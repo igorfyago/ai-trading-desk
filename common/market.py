@@ -227,6 +227,7 @@ def live_gex(ticker: str) -> dict | None:
     return {
         "ticker": snap["ticker"],
         "spot_live": s1, "spot_source": live["source"], "spot_delayed": live["delayed"],
+        "spot_ts": live.get("ts"), "spot_session": live.get("session"),
         "structure_as_of": snap["captured_at"],
         "net_gex_total_live": round(net),
         "regime_live": "positive_gamma" if net >= 0 else "negative_gamma",

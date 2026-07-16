@@ -93,16 +93,17 @@ def save_quote(customer: str, contact: str, project: str, low_usd: float, high_u
 
 # ----------------------------------------------------- options desk tools ----
 
-def _spot_and_iv(ticker: str) -> tuple[float, float, str] | None:
+def _spot_and_iv(ticker: str) -> tuple[float, float, str, str | None] | None:
     """House rule: LIVE spot when the feed is up AND coherent with the
-    snapshot structure, snapshot IV for the vol."""
+    snapshot structure, snapshot IV for the vol. Fourth element = which tape
+    printed it (rth/pre/post/overnight) so the agent can SAY it."""
     snap = market.latest_snapshot(ticker)
     if not snap:
         return None
     live = market.blendable_spot(ticker, snap)
     if live:
-        return live["price"], snap["atm_iv"], live["source"]
-    return snap["spot"], snap["atm_iv"], "snapshot"
+        return live["price"], snap["atm_iv"], live["source"], live.get("session")
+    return snap["spot"], snap["atm_iv"], "snapshot", None
 
 
 def desk_status(ticker: str) -> str:
@@ -116,6 +117,8 @@ def desk_status(ticker: str) -> str:
     gl = market.live_gex(ticker)
     if gl:
         out.update({"spot": gl["spot_live"], "spot_source": gl["spot_source"],
+                    "spot_session": gl.get("spot_session"),
+                    "spot_as_of": gl.get("spot_ts"),
                     "regime_live": gl["regime_live"], "side": gl["side"],
                     "distance_to_flip": gl["distance_to_flip"]})
     out["book"] = trades.book_line()
@@ -138,10 +141,11 @@ def quote_option(ticker: str, strike: float, kind: str, dte_days: float) -> str:
     ref = _spot_and_iv(ticker)
     if not ref:
         return json.dumps({"error": f"No data for {ticker}"})
-    spot, iv, source = ref
+    spot, iv, source, session = ref
     greeks = market.black_scholes(spot, strike, dte_days, iv, kind)
     greeks.update({"ticker": ticker.upper(), "strike": strike, "kind": kind,
-                   "spot_ref": spot, "spot_source": source, "iv_used": iv})
+                   "spot_ref": spot, "spot_source": source, "spot_session": session,
+                   "iv_used": iv})
     return json.dumps(greeks)
 
 
@@ -149,8 +153,9 @@ def expected_move(ticker: str, dte_days: float) -> str:
     ref = _spot_and_iv(ticker)
     if not ref:
         return json.dumps({"error": f"No data for {ticker}"})
-    spot, iv, source = ref
+    spot, iv, source, session = ref
     return json.dumps({"ticker": ticker.upper(), "spot": spot, "spot_source": source,
+                       "spot_session": session,
                        "one_sigma_move_usd": market.expected_move(spot, iv, dte_days),
                        "horizon_days": dte_days})
 
@@ -273,6 +278,12 @@ VOICE_STYLE = (
     "directly — no warm-up sounds, no 'oh—yeah', no 'mm okay so', no hedging. "
     "A direct first word ('Sure.', 'Tuesday works.', 'That's about four eighty.') "
     "reads as human; hesitation reads as a broken machine.\n"
+    "- ANSWER FIRST: your first sentence answers the exact question asked. A "
+    "yes/no question gets 'Yes.' or 'No.' as the FIRST WORD, then at most one "
+    "short fact. Never lead with background, process, or qualifiers.\n"
+    "- NO EXCUSES: if something has a limit, state it ONCE in five words or "
+    "less, never repeat it in the same call, never apologize for it, never "
+    "offer workarounds unless asked. Two caveats in a row = you sound broken.\n"
     "- You answer the phone: when the call connects, speak first with your "
     "greeting, then let them talk.\n"
     "- VARIETY: NEVER use the same sentence twice in a call. Do not repeat sample "
@@ -455,6 +466,16 @@ PERSONAS = {
             "unless the caller names another. Positive net GEX = "
             "dealers long gamma = pinned, mean-reverting tape. Negative = short "
             "gamma = amplified, momentum tape. The gamma flip is where it changes.\n\n"
+            "# Your feed — facts, never improvised humility\n"
+            "You see a 24-HOUR tape: regular session, pre-market, after-hours and "
+            "overnight prints. Real-time in regular hours; extended hours the desk "
+            "takes the freshest print across its tapes (worst case ~15 minutes "
+            "behind). Every price your tools return carries 'spot_session' "
+            "(rth/pre/post/overnight) and a timestamp — SAY the price with its "
+            "tape when outside regular hours: '749.57 on the after-hours tape'. "
+            "Asked whether you can see after-hours or overnight: the answer is "
+            "'Yes.' Never speculate about your own plumbing; the tool result is "
+            "the truth about what you see.\n\n"
             "# Notation & Numbers\n"
             "- 'GEX' is one word, rhymes with 'specs' — never spelled out.\n"
             "- House notation for EVERY option, written and spoken: "

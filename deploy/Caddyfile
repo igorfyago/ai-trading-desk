@@ -1,6 +1,16 @@
 # Automatic HTTPS (Let's Encrypt) for both apps. Point two DNS A-records at
 # the EC2 elastic IP and set the domains here. WebRTC mic access REQUIRES https.
 
+# Apex: the landing/portal page (static). Left-pane tabs load the apps below.
+{$BASE_DOMAIN} {
+    root * /srv/landing
+    file_server
+}
+
+www.{$BASE_DOMAIN} {
+    redir https://{$BASE_DOMAIN}{uri} permanent
+}
+
 desk.{$BASE_DOMAIN} {
     reverse_proxy desk:8000
 }

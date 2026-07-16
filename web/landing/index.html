@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>b4rruf3t — AI Trading Desk</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
+<style>
+  :root { --bg:#0a0d14; --panel:#10141f; --panel2:#161c2c; --line:#232b3f;
+          --text:#e8ebf2; --dim:#8b93a7; --accent:#5b8cff; --green:#3ddc84; }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:var(--bg); color:var(--text); font:15px/1.6 "Segoe UI",system-ui,sans-serif;
+         display:flex; }
+
+  nav { width:250px; min-width:250px; background:var(--panel); border-right:1px solid var(--line);
+        display:flex; flex-direction:column; padding:22px 14px; gap:6px; }
+  nav h1 { font-size:16px; letter-spacing:1.5px; margin-bottom:2px; }
+  nav h1 span { color:var(--accent); }
+  nav p.sub { color:var(--dim); font-size:12px; margin-bottom:16px; }
+  .tab { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+         color:var(--text); cursor:pointer; border:1px solid transparent; font-size:14px;
+         text-decoration:none; background:transparent; font-family:inherit; text-align:left; }
+  .tab:hover { background:var(--panel2); }
+  .tab.active { background:var(--panel2); border-color:var(--accent); }
+  .tab .ic { width:22px; text-align:center; }
+  .tab small { display:block; color:var(--dim); font-size:11px; }
+  .live-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green);
+              margin-right:6px; animation:pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  nav footer { margin-top:auto; color:var(--dim); font-size:11.5px; line-height:1.5; }
+  nav footer a { color:var(--accent); text-decoration:none; }
+
+  main { flex:1; min-width:0; display:flex; }
+  .pane { flex:1; display:none; }
+  .pane.active { display:flex; }
+  iframe { border:0; width:100%; height:100%; }
+
+  /* overview */
+  #overview { flex-direction:column; overflow-y:auto; padding:7vh 9% 6vh; }
+  #overview .tag { color:var(--green); font-size:12.5px; letter-spacing:1.5px;
+                   text-transform:uppercase; margin-bottom:14px; }
+  #overview h2 { font-size:clamp(26px, 3.6vw, 42px); line-height:1.15; max-width:17em; }
+  #overview h2 em { color:var(--accent); font-style:normal; }
+  #overview p.lead { color:var(--dim); max-width:44em; margin:18px 0 28px; font-size:16px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:14px;
+           max-width:980px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+          padding:16px; cursor:pointer; }
+  .card:hover { border-color:var(--accent); }
+  .card h3 { font-size:14.5px; margin-bottom:6px; }
+  .card p { color:var(--dim); font-size:12.5px; }
+  #overview .foot { color:var(--dim); font-size:12px; margin-top:34px; }
+</style>
+</head>
+<body>
+  <nav>
+    <h1>B4RRU<span>F3T</span></h1>
+    <p class="sub"><span class="live-dot"></span>live · AI trading desk</p>
+
+    <button class="tab active" data-pane="overview"><span class="ic">🏠</span>
+      <span>Overview</span></button>
+    <button class="tab" data-pane="desk"><span class="ic">💬</span>
+      <span>Trading Desk<small>chat &amp; voice with 8 agents</small></span></button>
+    <button class="tab" data-pane="gex"><span class="ic">📊</span>
+      <span>GEX Dashboard<small>live dealer positioning</small></span></button>
+    <a class="tab" href="https://github.com/igorfyago/ai-trading-desk" target="_blank"><span class="ic">⚙️</span>
+      <span>The Code<small>github · agents ladder</small></span></a>
+    <a class="tab" href="https://github.com/igorfyago/options-flow-analytics" target="_blank"><span class="ic">🦀</span>
+      <span>The Engine<small>github · rust GEX pipeline</small></span></a>
+
+    <footer>
+      Built by <a href="https://github.com/igorfyago" target="_blank">Igor Yago</a> —
+      AI engineer.<br>
+      LangChain · LangGraph · OpenAI Realtime · AWS<br><br>
+      Demo system on delayed data.<br>Not financial advice.
+    </footer>
+  </nav>
+
+  <main>
+    <section class="pane active" id="overview">
+      <div class="tag">● all systems live</div>
+      <h2>Six AI agents staffing an <em>options trading desk</em> — on live dealer-positioning data.</h2>
+      <p class="lead">
+        A Rust pipeline computes gamma exposure (GEX/DEX) from real option chains around the clock.
+        On top of it: a ladder of agents — text-to-SQL, codebase RAG, LangGraph research and analyst
+        workflows with human-in-the-loop — and speech-to-speech voice agents you can interrupt
+        mid-sentence. Ask Marcus for the trade; he'll give you strikes, invalidation and sizing
+        in plain English.
+      </p>
+      <div class="cards">
+        <div class="card" data-pane="desk"><h3>💬 Talk to the desk</h3>
+          <p>Chat with any agent or press the mic. Try: “what's the trade on SPY?”</p></div>
+        <div class="card" data-pane="gex"><h3>📊 Watch the tape</h3>
+          <p>Dealer gamma per strike, walls, flip level — refreshed every 30 seconds.</p></div>
+        <div class="card" onclick="window.open('https://github.com/igorfyago/ai-trading-desk','_blank')">
+          <h3>⚙️ Read the build</h3>
+          <p>Six-level agent ladder, tests, evals, Docker/K8s, AWS — all documented.</p></div>
+      </div>
+      <div class="foot">Stack: LangChain 1.0 · LangGraph 1.0 · OpenAI Realtime (gpt-realtime-2.1) ·
+        LangSmith · FastAPI · Rust/Tokio · PostgreSQL · Docker · AWS EC2/Route53/SSM</div>
+    </section>
+
+    <section class="pane" id="desk">
+      <iframe data-src="https://desk.b4rruf3t.com" title="Trading Desk"
+              allow="microphone; autoplay; clipboard-write"></iframe>
+    </section>
+
+    <section class="pane" id="gex">
+      <iframe data-src="https://gex.b4rruf3t.com" title="GEX Dashboard"></iframe>
+    </section>
+  </main>
+
+<script>
+  function show(name) {
+    document.querySelectorAll(".tab[data-pane]").forEach(t =>
+      t.classList.toggle("active", t.dataset.pane === name));
+    document.querySelectorAll(".pane").forEach(p =>
+      p.classList.toggle("active", p.id === name));
+    const frame = document.querySelector(`#${name} iframe`);
+    if (frame && !frame.src) frame.src = frame.dataset.src;   // lazy-load
+  }
+  document.querySelectorAll("[data-pane]").forEach(el =>
+    el.addEventListener("click", () => show(el.dataset.pane)));
+</script>
+</body>
+</html>

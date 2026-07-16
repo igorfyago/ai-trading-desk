@@ -82,6 +82,7 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../web/landing:/srv/landing:ro
       - caddy_data:/data
     depends_on: [desk, gex-api]
 

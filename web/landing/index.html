@@ -139,8 +139,71 @@
   .wchip:hover { border-color:rgba(255,255,255,.28); }
   .wchip.focus { border-color:var(--accent); color:var(--accent); font-weight:500; }
   .wchip.add { color:var(--dim); border-style:dashed; }
-  .dgrid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(380px,1fr); gap:12px;
-           flex:1; min-height:0; }
+  .dgrid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(380px,1fr) 278px;
+           gap:12px; flex:1; min-height:0; }
+
+  /* ------------------------------------------------- watchlist rail ---- */
+  #watch-rail { display:flex; flex-direction:column; min-height:0;
+                background:var(--panel); border:1px solid var(--line);
+                border-radius:var(--radius,8px); overflow:hidden; }
+  #wl-head { display:flex; justify-content:space-between; align-items:center;
+             padding:9px 12px 9px 14px; border-bottom:1px solid var(--line);
+             font-family:var(--mono); font-size:11px; text-transform:uppercase;
+             letter-spacing:.12em; color:var(--dim); }
+  #wl-add-btn { background:none; border:1px solid var(--line); border-radius:6px;
+                color:var(--dim); width:22px; height:22px; cursor:pointer;
+                font-size:13px; line-height:1; transition:color .13s,border-color .13s; }
+  #wl-add-btn:hover { color:var(--text); border-color:rgba(255,255,255,.28); }
+  #wl-addrow { padding:8px 10px; border-bottom:1px solid var(--line); }
+  #wl-addrow input { width:100%; background:none; border:1px solid var(--line);
+                     border-radius:6px; padding:6px 10px; color:var(--text);
+                     font:12.5px var(--mono); outline:none; text-transform:uppercase; }
+  #wl-addrow input:focus { border-color:var(--accent); }
+  #wl-cols, .wlrow { display:grid; grid-template-columns:10px minmax(0,1fr) 62px 52px 44px;
+                     gap:6px; align-items:center; padding:0 10px 0 8px; }
+  #wl-cols { font-family:var(--mono); font-size:10px; text-transform:uppercase;
+             letter-spacing:.08em; color:var(--dim); padding-top:7px; padding-bottom:7px;
+             border-bottom:1px solid var(--line); }
+  #wl-cols .wlc { cursor:pointer; text-align:right; }
+  #wl-cols .wlc:hover { color:var(--text); }
+  #wl-cols .wlc.on { color:var(--accent); }
+  #wl-body { flex:1; overflow-y:auto; min-height:0; overscroll-behavior:contain; }
+  .wlsec { display:flex; align-items:center; gap:7px; padding:8px 10px 5px;
+           font-family:var(--mono); font-size:10.5px; text-transform:uppercase;
+           letter-spacing:.1em; color:var(--dim); cursor:pointer; user-select:none; }
+  .wlsec:hover { color:var(--text); }
+  .wlsec .wlcount { opacity:.55; margin-left:auto; }
+  .wlrow { height:27px; cursor:pointer; position:relative; font-size:12.5px;
+           border-left:2px solid transparent; }
+  .wlrow:hover { background:rgba(255,255,255,.04); }
+  .wlrow.active { background:rgba(255,255,255,.05); border-left-color:var(--accent); }
+  .wlrow.dragover { box-shadow:inset 0 2px 0 var(--accent); }
+  .wlflag { width:6px; height:6px; border-radius:50%; background:transparent; }
+  .wlsym { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .wlpx, .wlchg, .wlext { font-family:var(--mono); font-size:11.5px; text-align:right;
+                          font-variant-numeric:tabular-nums; }
+  .wlchg.pos, .wlext.pos { color:var(--green); }
+  .wlchg.neg, .wlext.neg { color:var(--red); }
+  .wlext { color:var(--dim); }
+  .wlrow .wlx { position:absolute; right:6px; top:4px; display:none; width:18px; height:18px;
+                background:var(--bg); border:1px solid var(--line); border-radius:5px;
+                color:var(--dim); cursor:pointer; font-size:11px; line-height:1; }
+  .wlrow:hover .wlx { display:block; }
+  .wlrow .wlx:hover { color:var(--red); border-color:var(--red); }
+  @keyframes wlup { from { background:rgba(62,207,142,.22); } }
+  @keyframes wldn { from { background:rgba(244,101,127,.22); } }
+  .wlrow.up { animation:wlup .7s ease-out; }
+  .wlrow.dn { animation:wldn .7s ease-out; }
+  #wl-menu { position:fixed; z-index:99; background:#191c24; border:1px solid var(--line);
+             border-radius:8px; padding:5px; min-width:150px; font-size:12.5px; }
+  #wl-menu .mi { padding:6px 10px; border-radius:5px; cursor:pointer; display:flex;
+                 align-items:center; gap:8px; }
+  #wl-menu .mi:hover { background:rgba(255,255,255,.06); }
+  #wl-menu .mflags { display:flex; gap:7px; padding:7px 10px; }
+  #wl-menu .mflags span { width:14px; height:14px; border-radius:50%; cursor:pointer;
+                          border:1px solid var(--line); }
+  @media (max-width:1400px){ .dgrid{grid-template-columns:minmax(0,1.25fr) minmax(340px,1fr);}
+                             #watch-rail{display:none;} }
   #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px);
              overflow:hidden; flex:1; min-height:340px; }
   #agent-dock { flex:1.3; min-height:300px; display:flex; flex-direction:column;
@@ -283,7 +346,6 @@
 
     <section class="pane active" id="dash">
       <div class="dtop">
-        <div class="watch" id="watchlist"></div>
         <div class="watch" id="intervals"></div>
         <div class="watch" style="margin-left:auto">
           <span id="feed-chip" class="wchip" style="pointer-events:none;display:none"></span>
@@ -332,6 +394,23 @@
             </div>
           </div>
         </div>
+        <aside id="watch-rail">
+          <div id="wl-head">
+            <span>Watchlist</span>
+            <button id="wl-add-btn" title="Add symbol">＋</button>
+          </div>
+          <div id="wl-addrow" hidden>
+            <input id="wl-add" placeholder="Add symbol… (Enter)" maxlength="12"
+                   autocomplete="off" spellcheck="false">
+          </div>
+          <div id="wl-cols">
+            <span></span><span>Symbol</span>
+            <span class="wlc" data-sort="price">Last</span>
+            <span class="wlc" data-sort="chg_pct">Chg%</span>
+            <span class="wlc" data-sort="ext_pct">Ext</span>
+          </div>
+          <div id="wl-body"></div>
+        </aside>
       </div>
     </section>
 
@@ -686,12 +765,224 @@
   const API = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
     ? "" : "https://desk.b4rruf3t.com";
   const GEX_COVERED = ["SPY", "QQQ", "IWM", "XSP"];
-  let watch = JSON.parse(localStorage.getItem("watchlist") || '["SPY","QQQ","IWM"]');
-  if (watch[0] === "XSP") {   // house rule: chart and levels are SPY; XSP is just the fill
-    watch = ["SPY", ...watch.filter(t => t !== "SPY" && t !== "XSP")];
-    localStorage.setItem("watchlist", JSON.stringify(watch));
+  let focus = "SPY", dashStarted = false, refreshTimer = null;
+
+  /* ------------------------------------------- watchlist (TV-style rail) ---- */
+  const WL_KEY = "desk-watchlist-v1";
+  const WL_FLAGS = ["#f4657f", "#f5a623", "#3ecf8e", "#7c8aff", "#e8e8e8"];
+  const WL_DEFAULT = (() => {
+    const S = (name, syms, open = true) =>
+      ({ name, open, items: syms.split(" ").map(s => ({ s })) });
+    return { sort: null, sections: [
+      S("INDEX", "SPY QQQ TQQQ ES1! VIX BTCUSD ETHUSD"),
+      S("MAGGY-7 0DTE", "GOOGL SPCX META NVDA AMZN TSLA MSFT AAPL"),
+      S("CORE", "NOW PLTR"),
+      S("SWITCH", "NBIS BE WYFI CIFR RDW HIMS IREN MRVL CEVA RGTI WULF POET BBAI ORCL INTC MU ONDS RUN MSTR FIG NFLX IBM ACN"),
+      S("COMMONS", "ASTS SNDK OKLO CLSK HOOD ASST AMKR RIOT AG OSCR CRWV AMD IAG ZETA COIN RIVN OPEN SOFI GFI LMND VG BA NIO CELH BABA IWM BRK.B XOM"),
+      S("ON DECK", "RKLB JOBY VKTX GTLB UNH COST"),
+      S("RADAR", "MARA ARM ARKG JD"),
+      S("OTHER", "SOXL SMCI MP CRCL COHR RCAT TEM IONQ LITE SBET SPCE CAT VRT TWLO BITX BMNR ANET CBRS DUOL TSLL SLNH OXY IBEX35 US10Y ORR DXC LLY CG BIDU NVO XPEV", false),
+    ] };
+  })();
+  let WL;
+  try { WL = JSON.parse(localStorage.getItem(WL_KEY)) || WL_DEFAULT; }
+  catch { WL = WL_DEFAULT; }
+  const wlSave = () => localStorage.setItem(WL_KEY, JSON.stringify(WL));
+  const wlQuotes = {};                 // sym -> latest /api/watch row
+  let wlLastPx = {}, wlTimer = null, wlDrag = null;
+
+  function wlVisibleSyms() {
+    const out = [];
+    for (const sec of WL.sections) if (sec.open) sec.items.forEach(i => out.push(i.s));
+    if (!out.includes(focus)) out.push(focus);
+    return out;
   }
-  let focus = watch[0], dashStarted = false, refreshTimer = null;
+
+  const wlFmt = (v, d = 2) => v == null ? "—"
+    : v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+  function wlRow(item, sec) {
+    const q = wlQuotes[item.s] || {};
+    const row = document.createElement("div");
+    row.className = "wlrow" + (item.s === focus ? " active" : "");
+    row.dataset.sym = item.s;
+    row.draggable = true;
+    const flag = document.createElement("span");
+    flag.className = "wlflag";
+    if (item.flag) flag.style.background = item.flag;
+    const sym = document.createElement("span");
+    sym.className = "wlsym";
+    sym.textContent = item.s;
+    const px = document.createElement("span");
+    px.className = "wlpx";
+    px.textContent = q.price != null ? wlFmt(q.price, q.price >= 1000 ? 0 : 2) : "—";
+    const chg = document.createElement("span");
+    chg.className = "wlchg " + (q.chg_pct > 0 ? "pos" : q.chg_pct < 0 ? "neg" : "");
+    chg.textContent = q.chg_pct != null ? (q.chg_pct > 0 ? "+" : "") + wlFmt(q.chg_pct) + "%" : "";
+    chg.title = q.chg != null ? `day change ${q.chg > 0 ? "+" : ""}${wlFmt(q.chg)}` : "";
+    const ext = document.createElement("span");
+    ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
+    ext.textContent = q.ext_pct != null ? (q.ext_pct > 0 ? "+" : "") + wlFmt(q.ext_pct) + "%" : "";
+    ext.title = q.ext_pct != null ? `${q.session || "ext"} session move` : "";
+    const x = document.createElement("button");
+    x.className = "wlx";
+    x.textContent = "×";
+    x.title = "Remove";
+    x.onclick = (e) => { e.stopPropagation(); wlRemove(sec, item.s); };
+    row.append(flag, sym, px, chg, ext, x);
+    row.onclick = () => setFocus(item.s);
+    row.oncontextmenu = (e) => { e.preventDefault(); wlMenu(e, sec, item); };
+    row.ondragstart = (e) => { wlDrag = { sec: sec.name, sym: item.s }; e.dataTransfer.effectAllowed = "move"; };
+    row.ondragover = (e) => { e.preventDefault(); row.classList.add("dragover"); };
+    row.ondragleave = () => row.classList.remove("dragover");
+    row.ondrop = (e) => { e.preventDefault(); row.classList.remove("dragover"); wlDrop(sec, item.s); };
+    return row;
+  }
+
+  function wlRender() {
+    const body = document.getElementById("wl-body");
+    body.innerHTML = "";
+    for (const sec of WL.sections) {
+      const h = document.createElement("div");
+      h.className = "wlsec";
+      h.innerHTML = `<span>${sec.open ? "▾" : "▸"}</span>`;
+      const nm = document.createElement("span");
+      nm.textContent = sec.name;
+      const n = document.createElement("span");
+      n.className = "wlcount";
+      n.textContent = sec.items.length;
+      h.append(nm, n);
+      h.onclick = () => { sec.open = !sec.open; wlSave(); wlRender(); wlPoll(); };
+      h.ondragover = (e) => e.preventDefault();
+      h.ondrop = (e) => { e.preventDefault(); wlDrop(sec, null); };
+      body.appendChild(h);
+      if (!sec.open) continue;
+      let items = sec.items;
+      if (WL.sort) {
+        items = [...items].sort((a, b) => {
+          const av = (wlQuotes[a.s] || {})[WL.sort.key], bv = (wlQuotes[b.s] || {})[WL.sort.key];
+          return WL.sort.dir * (((bv ?? -1e18)) - ((av ?? -1e18)));
+        });
+      }
+      items.forEach(i => body.appendChild(wlRow(i, sec)));
+    }
+    document.querySelectorAll("#wl-cols .wlc").forEach(c =>
+      c.classList.toggle("on", WL.sort && WL.sort.key === c.dataset.sort));
+  }
+
+  function wlPatch() {                  // update numbers in place + tick flash
+    document.querySelectorAll("#wl-body .wlrow").forEach(row => {
+      const q = wlQuotes[row.dataset.sym];
+      if (!q || q.price == null) return;
+      const prev = wlLastPx[row.dataset.sym];
+      row.querySelector(".wlpx").textContent = wlFmt(q.price, q.price >= 1000 ? 0 : 2);
+      const chg = row.querySelector(".wlchg");
+      chg.textContent = q.chg_pct != null ? (q.chg_pct > 0 ? "+" : "") + wlFmt(q.chg_pct) + "%" : "";
+      chg.className = "wlchg " + (q.chg_pct > 0 ? "pos" : q.chg_pct < 0 ? "neg" : "");
+      const ext = row.querySelector(".wlext");
+      ext.textContent = q.ext_pct != null ? (q.ext_pct > 0 ? "+" : "") + wlFmt(q.ext_pct) + "%" : "";
+      ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
+      if (prev != null && q.price !== prev) {
+        row.classList.remove("up", "dn");
+        void row.offsetWidth;           // restart the animation
+        row.classList.add(q.price > prev ? "up" : "dn");
+      }
+      wlLastPx[row.dataset.sym] = q.price;
+    });
+  }
+
+  async function wlPoll() {
+    if (document.hidden || !document.querySelector("#dash.active")) return;
+    const syms = wlVisibleSyms();
+    if (!syms.length) return;
+    try {
+      const d = await fetch(`${API}/api/watch?symbols=${encodeURIComponent(syms.join(","))}`)
+        .then(r => r.json());
+      for (const r of d.rows || []) wlQuotes[r.sym] = r;
+      if (WL.sort) wlRender(); else wlPatch();
+    } catch { /* provider hiccup — next tick */ }
+  }
+
+  function wlRemove(sec, sym) {
+    sec.items = sec.items.filter(i => i.s !== sym);
+    wlSave(); wlRender();
+  }
+
+  function wlDrop(sec, beforeSym) {
+    if (!wlDrag) return;
+    const from = WL.sections.find(s => s.name === wlDrag.sec);
+    const idx = from.items.findIndex(i => i.s === wlDrag.sym);
+    if (idx < 0) return;
+    const [item] = from.items.splice(idx, 1);
+    if (beforeSym && !(sec.name === wlDrag.sec && beforeSym === item.s)) {
+      const at = sec.items.findIndex(i => i.s === beforeSym);
+      sec.items.splice(at < 0 ? sec.items.length : at, 0, item);
+    } else if (!beforeSym) {
+      sec.items.push(item);
+    } else {
+      from.items.splice(idx, 0, item);   // dropped on itself: put it back
+    }
+    wlDrag = null;
+    wlSave(); wlRender();
+  }
+
+  function wlMenu(e, sec, item) {
+    document.getElementById("wl-menu")?.remove();
+    const m = document.createElement("div");
+    m.id = "wl-menu";
+    m.style.left = Math.min(e.clientX, innerWidth - 170) + "px";
+    m.style.top = Math.min(e.clientY, innerHeight - 140) + "px";
+    const flags = document.createElement("div");
+    flags.className = "mflags";
+    for (const c of WL_FLAGS) {
+      const f = document.createElement("span");
+      f.style.background = c;
+      if (item.flag === c) f.style.outline = "2px solid var(--accent)";
+      f.onclick = () => { item.flag = item.flag === c ? undefined : c; wlSave(); wlRender(); m.remove(); };
+      flags.appendChild(f);
+    }
+    const top = document.createElement("div");
+    top.className = "mi";
+    top.textContent = "Move to top of section";
+    top.onclick = () => {
+      sec.items = [item, ...sec.items.filter(i => i.s !== item.s)];
+      wlSave(); wlRender(); m.remove();
+    };
+    const rm = document.createElement("div");
+    rm.className = "mi";
+    rm.textContent = "Remove " + item.s;
+    rm.onclick = () => { wlRemove(sec, item.s); m.remove(); };
+    m.append(flags, top, rm);
+    document.body.appendChild(m);
+    const close = () => { m.remove(); removeEventListener("click", close); };
+    setTimeout(() => addEventListener("click", close), 0);
+  }
+
+  function wlInitControls() {
+    const btn = document.getElementById("wl-add-btn");
+    const rowEl = document.getElementById("wl-addrow");
+    const input = document.getElementById("wl-add");
+    btn.onclick = () => { rowEl.hidden = !rowEl.hidden; if (!rowEl.hidden) input.focus(); };
+    input.onkeydown = (e) => {
+      if (e.key === "Escape") { rowEl.hidden = true; return; }
+      if (e.key !== "Enter") return;
+      const t = input.value.trim().toUpperCase();
+      if (!/^[A-Z0-9.!^=-]{1,12}$/.test(t)) return;
+      if (WL.sections.some(s => s.items.some(i => i.s === t))) { input.value = ""; return; }
+      const sec = WL.sections.find(s => s.open) || WL.sections[0];
+      sec.items.unshift({ s: t });
+      input.value = "";
+      wlSave(); wlRender(); wlPoll();
+    };
+    document.querySelectorAll("#wl-cols .wlc").forEach(c => {
+      c.onclick = () => {                    // desc -> asc -> manual
+        const key = c.dataset.sort;
+        WL.sort = !WL.sort || WL.sort.key !== key ? { key, dir: 1 }
+          : WL.sort.dir === 1 ? { key, dir: -1 } : null;
+        wlSave(); wlRender();
+      };
+    });
+  }
 
   function initDash() {
     if (dashStarted) return;
@@ -701,54 +992,25 @@
       // same-origin desk in local dev, the public desk in production
       dock.src = API === "" ? "/?agent=marcus&embed=1" : dock.dataset.src;
     }
-    renderWatch();
+    wlInitControls();
+    wlRender();
     renderSideTabs();
     setFocus(focus);
-    openQuoteStream();
     openEventStream();
     refreshScore();
+    wlPoll();
+    wlTimer = setInterval(wlPoll, 6000);
     refreshTimer = setInterval(() => document.querySelector("#dash.active") && loadSummary(), 60000);
-  }
-
-  function renderWatch() {
-    const el = document.getElementById("watchlist");
-    el.innerHTML = "";
-    for (const t of watch) {
-      const b = document.createElement("button");
-      b.className = "wchip" + (t === focus ? " focus" : "");
-      b.textContent = t;
-      b.onclick = () => setFocus(t);
-      b.oncontextmenu = (e) => {            // right-click removes
-        e.preventDefault();
-        watch = watch.filter(x => x !== t);
-        localStorage.setItem("watchlist", JSON.stringify(watch));
-        if (focus === t && watch.length) setFocus(watch[0]);
-        renderWatch();
-        if (dashStarted) openQuoteStream();
-      };
-      el.appendChild(b);
-    }
-    const add = document.createElement("button");
-    add.className = "wchip add";
-    add.textContent = "+ ticker";
-    add.onclick = () => {
-      const t = (prompt("Ticker symbol:") || "").trim().toUpperCase();
-      if (t && /^[A-Z.]{1,6}$/.test(t) && !watch.includes(t)) {
-        watch.push(t);
-        localStorage.setItem("watchlist", JSON.stringify(watch));
-        setFocus(t);
-        if (dashStarted) openQuoteStream();
-      }
-    };
-    el.appendChild(add);
   }
 
   function setFocus(t) {
     focus = t;
-    renderWatch();
+    document.querySelectorAll("#wl-body .wlrow").forEach(r =>
+      r.classList.toggle("active", r.dataset.sym === t));
     mountChart(t);
     loadSummary();
     loadXPulse(t);
+    if (dashStarted) openQuoteStream();
   }
 
   async function loadXPulse(t) {
@@ -841,7 +1103,7 @@
 
   function openQuoteStream() {
     if (quotesES) quotesES.close();
-    quotesES = new EventSource(`${API}/api/stream/quotes?symbols=${watch.join(",")}`);
+    quotesES = new EventSource(`${API}/api/stream/quotes?symbols=${[...new Set([focus, "SPY"])].join(",")}`);
     quotesES.onmessage = (e) => {
       let d; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type !== "quote") return;

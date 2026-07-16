@@ -116,3 +116,27 @@ def test_fetch_spots_newest_print_wins(monkeypatch):
     quotes._spot_cache.clear()
     out = quotes.fetch_spots(["SPY"])
     assert out["SPY"]["price"] == 749.82 and out["SPY"]["session"] == "post"
+
+
+def test_symbol_dialects():
+    assert quotes.clean_symbol("NASDAQ:TSLA") == "TSLA"
+    assert quotes.clean_symbol("CME_MINI:ES1!") == "ES1!"
+    assert quotes.clean_symbol(" spy ") == "SPY"
+    assert quotes._alpaca_sym("BTCUSD") is None          # not on the stock feed
+    assert quotes._alpaca_sym("BRK.B") == "BRK.B"
+    assert quotes._yahoo_sym("BRK.B") == "BRK-B"
+    assert quotes._yahoo_sym("ES1!") == "ES=F"
+    assert quotes._yahoo_sym("VIX") == "^VIX"
+
+
+def test_watch_quotes_batches_and_maps(monkeypatch):
+    monkeypatch.setenv("QUOTES_PROVIDER", "yahoo")
+    monkeypatch.setattr(quotes, "_spot_yahoo", lambda s: {
+        "ticker": s, "price": 100.0, "ts": None, "source": "yahoo",
+        "delayed": False, "session": "post"})
+    monkeypatch.setattr(quotes, "_closes", lambda s: (80.0, 90.0))
+    quotes._watch_cache = None
+    rows = quotes.watch_quotes(["NASDAQ:TSLA", "BTCUSD", "TSLA"])   # dedup
+    assert [r["sym"] for r in rows] == ["TSLA", "BTCUSD"]
+    assert rows[0]["chg_pct"] == 25.0                    # vs prev close 80
+    assert rows[0]["ext_pct"] == round((100 / 90 - 1) * 100, 2)     # vs reg close

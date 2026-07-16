@@ -102,6 +102,29 @@ def session_label(iso) -> str | None:
     return "overnight"
 
 
+# ------------------------------------------------------- symbol dialects ----
+# The watchlist speaks TradingView ("NASDAQ:TSLA", "ES1!", "VIX"); providers
+# each have their own dialect. Canonical form = bare uppercase ("TSLA").
+_SPECIAL = {          # canonical -> (alpaca symbol or None, yahoo symbol)
+    "BTCUSD": (None, "BTC-USD"), "ETHUSD": (None, "ETH-USD"),
+    "ES1!": (None, "ES=F"), "NQ1!": (None, "NQ=F"),
+    "VIX": (None, "^VIX"), "US10Y": (None, "^TNX"), "IBEX35": (None, "^IBEX"),
+}
+
+
+def clean_symbol(sym: str) -> str:
+    """'NASDAQ:TSLA' -> 'TSLA'; keeps specials like 'ES1!' intact."""
+    return (sym or "").split(":")[-1].strip().upper()
+
+
+def _alpaca_sym(sym: str) -> str | None:
+    return _SPECIAL[sym][0] if sym in _SPECIAL else sym
+
+
+def _yahoo_sym(sym: str) -> str:
+    return _SPECIAL[sym][1] if sym in _SPECIAL else sym.replace(".", "-")
+
+
 def normalize_interval(label: str) -> str | None:
     label = (label or "").strip()
     if label in INTERVALS:
@@ -130,16 +153,20 @@ def provider_order() -> list[str]:
 
 def _alpaca_feed(symbols: list[str], feed: str, label: str, delayed: bool,
                  keys: tuple[str, str]) -> dict[str, dict]:
+    req = {m: s for s in symbols if (m := _alpaca_sym(s))}   # crypto/futures skip
+    if not req:
+        return {}
     r = _client.get(f"{_ALPACA_DATA}/trades/latest",
-                    params={"symbols": ",".join(symbols), "feed": feed},
+                    params={"symbols": ",".join(req), "feed": feed},
                     headers={"APCA-API-KEY-ID": keys[0], "APCA-API-SECRET-KEY": keys[1]})
     if r.status_code != 200:     # a tape the plan doesn't carry: not an error
         return {}
     out = {}
     for sym, t in (r.json().get("trades") or {}).items():
-        out[sym] = {"ticker": sym, "price": round(float(t["p"]), 2), "ts": t["t"],
-                    "source": f"alpaca·{label}", "delayed": delayed,
-                    "session": session_label(t["t"])}
+        canon = req.get(sym, sym)
+        out[canon] = {"ticker": canon, "price": round(float(t["p"]), 2), "ts": t["t"],
+                      "source": f"alpaca·{label}", "delayed": delayed,
+                      "session": session_label(t["t"])}
     return out
 
 
@@ -168,7 +195,7 @@ def _spots_alpaca(symbols: list[str]) -> dict[str, dict]:
 def _spot_yahoo(symbol: str) -> dict | None:
     """Last pre/post-inclusive 1m candle — during extended hours this is the
     real-time print (meta.regularMarketPrice would be the stale 16:00 close)."""
-    r = _client.get(f"{_YAHOO}/{symbol}",
+    r = _client.get(f"{_YAHOO}/{_yahoo_sym(symbol)}",
                     params={"interval": "1m", "range": "1d", "includePrePost": "true"})
     r.raise_for_status()
     res = r.json()["chart"]["result"][0]
@@ -190,6 +217,8 @@ def _spot_yahoo(symbol: str) -> dict | None:
 
 
 def _spot_cboe(symbol: str) -> dict | None:
+    if symbol in _SPECIAL:                    # cboe quotes equities only
+        return None
     r = _client.get(f"{_CBOE}/{symbol}.json")
     r.raise_for_status()
     d = r.json().get("data") or {}
@@ -278,13 +307,16 @@ def _bars_alpaca(symbol: str, interval: str, limit: int) -> list[dict] | None:
     span_days = {"1m": 5, "3m": 5, "5m": 30, "15m": 60, "45m": 120,
                  "4h": 365, "D": 730, "W": 1825}[interval]
     start = (datetime.now(timezone.utc) - timedelta(days=span_days)).isoformat()
+    asym = _alpaca_sym(symbol)
+    if asym is None:                          # crypto/futures: yahoo has them
+        return None
     r = _client.get(f"{_ALPACA_DATA}/bars",
-                    params={"symbols": symbol, "timeframe": tf, "start": start,
+                    params={"symbols": asym, "timeframe": tf, "start": start,
                             "limit": min(limit, 1000), "adjustment": "split",
                             "feed": "iex", "sort": "desc"},
                     headers={"APCA-API-KEY-ID": keys[0], "APCA-API-SECRET-KEY": keys[1]})
     r.raise_for_status()
-    raw = (r.json().get("bars") or {}).get(symbol) or []
+    raw = (r.json().get("bars") or {}).get(asym) or []
     bars = [{"t": int(datetime.fromisoformat(b["t"].replace("Z", "+00:00")).timestamp()),
              "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)}
             for b in raw]
@@ -294,7 +326,7 @@ def _bars_alpaca(symbol: str, interval: str, limit: int) -> list[dict] | None:
 
 def _bars_yahoo(symbol: str, interval: str, limit: int) -> list[dict] | None:
     _, yiv, yrange, factor, step = INTERVALS[interval]
-    r = _client.get(f"{_YAHOO}/{symbol}",
+    r = _client.get(f"{_YAHOO}/{_yahoo_sym(symbol)}",
                     params={"interval": yiv, "range": yrange, "includePrePost": "false"})
     r.raise_for_status()
     res = r.json()["chart"]["result"][0]
@@ -340,6 +372,88 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
         except Exception:
             continue
     return None
+
+
+# -------------------------------------------------------------- watchlist ----
+
+_closes_cache: dict[str, tuple[float, float | None, float | None]] = {}
+_CLOSES_TTL = 2 * 3600.0     # prev-close changes once a session
+_watch_cache: tuple[float, tuple, list] | None = None   # (t, key, rows)
+
+
+def _closes(symbol: str) -> tuple[float | None, float | None]:
+    """(previous session close, latest regular close) from yahoo meta, cached."""
+    now = time.monotonic()
+    hit = _closes_cache.get(symbol)
+    if hit and now - hit[0] < _CLOSES_TTL:
+        return hit[1], hit[2]
+    prev = reg = None
+    try:
+        r = _client.get(f"{_YAHOO}/{_yahoo_sym(symbol)}",
+                        params={"interval": "1d", "range": "1d"})
+        r.raise_for_status()
+        meta = r.json()["chart"]["result"][0]["meta"]
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+        reg = meta.get("regularMarketPrice")
+    except Exception:
+        pass
+    _closes_cache[symbol] = (now, prev, reg)
+    return prev, reg
+
+
+def watch_quotes(symbols: list[str]) -> list[dict]:
+    """One row per symbol for the watchlist: last, day change vs previous
+    close, and the extended-session move vs the regular close — the same
+    numbers TradingView's watchlist shows. One batched alpaca call covers
+    every US stock; specials (crypto, futures, indices) ride yahoo."""
+    global _watch_cache
+    syms, seen = [], set()
+    for s in symbols:
+        c = clean_symbol(s)
+        if c and c not in seen:
+            seen.add(c)
+            syms.append(c)
+    syms = syms[:150]
+    key = tuple(syms)
+    now = time.monotonic()
+    if _watch_cache and _watch_cache[1] == key and now - _watch_cache[0] < 3.0:
+        return _watch_cache[2]      # many open tabs share one provider hit
+
+    quotes_out: dict[str, dict] = {}
+    keys = _alpaca_keys()
+    stocks = [s for s in syms if s not in _SPECIAL]
+    if keys and stocks and "alpaca" in provider_order():
+        try:
+            quotes_out.update(_spots_alpaca(stocks))
+        except Exception:
+            pass
+    if provider_order():
+        for s in syms:
+            if s not in quotes_out:
+                try:
+                    q = _spot_yahoo(s)
+                    if q:
+                        quotes_out[s] = q
+                except Exception:
+                    continue
+
+    rows = []
+    for s in syms:
+        q = quotes_out.get(s)
+        row: dict = {"sym": s}
+        if q:
+            row.update({"price": q["price"], "ts": q["ts"],
+                        "session": q.get("session"), "source": q["source"]})
+            prev, reg = _closes(s)
+            if prev:
+                row["chg"] = round(q["price"] - prev, 2)
+                row["chg_pct"] = round((q["price"] / prev - 1) * 100, 2)
+            if (reg and q.get("session") in ("pre", "post", "overnight")
+                    and abs(q["price"] - reg) > 1e-9):
+                row["ext_pct"] = round((q["price"] / reg - 1) * 100, 2)
+        rows.append(row)
+    _watch_cache = (now, key, rows)
+    return rows
 
 
 # ------------------------------------------------------------ watch loop ----

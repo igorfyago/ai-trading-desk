@@ -219,6 +219,21 @@ def spot(ticker: str):
     return out
 
 
+@app.get("/api/watch")
+def watch(symbols: str = ""):
+    """Watchlist rows: last / day chg / chg% / extended-session move, batched.
+    One alpaca call covers every US stock; crypto/futures/indices ride yahoo."""
+    from common import quotes
+
+    syms = [s for s in symbols.split(",") if s.strip()][:150]
+    if not syms:
+        raise HTTPException(400, "symbols=CSV required")
+    from datetime import datetime, timezone
+
+    return {"rows": quotes.watch_quotes(syms),
+            "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+
+
 @app.get("/api/bars/{ticker}")
 def bars(ticker: str, interval: str = "5m", limit: int = 600):
     """Candles for the site's own chart (lightweight-charts): live feed data,

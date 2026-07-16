@@ -1,7 +1,7 @@
 :root {
-  --bg: #070a12; --panel: #0c101c; --panel2: #131a2b; --line: rgba(255,255,255,.08);
-  --text: #e9edf6; --dim: #9aa3b5; --accent: #6d8dff; --accent2: #a06bff;
-  --green: #2fe39c; --amber: #ffb454; --red: #ff5c7a; --user: #1c2749;
+  --bg: #13151b; --panel: #181b23; --panel2: #1f232e; --line: rgba(255,255,255,.09);
+  --text: #eceef4; --dim: #9ba3b2; --accent: #7c8aff; --accent2: #7c8aff;
+  --green: #3ecf8e; --amber: #ffb454; --red: #f4657f; --user: #232c4a;
   --grad: linear-gradient(120deg, #6d8dff, #a06bff);
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --display: "Inter", system-ui, sans-serif;
@@ -9,10 +9,7 @@
 * { box-sizing: border-box; margin: 0; }
 html, body, #app { height: 100%; }
 body { color: var(--text); font: 15px/1.55 "Inter", system-ui, sans-serif;
-  background:
-    radial-gradient(1100px 650px at 90% -10%, rgba(109,141,255,.08), transparent 60%),
-    radial-gradient(800px 550px at -10% 110%, rgba(160,107,255,.05), transparent 60%),
-    var(--bg); }
+  background: var(--bg); }
 #app { display: flex; }
 h1, h2, h3, h4 { font-family: var(--display); letter-spacing: -.01em; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }

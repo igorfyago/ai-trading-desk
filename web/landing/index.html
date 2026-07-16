@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="color-scheme: dark">
 <head>
 <meta charset="utf-8">
+<meta name="theme-color" content="#13151b">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>b4rruf3t — AI Trading Desk</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
@@ -9,8 +10,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:#fcfcfd; --panel:#ffffff; --panel2:#f5f6f8; --line:#e5e7eb;
-    --text:#1c1f26; --dim:#6a7180; --accent:#3d56f0; --green:#0f9d6e; --red:#d64561;
+    --bg:#13151b;                              /* oklch(~14%) cool-tinted, not black */
+    --panel:rgba(255,255,255,.04);             /* elevation = white at stepped opacity */
+    --panel2:rgba(255,255,255,.07);
+    --line:rgba(255,255,255,.09);
+    --text:#eceef4; --dim:#9ba3b2;             /* 13.8:1 and 5.6:1 on bg */
+    --accent:#7c8aff; --green:#3ecf8e; --red:#f4657f;
     --mono:"IBM Plex Mono",ui-monospace,monospace;
   }
   * { box-sizing:border-box; margin:0; }
@@ -31,11 +36,11 @@
   nav p.sub { color:var(--dim); font-size:11.5px; margin:6px 0 36px; font-family:var(--mono); }
   .navlabel { color:var(--dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.14em;
               margin:26px 0 8px; font-family:var(--mono); }
-  .tab { display:flex; align-items:flex-start; padding:7px 0; color:var(--text);
+  .tab { display:flex; align-items:flex-start; padding:7px 0; color:var(--dim);
          cursor:pointer; border:0; font-size:14px; text-decoration:none; background:none;
-         font-family:inherit; text-align:left; transition:opacity .13s; opacity:.82; }
-  .tab:hover { opacity:1; }
-  .tab.active { opacity:1; color:var(--accent); font-weight:500; }
+         font-family:inherit; text-align:left; transition:color .13s; }
+  .tab:hover { color:var(--text); }
+  .tab.active { color:var(--accent); font-weight:500; }
   .tab.active small { color:var(--dim); font-weight:400; }
   .tab .ic { display:none; }
   .tab small { display:block; color:var(--dim); font-size:11.5px; font-weight:400; }
@@ -61,8 +66,9 @@
   .card { display:flex; justify-content:space-between; align-items:baseline; gap:20px;
           padding:26px 4px; border-bottom:1px solid var(--line); cursor:pointer;
           background:none; transition:opacity .13s; }
-  .card:hover { opacity:.6; }
-  .card h3 { font-size:16px; font-weight:500; margin:0; }
+  .card:hover { border-bottom-color:rgba(255,255,255,.22); }
+  .card:hover h3 { color:var(--accent); }
+  .card h3 { font-size:16px; font-weight:500; margin:0; transition:color .13s; }
   .card p { color:var(--dim); font-size:13.5px; margin:4px 0 0; }
   .card::after { content:"\2192"; color:var(--dim); font-size:15px; }
   #overview .foot { color:var(--dim); font-size:12px; margin-top:80px; font-family:var(--mono); }
@@ -73,7 +79,7 @@
   .wchip { background:none; border:1px solid var(--line); border-radius:999px;
            padding:6px 16px; cursor:pointer; color:var(--text); font:inherit; font-size:13px;
            font-family:var(--mono); transition:border-color .13s; }
-  .wchip:hover { border-color:var(--dim); }
+  .wchip:hover { border-color:rgba(255,255,255,.28); }
   .wchip.focus { border-color:var(--accent); color:var(--accent); font-weight:500; }
   .wchip.add { color:var(--dim); border-style:dashed; }
   .dgrid { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(320px,1fr); gap:16px;
@@ -94,7 +100,7 @@
   #d-trade { font-size:13.5px; line-height:1.65; }
   .nitem { padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .nitem:last-child { border-bottom:0; }
-  .nitem a:hover { opacity:.6; }
+  .nitem a:hover { color:var(--accent); }
   .nitem small { color:var(--dim); display:block; font-size:11px; font-family:var(--mono); }
   .dnote { color:var(--dim); font-size:12.5px; }
   @media (max-width:980px){ .dgrid{grid-template-columns:1fr;} #tv-wrap{min-height:340px;} }
@@ -111,7 +117,7 @@
   .kcalc p.sub { color:var(--dim); font-size:12.5px; margin-bottom:16px; }
   .kcalc label { display:flex; justify-content:space-between; gap:10px; font-size:12.5px;
                  color:var(--dim); margin:8px 0; align-items:center; }
-  .kcalc input { width:112px; background:var(--bg); border:1px solid var(--line);
+  .kcalc input { width:112px; background:rgba(255,255,255,.05); border:1px solid var(--line);
                  border-radius:6px; color:var(--text); padding:6px 9px; font-family:var(--mono);
                  font-size:13px; }
   .kout { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; font-size:13.5px; }
@@ -416,7 +422,7 @@
              maxRows: Math.max(...Object.values(cols).map((c) => c.length)) };
   }
 
-  const NW = 188, NH = 48, GX = 252, GY = 92, PAD = 30;
+  const NW = 200, NH = 50, GX = 264, GY = 96, PAD = 30;
   const clean = (n) => n.replace(/^__|__$/g, "");
 
   function drawGraph(g) {
@@ -426,7 +432,7 @@
     let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${Math.round(W*1.25)}px" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-          <path d="M0,0.6 L7.4,4 L0,7.4 Z" fill="#a9afba"/>
+          <path d="M0,0.6 L7.4,4 L0,7.4 Z" fill="#7e8595"/>
         </marker>
       </defs>`;
     const seen = new Set();
@@ -446,7 +452,7 @@
         const dip = Math.max(y1, y2) + 34 + (twin ? 10 : 0);
         d = `M${x1},${y1} C${x1},${dip} ${x2},${dip} ${x2},${y2}`;
       }
-      s += `<path d="${d}" fill="none" stroke="#c6cbd4" stroke-width="1.4"
+      s += `<path d="${d}" fill="none" stroke="#5d6474" stroke-width="1.4"
              opacity=".95" marker-end="url(#ah)"
              ${e.cond ? 'stroke-dasharray="5 6"' : ""}/>`;
     }
@@ -456,11 +462,11 @@
       const port = n === "__start__" || n === "__end__" || label === "caller audio" || label === "question";
       s += `<g>
         <rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${port ? 24 : 8}"
-          fill="#ffffff"
-          stroke="${port ? "#3d56f0" : "#e2e4e9"}" stroke-width="${port ? 1.4 : 1}"/>
+          fill="rgba(255,255,255,.05)"
+          stroke="${port ? "#7c8aff" : "rgba(255,255,255,.16)"}" stroke-width="${port ? 1.4 : 1}"/>
         <text x="${x + NW / 2}" y="${y + NH / 2 + 4}" text-anchor="middle"
-          font-family="IBM Plex Mono,monospace" font-size="12"
-          fill="${port ? "#3d56f0" : "#1c1f26"}">${label.length > 22 ? label.slice(0, 21) + "…" : label}</text>
+          font-family="IBM Plex Mono,monospace" font-size="13"
+          fill="${port ? "#a9b3ff" : "#eceef4"}">${label.length > 22 ? label.slice(0, 21) + "…" : label}</text>
       </g>`;
     }
     return s + "</svg>";
@@ -625,10 +631,10 @@
     const mount = () => {
       document.getElementById("tv-chart").innerHTML = "";
       new TradingView.widget({
-        container_id: "tv-chart", symbol, autosize: true, theme: "light",
+        container_id: "tv-chart", symbol, autosize: true, theme: "dark",
         style: "1", interval, timezone: "Etc/UTC", locale: "en",
         hide_side_toolbar: true, hide_top_toolbar: false, allow_symbol_change: false,
-        backgroundColor: "#ffffff",
+        
         studies: [
           { id: "VWAP@tv-basicstudies" },
           { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },

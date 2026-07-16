@@ -1,5 +1,7 @@
 # ai-trading-desk
 
+[![ci](https://github.com/igorfyago/ai-trading-desk/actions/workflows/ci.yml/badge.svg)](https://github.com/igorfyago/ai-trading-desk/actions/workflows/ci.yml)
+
 **Six AI agents that staff an options trading desk — a deliberate ladder from a single LLM call to multi-path LangGraph workflows and real-time voice agents.**
 
 Built with **LangChain 1.0** and **LangGraph 1.0** (Python), the **OpenAI Realtime API** for speech-to-speech voice, and grounded in a real system: my [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) service (Rust + PostgreSQL + Node.js), which computes live dealer gamma/delta exposure (GEX/DEX) from option chains. Every agent works out of the box on a bundled, auto-seeded SQLite mirror of that production schema — clone, add one API key, run.
@@ -75,6 +77,24 @@ Agent 3 additionally needs a checkout of [options-flow-analytics](https://github
 ## Observability (LangSmith)
 
 Every chat run, every graph node, every sub-agent and **every voice tool call** is traced. Setup is three env vars in `.env` (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `LANGSMITH_PROJECT=ai-trading-desk`) — LangChain/LangGraph pick them up automatically, and the voice path is instrumented with `@traceable`. Web runs are tagged (`web-ui`, agent id, session) so you can filter one user's conversation, inspect the Desk Analyst's parallel branches, token costs, and latencies, or replay a failing SQL loop step by step.
+
+## Testing
+
+```bash
+pip install -e ".[web,dev]"
+pytest                    # 48 unit + integration tests, no API key needed, ~6s
+RUN_LIVE=1 pytest tests/integration/test_live.py   # opt-in: real API round-trips
+```
+
+The suite is designed around what can go wrong in an agent system, not just line coverage:
+
+- **Unit** — pricing math *properties* (put-call parity, delta bounds, monotonicity), all five branches of the trade engine, seed determinism, and **SQL guardrails** (DML/DDL/multi-statement injection attempts must come back `REJECTED`, bad SQL must come back as feedback, never an exception).
+- **Graph topology** — the LangGraph wiring *is* the design, so tests pin it: the research graph's two loops close, the analyst graph fans out from both playbooks to all three specialists and joins before synthesis.
+- **Contract** — every tool a voice persona declares to OpenAI must have a matching server-side implementation with valid JSON schema.
+- **Integration** — the FastAPI surface with a test client: NDJSON chat streams, voice tools writing real rows, and *clean failure*: with a bad key the stream must yield a structured `error` event, not a 500.
+- **Live (opt-in)** — one real structured-output run and one real Realtime session mint.
+
+CI runs the keyless suite on every push (badge above). Tests never spend tokens unless you set `RUN_LIVE=1`.
 
 ## Roadmap
 

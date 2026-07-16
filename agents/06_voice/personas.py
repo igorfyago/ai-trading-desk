@@ -17,7 +17,7 @@ call round-trips through our backend, so data and side effects stay here.
 
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -52,7 +52,7 @@ def book_appointment(patient_name: str, contact: str, service: str, slot: str) -
     conn = get_connection()
     conn.execute(
         "INSERT INTO appointments (created_at, patient_name, contact, service, slot) VALUES (?,?,?,?,?)",
-        (datetime.utcnow().isoformat(), patient_name, contact, service.lower(), slot),
+        (datetime.now(timezone.utc).isoformat(), patient_name, contact, service.lower(), slot),
     )
     conn.commit()
     conn.close()
@@ -82,7 +82,7 @@ def save_quote(customer: str, contact: str, project: str, low_usd: float, high_u
     conn = get_connection()
     conn.execute(
         "INSERT INTO quotes (created_at, customer, contact, project, low_usd, high_usd) VALUES (?,?,?,?,?,?)",
-        (datetime.utcnow().isoformat(), customer, contact, project, low_usd, high_usd),
+        (datetime.now(timezone.utc).isoformat(), customer, contact, project, low_usd, high_usd),
     )
     conn.commit()
     conn.close()

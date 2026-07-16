@@ -6,7 +6,7 @@ API, a broker API) would plug in.
 """
 
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from common.db import get_connection
 
@@ -86,4 +86,4 @@ def expected_move(spot: float, iv: float, dte_days: float) -> float:
 
 def days_to(expiry_iso: str) -> float:
     d = date.fromisoformat(expiry_iso)
-    return max((d - datetime.utcnow().date()).days, 0.5)
+    return max((d - datetime.now(timezone.utc).date()).days, 0.5)

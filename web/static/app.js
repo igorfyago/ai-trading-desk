@@ -178,6 +178,88 @@ function renderApproval(b, body, memo) {
   scroll();
 }
 
+/* ----------------------------------------------------------- ambience ---- */
+/* Procedural office sound design (no audio files): a faint room tone while
+   the call is live, and keyboard foley that plays exactly while the agent's
+   tool calls run — "let me pull that up" + real typing sounds. The point:
+   digital silence is the #1 bot tell; a real mic has a room behind it. */
+
+const amb = { ctx: null, master: null, room: null, typing: false };
+
+function ambStart() {
+  if (amb.ctx) return;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ctx.createGain();
+  master.gain.value = 1.0;
+  master.connect(ctx.destination);
+
+  // Room tone: looped brown-ish noise, heavily low-passed, very quiet.
+  const seconds = 4;
+  const buf = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < data.length; i++) {
+    const white = Math.random() * 2 - 1;
+    last = (last + 0.02 * white) / 1.02;        // brown noise walk
+    data[i] = last * 3.5;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 400;
+  const roomGain = ctx.createGain();
+  roomGain.gain.value = 0.012;                   // barely there
+  src.connect(lp).connect(roomGain).connect(master);
+  src.start();
+
+  amb.ctx = ctx; amb.master = master; amb.room = src;
+}
+
+function ambStop() {
+  amb.typing = false;
+  if (amb.ctx) { amb.ctx.close(); amb.ctx = null; }
+}
+
+function keyClick() {
+  if (!amb.ctx) return;
+  const ctx = amb.ctx;
+  const dur = 0.008 + Math.random() * 0.012;
+  const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.3));
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const bp = ctx.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 2000 + Math.random() * 2500;  // every key sounds different
+  bp.Q.value = 1.2;
+  const g = ctx.createGain();
+  g.gain.value = 0.04 + Math.random() * 0.05;
+  src.connect(bp).connect(g).connect(amb.master);
+  src.start();
+}
+
+function typeBurst() {                            // one word-ish flurry of keys
+  if (!amb.ctx || !amb.typing) return;
+  const keys = 3 + Math.floor(Math.random() * 6);
+  let t = 0;
+  for (let i = 0; i < keys; i++) {
+    t += 55 + Math.random() * 110;                // human inter-key jitter
+    setTimeout(() => amb.typing && keyClick(), t);
+  }
+  setTimeout(typeBurst, t + 150 + Math.random() * 500);  // pause between words
+}
+
+function typingStart() { if (amb.ctx && !amb.typing) { amb.typing = true; typeBurst(); } }
+function typingStop() { amb.typing = false; }
+
+// A receptionist multitasks: occasional stray keystrokes even while idle.
+setInterval(() => {
+  if (amb.ctx && !amb.typing && Math.random() < 0.18) keyClick();
+}, 2500);
+
 /* -------------------------------------------------------------- voice ---- */
 
 async function toggleVoice() {
@@ -209,6 +291,7 @@ async function toggleVoice() {
     await voice.pc.setRemoteDescription({ type: "answer", sdp });
 
     voice.live = true;
+    ambStart();
     $("mic").classList.add("live");
     $("voice-state").textContent = `voice live — ${sess.label}`;
     $("voice-state").classList.add("live");
@@ -221,6 +304,7 @@ async function toggleVoice() {
 }
 
 function hangUp(silent) {
+  ambStop();
   voice.dc?.close(); voice.pc?.close();
   voice.mic?.getTracks().forEach((t) => t.stop());
   const wasLive = voice.live;
@@ -262,12 +346,13 @@ async function handleVoiceEvent(ev) {
 async function runVoiceTool(item) {
   const b = [...document.querySelectorAll(".bubble.agent")].pop();
   if (b) chip(b, "tool", `🔧 ${item.name}`);
+  typingStart();                       // she's "looking it up" — keys clatter
   const url = current.kind === "persona" ? `/tool/${current.id}` : `/tool/bridge/${current.id}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: item.name, arguments: JSON.parse(item.arguments), session: sessionId }),
-  }).then((r) => r.json());
+  }).then((r) => r.json()).finally(typingStop);
   voice.dc.send(JSON.stringify({
     type: "conversation.item.create",
     item: { type: "function_call_output", call_id: item.call_id, output: res.output },

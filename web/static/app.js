@@ -187,32 +187,13 @@ function renderApproval(b, body, memo) {
 const amb = { ctx: null, master: null, room: null, typing: false };
 
 function ambStart() {
+  // Keyboard foley only — no room-tone drone (tried it, sounded like traffic).
   if (amb.ctx) return;
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const master = ctx.createGain();
   master.gain.value = 1.0;
   master.connect(ctx.destination);
-
-  // Room tone: looped brown-ish noise, heavily low-passed, very quiet.
-  const seconds = 4;
-  const buf = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
-  const data = buf.getChannelData(0);
-  let last = 0;
-  for (let i = 0; i < data.length; i++) {
-    const white = Math.random() * 2 - 1;
-    last = (last + 0.02 * white) / 1.02;        // brown noise walk
-    data[i] = last * 3.5;
-  }
-  const src = ctx.createBufferSource();
-  src.buffer = buf; src.loop = true;
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass"; lp.frequency.value = 400;
-  const roomGain = ctx.createGain();
-  roomGain.gain.value = 0.012;                   // barely there
-  src.connect(lp).connect(roomGain).connect(master);
-  src.start();
-
-  amb.ctx = ctx; amb.master = master; amb.room = src;
+  amb.ctx = ctx; amb.master = master;
 }
 
 function ambStop() {
@@ -281,6 +262,8 @@ async function toggleVoice() {
     voice.mic.getTracks().forEach((t) => voice.pc.addTrack(t, voice.mic));
     voice.dc = voice.pc.createDataChannel("oai-events");
     voice.dc.onmessage = (e) => handleVoiceEvent(JSON.parse(e.data));
+    // The agent answers the phone — it speaks FIRST, like a real receptionist.
+    voice.dc.onopen = () => voice.dc.send(JSON.stringify({ type: "response.create" }));
 
     const offer = await voice.pc.createOffer();
     await voice.pc.setLocalDescription(offer);

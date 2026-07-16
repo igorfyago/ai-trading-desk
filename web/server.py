@@ -219,23 +219,29 @@ def atlas():
         for meta in registry.AGENT_META:
             aid = meta["id"]
             if aid == "brief":
-                mmd = ("flowchart LR\n  Q([question]) --> P[prompt + live context]\n"
-                       "  P --> M[LLM structured output]\n  M --> A([typed MarketQuery])")
+                nodes = ["question", "prompt + live context", "LLM structured output", "typed answer"]
+                edges = [{"s": nodes[i], "t": nodes[i + 1], "cond": False} for i in range(3)]
             else:
-                mmd = rt[aid].get_graph().draw_mermaid()
+                g = rt[aid].get_graph()
+                nodes = list(g.nodes)
+                edges = [{"s": e.source, "t": e.target, "cond": bool(e.conditional)}
+                         for e in g.edges]
             graphs.append({"id": aid, "name": meta["name"], "category": meta["category"],
-                           "kind": "LangGraph runtime graph" if aid != "brief" else "LangChain call",
-                           "mermaid": mmd})
+                           "kind": "LangGraph runtime" if aid != "brief" else "LangChain call",
+                           "nodes": nodes, "edges": edges})
     except Exception as exc:
         return {"error": str(exc), "graphs": []}
     for pid, p in PERSONAS.items():
-        tools = "\n".join(f"  M -->|{t['name']}| T{i}[{t['name']}]\n  T{i} --> M"
-                          for i, t in enumerate(p["tools"]))
+        tool_names = [t["name"] for t in p["tools"]]
+        nodes = ["caller audio", "gpt-realtime-2.1 + persona"] + tool_names
+        edges = ([{"s": "caller audio", "t": nodes[1], "cond": False},
+                  {"s": nodes[1], "t": "caller audio", "cond": False}] +
+                 [{"s": nodes[1], "t": t, "cond": True} for t in tool_names] +
+                 [{"s": t, "t": nodes[1], "cond": True} for t in tool_names])
         graphs.append({"id": pid, "name": p["label"],
                        "category": PERSONA_CATEGORY.get(pid, "agency"),
                        "kind": "Realtime voice (WebRTC / SIP)",
-                       "mermaid": "flowchart LR\n  C([caller audio]) <--> M[gpt-realtime-2.1\\n+ persona]\n"
-                                  + tools})
+                       "nodes": nodes, "edges": edges})
     _ATLAS_CACHE.update({"graphs": graphs})
     return _ATLAS_CACHE
 

@@ -29,7 +29,9 @@ services:
       retries: 5
 
   collector:
-    build: ../../options-flow-analytics/collector
+    build:
+      context: ../../options-flow-analytics
+      dockerfile: collector/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
@@ -42,7 +44,9 @@ services:
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
 
   gex-api:
-    build: ../../options-flow-analytics/api
+    build:
+      context: ../../options-flow-analytics
+      dockerfile: api/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:

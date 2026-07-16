@@ -252,10 +252,6 @@ function typeBurst() {                            // one word-ish flurry of keys
 function typingStart() { if (amb.ctx && !amb.typing) { amb.typing = true; typeBurst(); } }
 function typingStop() { amb.typing = false; }
 
-// A receptionist multitasks: occasional stray keystrokes even while idle.
-setInterval(() => {
-  if (amb.ctx && !amb.typing && Math.random() < 0.18) keyClick();
-}, 2500);
 
 /* -------------------------------------------------------------- voice ---- */
 

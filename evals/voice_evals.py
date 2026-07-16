@@ -181,9 +181,15 @@ SCENARIOS = [
         "no_jargon_by_default": lambda tr: not JARGON.search(delivery(tr)),
         "has_disclaimer": lambda tr: re.search(r"not (financial )?advice|demo data|education", " ".join(agent_turns(tr)).lower()) is not None,
         "terse": lambda tr: len(delivery(tr).split()) <= 130,
-        "has_exit_rule": lambda tr: any(w in delivery(tr).lower()
-                                        for w in ("get out", "exit", "wrong if", "above", "below",
-                                                  "scratch", "shut it down", "close it", "bail")),
+        "has_exit_rule": lambda tr: re.search(
+            r"kill|out completely|get out|exit|bail|scratch|close it|shut it down|"
+            r"drop it|cut it|trade('s| is)? (over|done|dead)|go flat|step aside|"
+            r"(break|cross|lose|reclaim|clear|slip)s? (above|below|back|under|over)",
+            delivery(tr), re.I) is not None,
+        "sells_half_at_target": lambda tr: "half" in delivery(tr).lower(),
+        "has_entry_condition": lambda tr: any(
+            w in delivery(tr).lower()
+            for w in ("while", "holds", "get in", "entry", "only if", "touch", "as long as")),
     }),
     dict(persona="marcus", name="depth_on_request_and_news", turns=[
         "what should I trade on QQQ?",

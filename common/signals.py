@@ -112,45 +112,80 @@ def recommend_trade(ticker: str) -> dict:
                      f"hedging pins price between the walls ({put_wall} / {call_wall}). "
                      f"Sell premium at the walls dealers defend. Signal score {score:+.0f}.")
 
+    execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em)
     return {
         "ticker": snap["ticker"], "as_of": snap["captured_at"], "spot": spot,
         "regime": snap["regime"], "gamma_flip": flip, "signal_score": score,
         "structure": name, "bias": bias, "legs": legs,
         "one_sigma_move": em, "expected_move_band": [round(spot - em, 2), round(spot + em, 2)],
         "rationale": rationale,
-        "plain_english": _plain_english(snap["ticker"], name, legs, spot, flip,
-                                        put_wall, call_wall, snap["regime"]),
+        "execution": execution,
+        "plain_english": _plain_english_exec(snap["ticker"], execution),
         "invalidation": f"Exit if {invalidation}.",
         "sizing": "Risk no more than 1% of account on the structure's max loss.",
         "disclaimer": DISCLAIMER,
     }
 
 
-def _plain_english(ticker: str, structure: str, legs: list, spot: float, flip: float,
-                   put_wall: float, call_wall: float, regime: str) -> str:
-    """The no-jargon version, authored by the engine so it's always faithful.
-
-    Rules: cause-and-effect words, at most one number per sentence, four
-    sentences total. This is the default narration; jargon is opt-in.
+def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em) -> dict:
+    """The desk format: ONE option to buy (0-5 DTE), the underlying
+    entry level + condition, the underlying level to sell HALF at (with the
+    option's rough value there), and a hard stop. All rule-derived.
     """
-    def leg_words(leg):
-        return f"{'buy' if leg['side'] == 'buy' else 'sell'} the {leg['strike']:g} {leg['kind']}s"
-
-    trade = ", ".join(leg_words(l) for l in legs) + f" expiring {legs[0]['expiry']}"
-
+    regime = snap["regime"]
     if regime == "negative_gamma":
-        if spot < flip:
-            why = (f"{ticker} is in a fragile spot: as it falls, big market players are "
-                   f"forced to sell even more, so drops tend to snowball.")
-            wrong = (f"If it climbs back above {flip:g}, that snowball effect switches "
-                     f"off — get out.")
-        else:
-            why = (f"{ticker} is in breakout mode: as it rises, big market players are "
-                   f"forced to buy even more, so rallies tend to feed themselves.")
-            wrong = f"If it slips back under {flip:g}, that fuel is gone — get out."
+        bullish = spot >= flip
+        kind = "call" if bullish else "put"
+        entry_u, condition = spot, (f"while {snap['ticker']} holds "
+                                    f"{'above' if bullish else 'below'} {flip:g}")
+        tp50_u = call_wall if bullish else put_wall
+        stop_u, conviction = flip, "standard"
     else:
-        why = (f"{ticker} is in a calm stretch: big market players make money keeping it "
-               f"inside roughly {put_wall:g} to {call_wall:g}, so it tends to stay there.")
-        wrong = "If it closes outside that range, the calm is over — get out."
+        bullish = score >= 0
+        kind = "call" if bullish else "put"
+        entry_u = put_wall if bullish else call_wall     # buy the bounce off the wall
+        condition = (f"on a touch of the {'put' if bullish else 'call'} wall at {entry_u:g} "
+                     "(long-gamma tape mean-reverts — don't chase mid-range)")
+        tp50_u = call_wall if bullish else put_wall
+        stop_u = round(entry_u - step if bullish else entry_u + step, 2)
+        conviction = "reduced - long-gamma tape dampens moves; prefer the credit structure"
 
-    return f"{why} The trade: {trade}. {wrong} Risk about one percent of your account, no more."
+    # target must be worth taking: at least 0.6 sigma from entry, else extend
+    min_dist = max(em * 0.6, step)
+    if abs(tp50_u - entry_u) < min_dist:
+        tp50_u = round(entry_u + min_dist if bullish else entry_u - min_dist, 2)
+
+    strike = atm if regime == "negative_gamma" else (
+        round(entry_u / step) * step if step else entry_u)
+    entry_px = market.black_scholes(entry_u, strike, dte, snap["atm_iv"], kind)["price"]
+    tp_dte = max(dte * 0.5, 0.5)                          # rough: target hit mid-horizon
+    tp50_px = market.black_scholes(tp50_u, strike, tp_dte, snap["atm_iv"], kind)["price"]
+    return {
+        "action": "buy", "kind": kind, "strike": strike, "expiry": snap["expiry"],
+        "dte_days": round(dte, 1),
+        "entry_underlying": round(entry_u, 2), "entry_condition": condition,
+        "entry_option_price_est": entry_px,
+        "tp50_underlying": round(tp50_u, 2), "tp50_option_price_est": tp50_px,
+        "tp50_rule": "sell HALF at the target, let the rest run, never past the stop",
+        "stop_underlying": round(stop_u, 2),
+        "conviction": conviction,
+        "estimates_note": "option prices are Black-Scholes estimates at ATM vol; "
+                          "theta/vol shift will move them",
+    }
+
+
+def _plain_english_exec(ticker: str, x: dict) -> str:
+    """His format, four sentences, ~one number each — engine-authored."""
+    return (
+        f"Buy the {ticker} {x['strike']:g} {x['kind']}s expiring {x['expiry']} "
+        f"({x['dte_days']:g} days), {x['entry_condition']} — about "
+        f"{x['entry_option_price_est']:.2f} per contract with {ticker} at "
+        f"{x['entry_underlying']:g}. "
+        f"Sell HALF when {ticker} touches {x['tp50_underlying']:g} — those "
+        f"{x['kind']}s should be worth roughly {x['tp50_option_price_est']:.2f}. "
+        f"Let the rest run, but if {ticker} crosses {x['stop_underlying']:g} the trade "
+        f"is over — out completely. "
+        f"Risk about one percent of your account, no more."
+    )
+
+

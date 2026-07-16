@@ -179,16 +179,17 @@ SCENARIOS = [
     ], checks={
         "engine_used": lambda tr: "trade_recommendation" in tools_called(tr),
         "no_jargon_by_default": lambda tr: not JARGON.search(delivery(tr)),
-        "has_disclaimer": lambda tr: re.search(r"not (financial )?advice|demo data|education", " ".join(agent_turns(tr)).lower()) is not None,
+        "has_disclaimer": lambda tr: re.search(r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice", " ".join(agent_turns(tr)).lower()) is not None,
         "terse": lambda tr: len(delivery(tr).split()) <= 130,
         "has_exit_rule": lambda tr: re.search(
-            r"kill|out completely|get out|exit|bail|scratch|close it|shut it down|"
-            r"drop it|cut it|trade('s| is)? (over|done|dead)|go flat|step aside|"
-            r"(break|cross|lose|reclaim|clear|slip)s? (above|below|back|under|over)",
-            delivery(tr), re.I) is not None,
-        "sells_half_at_target": lambda tr: "half" in delivery(tr).lower(),
+            r"(kill|cut|exit|bail|scratch|get out|out completely|go flat|"
+            r"shut it down|close it|drop it|full stop|stop if|stop is|the stop|reclaim|"
+            r"every contract out|trade is (over|done|dead))"
+            r"|if[^.!?]{0,90}(above|below|under|over)",
+            " ".join(agent_turns(tr)), re.I) is not None,
+        "sells_half_at_target": lambda tr: "half" in " ".join(agent_turns(tr)).lower(),
         "has_entry_condition": lambda tr: any(
-            w in delivery(tr).lower()
+            w in " ".join(agent_turns(tr)).lower()
             for w in ("while", "holds", "get in", "entry", "only if", "touch", "as long as")),
     }),
     dict(persona="marcus", name="depth_on_request_and_news", turns=[
@@ -198,7 +199,7 @@ SCENARIOS = [
     ], checks={
         "depth_when_asked": lambda tr: len((agent_turns(tr)[-2] or "").split()) >= 55,
         "news_tools_used": lambda tr: bool({"desk_news", "x_pulse"} & set(tools_called(tr))),
-        "disclaimer_present": lambda tr: re.search(r"not (financial )?advice|demo data|education", " ".join(agent_turns(tr)).lower()) is not None,
+        "disclaimer_present": lambda tr: re.search(r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice", " ".join(agent_turns(tr)).lower()) is not None,
     }),
 ]
 

@@ -1,7 +1,10 @@
 /* AI Trading Desk — one conversation, six agents, text + voice. */
 
 const $ = (id) => document.getElementById(id);
-const sessionId = crypto.randomUUID();
+// crypto.randomUUID only exists in secure contexts (https/localhost) — fall back
+const sessionId = crypto.randomUUID
+  ? crypto.randomUUID()
+  : "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
 let catalog = null;
 let current = null;            // {kind: 'text'|'persona', id, name, desc, hint}
 let busy = false;

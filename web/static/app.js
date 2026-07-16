@@ -22,6 +22,20 @@ const md = (text) => DOMPurify.sanitize(marked.parse(text ?? ""));
 
 /* ------------------------------------------------------------ sidebar ---- */
 
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.get("embed") === "1") document.body.classList.add("embed");
+
+async function refreshSpy() {
+  try {
+    const d = await fetch("/api/spot/SPY").then((r) => r.json());
+    $("spy-chip").innerHTML =
+      `SPY <b>${d.spot}</b> &nbsp;→&nbsp; XSP ≈ <b>${d.xsp_est}</b>` +
+      ` <span style="opacity:.6">· ${String(d.as_of).slice(11, 16)}Z</span>`;
+  } catch { $("spy-chip").textContent = ""; }
+}
+refreshSpy();
+setInterval(refreshSpy, 30000);
+
 async function boot() {
   catalog = await fetch("/agents").then((r) => r.json());
   const ta = $("text-agents");
@@ -38,7 +52,14 @@ async function boot() {
   }
   $("custom-label").style.display = groups.custom.children.length ? "" : "none";
   renderBuilderOptions();
-  if (!current) select({ kind: "text", ...catalog.text_agents[0] });
+  if (!current) {
+    const want = urlParams.get("agent");
+    const persona = want && catalog.voice_personas.find((p) => p.id === want);
+    const textA = want && catalog.text_agents.find((a) => a.id === want);
+    if (persona) select({ kind: "persona", id: persona.id, name: persona.label, desc: persona.tagline });
+    else if (textA) select({ kind: "text", ...textA });
+    else select({ kind: "text", ...catalog.text_agents[0] });
+  }
 }
 
 function agentButton(sel, badge) {

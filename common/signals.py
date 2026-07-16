@@ -23,6 +23,11 @@ from common.db import get_connection
 DISCLAIMER = ("Demo data + rule-based engine. Educational example only — "
               "not financial advice, not an offer to trade.")
 
+# House convention: ANALYZE on SPY, EXECUTE in XSP (mini-SPX).
+# XSP usually trades ~+2 over SPY; strikes map SPY level + offset.
+XSP_OFFSET = 2.0
+DEFAULT_BUDGET_USD = 2000
+
 
 def _latest_walls(ticker: str) -> dict:
     if db.using_live_db():
@@ -117,9 +122,10 @@ def recommend_trade(ticker: str) -> dict:
         # house rule: XSP fills are ugly on spreads - single direction only
         name = f"long {execution['kind']} (XSP: single-leg only, no spreads)"
         legs = [_leg(snap, execution["strike"], execution["kind"], "buy", dte)]
-    plain = _plain_english_exec(snap["ticker"], execution)
-    if snap.get("levels_note"):
-        plain += f" ({snap['levels_note']}.)"
+    execution["contract_plan"] = _contract_and_sizing(
+        execution, snap["ticker"], snap["regime"], score)
+    plain = _plain_english_exec("SPY" if snap["ticker"] in ("SPY", "XSP") else snap["ticker"],
+                                execution)
     return {
         "ticker": snap["ticker"], "as_of": snap["captured_at"], "spot": spot,
         "regime": snap["regime"], "gamma_flip": flip, "signal_score": score,
@@ -204,19 +210,83 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     }
 
 
+def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float,
+                         budget: float = DEFAULT_BUDGET_USD) -> dict:
+    """House conventions on top of the plan:
+      - S&P trades: analysis stays in SPY levels, the CONTRACT is XSP
+        (strike = SPY strike + ~2), notation like '753p'
+      - sizing algo for the clip (default $2k): full clip when the regime and
+        signal both back the move; split (half now, half on confirmation)
+        when conviction is partial. Premium buyer, hold-to-zero sizing.
+    """
+    kind_letter = "p" if execution["kind"] == "put" else "c"
+    if ticker in ("SPY", "XSP"):
+        contract_ticker = "XSP"
+        contract_strike = round(execution["strike"] + XSP_OFFSET)
+        conversion_note = (f"analysis on SPY; execute in XSP at about +{XSP_OFFSET:g} "
+                           "- confirm the live offset at the broker")
+    else:
+        contract_ticker = ticker
+        contract_strike = round(execution["strike"])
+        conversion_note = None
+
+    est_px = execution["entry_option_price_est"]
+    per_contract = max(est_px * 100, 1)
+    strong = (regime == "negative_gamma" and abs(score) >= 40)
+    if strong:
+        plan, now_usd, later_usd = "full clip", budget, 0
+        trigger = None
+        why = "momentum tape and strong signal agree - deploy the full clip"
+    elif regime == "negative_gamma":
+        plan, now_usd, later_usd = "split", budget / 2, budget / 2
+        trigger = ("add the second half only if the contract is up 25% or SPY "
+                   "pushes through the entry level with momentum")
+        why = "momentum tape but the signal is lukewarm - half now, prove it, then add"
+    else:
+        plan, now_usd, later_usd = "split", budget / 2, budget / 2
+        trigger = "add the second half only on a clean tag of the far wall"
+        why = "pinned tape - mean-reversion entries earn the add, they don't get it upfront"
+
+    return {
+        "contract_ticker": contract_ticker,
+        "contract": f"{contract_strike:g}{kind_letter}",
+        "contract_strike": contract_strike,
+        "moneyness": "ATM",
+        "conversion_note": conversion_note,
+        "budget_usd": budget,
+        "plan": plan,
+        "now_usd": round(now_usd),
+        "later_usd": round(later_usd),
+        "contracts_now": max(int(now_usd // per_contract), 1),
+        "add_trigger": trigger,
+        "sizing_why": why,
+        "doctrine": "size for zero: the whole premium is the risk, no stop",
+    }
+
+
 def _plain_english_exec(ticker: str, x: dict) -> str:
-    """The desk script: headline, the buy, the trim, the risk frame."""
+    """The desk script: headline, SPY levels, XSP contract, trim, sizing, risk."""
+    cp = x.get("contract_plan", {})
+    contract_bit = (f"that's the {cp.get('contract_ticker', ticker)} "
+                    f"{cp.get('contract', '')} " if cp.get("conversion_note") else "")
+    sizing_bit = (
+        f"Clip is {cp.get('budget_usd', 2000):g} dollars: "
+        + (f"all of it now ({cp.get('contracts_now')} contracts) - {cp.get('sizing_why')}. "
+           if cp.get("plan") == "full clip" else
+           f"half now ({cp.get('contracts_now')} contracts, {cp.get('now_usd')} dollars), "
+           f"the other half waits - {cp.get('add_trigger')}. ")
+    ) if cp else ""
     return (
         f"{x['gex_headline']} - {x['gex_why']}. "
-        f"Buy the {ticker} {x['strike']:g} {x['kind']}s expiring {x['expiry']} "
-        f"({x['dte_days']:g} days), about {x['entry_option_price_est']:.2f} per "
-        f"contract with {ticker} at {x['entry_underlying']:g}. "
+        f"With {ticker} at {x['entry_underlying']:g}, buy ATM {x['kind']}s - "
+        f"{contract_bit}expiring {x['expiry']} ({x['dte_days']:g} days), about "
+        f"{x['entry_option_price_est']:.2f} per contract. "
         f"Sell HALF when the contract is up fifty percent - around "
-        f"{x['tp50_option_price']:.2f}, which is {ticker} near "
-        f"{x['tp50_underlying_est']:g} - then let the rest ride. "
-        f"No stop-loss: size it small, half a percent of the account, and accept "
-        f"it can go to zero; the tipping point at {x['thesis_reference']:g} only "
-        f"tells you whether the thesis still stands."
+        f"{x['tp50_option_price']:.2f}, {ticker} near {x['tp50_underlying_est']:g} - "
+        f"then let the rest ride. "
+        f"{sizing_bit}"
+        f"No stop-loss: size for zero; the tipping point at "
+        f"{x['thesis_reference']:g} only tells you whether the thesis still stands."
     )
 
 

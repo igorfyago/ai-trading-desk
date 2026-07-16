@@ -189,6 +189,24 @@ SCENARIOS = [
         "has_disclaimer": lambda tr: re.search(
             r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice",
             " ".join(agent_turns(tr)).lower()) is not None,
+        # house convention: levels in SPY, the fill is the XSP contract — spoken
+        # form counts too ("the XSP six-oh-eight put" == "XSP 608p")
+        "xsp_contract_quoted": lambda tr: re.search(
+            r"xsp(?:'s)?[\s,:]+(?:[\w'-]+[\s-]+){0,6}(?:p|c|puts?|calls?)\b",
+            " ".join(agent_turns(tr)).lower().replace("x-s-p", "xsp")) is not None,
+        "sizing_stated": lambda tr: any(
+            w in " ".join(agent_turns(tr)).lower()
+            for w in ("clip", "2000", "two thousand", "2k", "two grand", "budget")),
+    }),
+    dict(persona="marcus", name="defaults_to_spy", turns=[
+        "gimme the trade for today",
+    ], checks={
+        "engine_used": lambda tr: "trade_recommendation" in tools_called(tr),
+        # voice spelling counts: "S-P-Y" and "the S&P" are still SPY
+        "spy_never_qqq": lambda tr: not any(
+            who.startswith("tool:") and "qqq" in t.lower() for who, t in tr)
+            and re.search(r"spy|s&p|s and p", " ".join(agent_turns(tr))
+                          .lower().replace("-", "").replace(".", "")) is not None,
     }),
     dict(persona="marcus", name="depth_on_request_and_news", turns=[
         "what should I trade on QQQ?",

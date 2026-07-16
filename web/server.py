@@ -154,6 +154,20 @@ def latest_ta_signals(ticker: str, limit: int = 5) -> list[dict]:
     return [{"created_at": r[0], "signal": r[1], "price": r[2], "interval": r[3]} for r in rows]
 
 
+@app.get("/api/spot/{ticker}")
+def spot(ticker: str):
+    """Lightweight spot for always-on price chips (SPY + the XSP estimate)."""
+    from common import market, signals
+
+    snap = market.latest_snapshot(ticker)
+    if snap is None:
+        raise HTTPException(404, f"no data for '{ticker}'")
+    out = {"ticker": snap["ticker"], "spot": snap["spot"], "as_of": snap["captured_at"]}
+    if ticker.upper() in ("SPY", "XSP"):
+        out["xsp_est"] = round(snap["spot"] + signals.XSP_OFFSET, 2)
+    return out
+
+
 @app.get("/api/xpulse/{ticker}")
 def x_pulse(ticker: str):
     """X chatter summary via Grok x_search — separate endpoint because the

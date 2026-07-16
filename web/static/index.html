@@ -3,168 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Yago Capital — talk to the desk</title>
-<style>
-  :root { --bg:#0b0e14; --panel:#131826; --line:#232b3d; --text:#e6e9f0; --dim:#8b93a7;
-          --green:#3ddc84; --amber:#ffb454; --accent:#5b8cff; }
-  * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--text); font:15px/1.5 "Segoe UI",system-ui,sans-serif;
-         min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:32px 16px; }
-  h1 { font-size:22px; letter-spacing:.5px; }
-  h1 span { color:var(--accent); }
-  p.sub { color:var(--dim); margin:6px 0 24px; max-width:560px; text-align:center; }
-  .cards { display:flex; gap:16px; flex-wrap:wrap; justify-content:center; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px;
-          width:260px; cursor:pointer; transition:border-color .15s; }
-  .card:hover { border-color:var(--accent); }
-  .card.active { border-color:var(--green); }
-  .card h2 { font-size:16px; margin-bottom:6px; }
-  .card p { color:var(--dim); font-size:13px; }
-  .controls { margin:24px 0 12px; display:flex; gap:12px; align-items:center; }
-  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 22px;
-           font-size:15px; cursor:pointer; }
-  button:disabled { background:var(--line); color:var(--dim); cursor:default; }
-  #status { color:var(--dim); font-size:13px; }
-  #status.live { color:var(--green); }
-  #log { background:var(--panel); border:1px solid var(--line); border-radius:12px; width:100%;
-         max-width:720px; min-height:220px; max-height:50vh; overflow-y:auto; padding:16px;
-         font-size:14px; }
-  .msg { margin-bottom:10px; }
-  .msg .who { font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); }
-  .msg.agent .who { color:var(--accent); }
-  .msg.tool .who { color:var(--amber); }
-  .msg.tool { color:var(--amber); font-family:Consolas,monospace; font-size:12.5px; }
-  footer { color:var(--dim); font-size:12px; margin-top:18px; text-align:center; }
-  footer a { color:var(--accent); }
-</style>
+<title>AI Trading Desk — talk to the agents</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 </head>
 <body>
-  <h1>YAGO <span>CAPITAL</span> — talk to the desk</h1>
-  <p class="sub">Live speech-to-speech AI agents (OpenAI Realtime over WebRTC) wired to an options-analytics
-     backend. Pick an agent, allow the mic, and just talk — interrupt them mid-sentence, they can take it.</p>
-
-  <div class="cards">
-    <div class="card active" id="card-receptionist" onclick="pick('receptionist')">
-      <h2>📞 Riley — AI Receptionist</h2>
-      <p>Ask what the desk does, get the current read on SPY / QQQ / IWM, or book a callback with an analyst.</p>
+<div id="app">
+  <aside id="sidebar">
+    <div id="brand">
+      <h1>AI TRADING <span>DESK</span></h1>
+      <p>Six agents, one conversation.<br>Type to any of them — or press the mic and talk.</p>
     </div>
-    <div class="card" id="card-quoting" onclick="pick('quoting')">
-      <h2>📈 Marcus — AI Quoting Agent</h2>
-      <p>Ask for an option quote: “SPY 620 calls, a week out” — prices, greeks and expected move, by voice.</p>
+    <div class="section-label">Text agents — the ladder</div>
+    <nav id="text-agents"></nav>
+    <div class="section-label">Voice-native agents</div>
+    <nav id="voice-personas"></nav>
+    <footer>
+      <a href="https://github.com/igorfyago/ai-trading-desk" target="_blank">GitHub ↗</a>
+      <span>demo data · not financial advice</span>
+    </footer>
+  </aside>
+
+  <main id="chat-pane">
+    <header id="chat-header">
+      <div>
+        <div id="current-name">Market Brief</div>
+        <div id="current-desc"></div>
+      </div>
+      <div id="voice-state"></div>
+    </header>
+    <div id="log"></div>
+    <div id="composer">
+      <button id="mic" title="Talk to this agent">🎙</button>
+      <input id="input" placeholder="Ask the agent…" autocomplete="off">
+      <button id="send">Send</button>
     </div>
-  </div>
-
-  <div class="controls">
-    <button id="btn" onclick="toggle()">Start talking</button>
-    <span id="status">idle</span>
-  </div>
-
-  <div id="log"></div>
-  <footer>Demo data, indicative quotes, not financial advice. Part of the
-    <a href="https://github.com/igorfyago/ai-trading-desk">ai-trading-desk</a> project.</footer>
-
-<script>
-let persona = "receptionist", pc = null, dc = null, micStream = null, live = false;
-const $ = (id) => document.getElementById(id);
-
-function pick(p) {
-  if (live) return;
-  persona = p;
-  document.querySelectorAll(".card").forEach(c => c.classList.remove("active"));
-  $("card-" + p).classList.add("active");
-}
-
-function logMsg(who, cls, text) {
-  const div = document.createElement("div");
-  div.className = "msg " + cls;
-  div.innerHTML = `<div class="who">${who}</div><div class="body"></div>`;
-  div.querySelector(".body").textContent = text;
-  $("log").appendChild(div);
-  $("log").scrollTop = $("log").scrollHeight;
-  return div.querySelector(".body");
-}
-
-let currentAgentLine = null;
-
-async function toggle() {
-  if (live) { stop(); return; }
-  $("btn").disabled = true;
-  $("status").textContent = "requesting session…";
-  try {
-    const sess = await fetch(`/session/${persona}`, { method: "POST" }).then(r => {
-      if (!r.ok) throw new Error("session mint failed (is OPENAI_API_KEY set on the server?)");
-      return r.json();
-    });
-
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    pc = new RTCPeerConnection();
-    pc.ontrack = (e) => { const a = new Audio(); a.srcObject = e.streams[0]; a.play(); };
-    micStream.getTracks().forEach(t => pc.addTrack(t, micStream));
-
-    dc = pc.createDataChannel("oai-events");
-    dc.onmessage = (e) => handleEvent(JSON.parse(e.data));
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    const sdp = await fetch("https://api.openai.com/v1/realtime/calls", {
-      method: "POST",
-      body: offer.sdp,
-      headers: { Authorization: `Bearer ${sess.client_secret}`, "Content-Type": "application/sdp" },
-    }).then(r => r.text());
-    await pc.setRemoteDescription({ type: "answer", sdp });
-
-    live = true;
-    $("btn").textContent = "Hang up";
-    $("status").textContent = `connected to ${sess.label} (${sess.model}) — speak!`;
-    $("status").classList.add("live");
-  } catch (err) {
-    $("status").textContent = "error: " + err.message;
-    stop(true);
-  }
-  $("btn").disabled = false;
-}
-
-function stop(silent) {
-  if (dc) dc.close();
-  if (pc) pc.close();
-  if (micStream) micStream.getTracks().forEach(t => t.stop());
-  pc = dc = micStream = null; live = false;
-  $("btn").textContent = "Start talking";
-  if (!silent) { $("status").textContent = "idle"; $("status").classList.remove("live"); }
-}
-
-async function handleEvent(ev) {
-  switch (ev.type) {
-    case "response.output_audio_transcript.delta":
-      if (!currentAgentLine) currentAgentLine = logMsg(persona === "receptionist" ? "Riley" : "Marcus", "agent", "");
-      currentAgentLine.textContent += ev.delta;
-      $("log").scrollTop = $("log").scrollHeight;
-      break;
-    case "conversation.item.input_audio_transcription.completed":
-      logMsg("You", "user", ev.transcript || "(audio)");
-      break;
-    case "response.done":
-      currentAgentLine = null;
-      for (const item of (ev.response?.output || [])) {
-        if (item.type === "function_call") await runTool(item);
-      }
-      break;
-  }
-}
-
-async function runTool(item) {
-  logMsg("tool", "tool", `${item.name}(${item.arguments})`);
-  const res = await fetch(`/tool/${persona}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: item.name, arguments: JSON.parse(item.arguments) }),
-  }).then(r => r.json());
-  dc.send(JSON.stringify({
-    type: "conversation.item.create",
-    item: { type: "function_call_output", call_id: item.call_id, output: res.output },
-  }));
-  dc.send(JSON.stringify({ type: "response.create" }));
-}
-</script>
+  </main>
+</div>
+<script src="/static/app.js"></script>
 </body>
 </html>

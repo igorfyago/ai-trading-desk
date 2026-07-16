@@ -1,61 +1,108 @@
-"""Agent 6 — Voice agent definitions (OpenAI Realtime API).
+"""Voice agent personas (OpenAI Realtime API).
 
-Two speech-to-speech agents share one architecture; only this file differs
-between them. Each persona bundles:
-  • instructions  — the voice-tuned system prompt
-  • voice         — Realtime voice ("marin"/"cedar" are the most natural)
-  • tools         — JSON-schema function declarations sent in the session config
-  • implementations — the Python functions that actually run, SERVER-SIDE
+Three speech-to-speech agents, deliberately spanning the two big commercial
+voice-agent use cases plus the desk's own specialty:
 
-The split matters: the model and audio run in the browser via WebRTC for
-latency, but every tool call round-trips through our backend (web/server.py),
-so data access and side effects stay on the server where they belong.
+  riley   — AI Receptionist for a dental clinic (GENERALIST: any local business)
+  quinn   — AI Quoting Agent for a renovation company (GENERALIST: any services firm)
+  marcus  — AI Options Desk Agent: tells you the exact GEX-based trade
+            (a deterministic rules engine in common/signals.py picks the trade;
+             the model only narrates — the LLM never chooses strikes)
+
+Each persona bundles instructions, a Realtime voice, JSON-schema tool
+declarations (baked into the session at mint time), and the server-side
+Python implementations. Audio runs browser↔OpenAI over WebRTC; every tool
+call round-trips through our backend, so data and side effects stay here.
 """
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from common import market
+from common import market, signals
 from common.db import get_connection
 
-# ------------------------------------------------------------ tool impls ----
+try:  # tool calls show up in LangSmith when LANGSMITH_TRACING is on
+    from langsmith import traceable
+except ImportError:  # pragma: no cover
+    def traceable(**_kw):
+        return lambda f: f
+
+
+# ----------------------------------------------------- receptionist tools ----
+
+SERVICES = {"cleaning": 30, "checkup": 30, "whitening": 60, "filling": 45, "consultation": 20}
+
+
+def clinic_openings(day: str) -> str:
+    """Deterministic fake calendar: same weekday → same slots."""
+    seedmap = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, "friday": 4}
+    d = seedmap.get(day.lower().strip(), 0)
+    slots = [f"{h}:{m:02d}" for i, (h, m) in enumerate(
+        [(9, 0), (9, 30), (10, 15), (11, 0), (13, 30), (14, 15), (15, 0), (16, 30)]) if (i + d) % 3 != 0]
+    return json.dumps({"day": day, "open_slots": slots, "services": SERVICES})
+
+
+def book_appointment(patient_name: str, contact: str, service: str, slot: str) -> str:
+    if service.lower() not in SERVICES:
+        return json.dumps({"error": f"unknown service '{service}'", "services": list(SERVICES)})
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO appointments (created_at, patient_name, contact, service, slot) VALUES (?,?,?,?,?)",
+        (datetime.utcnow().isoformat(), patient_name, contact, service.lower(), slot),
+    )
+    conn.commit()
+    conn.close()
+    return json.dumps({"status": "booked", "patient": patient_name, "service": service, "slot": slot})
+
+
+# ---------------------------------------------------------- quoting tools ----
+
+RATES = {"kitchen": (95, 140), "bathroom": (110, 160), "painting": (3.5, 6.0),
+         "flooring": (8, 14), "deck": (35, 55)}  # $/sqft ranges
+
+
+def estimate_project(project_type: str, area_sqft: float, finish_level: str = "standard") -> str:
+    rates = RATES.get(project_type.lower().strip())
+    if not rates:
+        return json.dumps({"error": f"unknown project '{project_type}'", "projects": list(RATES)})
+    lo, hi = rates
+    mult = {"budget": 0.8, "standard": 1.0, "premium": 1.45}.get(finish_level.lower(), 1.0)
+    low, high = round(lo * area_sqft * mult, -2), round(hi * area_sqft * mult, -2)
+    weeks = max(1, round(area_sqft / 120))
+    return json.dumps({"project": project_type, "area_sqft": area_sqft, "finish": finish_level,
+                       "estimate_low_usd": low, "estimate_high_usd": high,
+                       "typical_duration_weeks": weeks})
+
+
+def save_quote(customer: str, contact: str, project: str, low_usd: float, high_usd: float) -> str:
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO quotes (created_at, customer, contact, project, low_usd, high_usd) VALUES (?,?,?,?,?,?)",
+        (datetime.utcnow().isoformat(), customer, contact, project, low_usd, high_usd),
+    )
+    conn.commit()
+    conn.close()
+    return json.dumps({"status": "saved", "customer": customer, "project": project,
+                       "range_usd": [low_usd, high_usd],
+                       "note": "A project manager will follow up within one business day."})
+
+
+# ----------------------------------------------------- options desk tools ----
 
 def desk_status(ticker: str) -> str:
     snap = market.latest_snapshot(ticker)
     if not snap:
         return json.dumps({"error": f"No data for {ticker}. We cover SPY, QQQ, IWM."})
-    return json.dumps({
-        "ticker": snap["ticker"], "spot": snap["spot"], "regime": snap["regime"],
-        "traffic_light": snap["traffic_light"], "signal_score": snap["signal_score"],
-        "gamma_flip": snap["gamma_flip"], "as_of": snap["captured_at"],
-    })
+    return json.dumps({k: snap[k] for k in ("ticker", "spot", "regime", "traffic_light",
+                                            "signal_score", "gamma_flip", "atm_iv", "captured_at")})
 
 
-def book_callback(caller_name: str, contact: str, topic: str, preferred_time: str = "") -> str:
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO callbacks (created_at, caller_name, contact, topic, preferred_time)"
-        " VALUES (?,?,?,?,?)",
-        (datetime.utcnow().isoformat(), caller_name, contact, topic, preferred_time),
-    )
-    conn.commit()
-    conn.close()
-    return json.dumps({"status": "booked", "for": caller_name, "topic": topic,
-                       "preferred_time": preferred_time or "first available"})
-
-
-def market_context(ticker: str) -> str:
-    snap = market.latest_snapshot(ticker)
-    if not snap:
-        return json.dumps({"error": f"No data for {ticker}. We quote SPY, QQQ, IWM."})
-    return json.dumps({
-        "ticker": snap["ticker"], "spot": snap["spot"], "atm_iv": snap["atm_iv"],
-        "nearest_expiry": snap["expiry"], "regime": snap["regime"], "vix": snap["vix"],
-    })
+def trade_recommendation(ticker: str) -> str:
+    return json.dumps(signals.recommend_trade(ticker))
 
 
 def quote_option(ticker: str, strike: float, kind: str, dte_days: float) -> str:
@@ -64,8 +111,7 @@ def quote_option(ticker: str, strike: float, kind: str, dte_days: float) -> str:
         return json.dumps({"error": f"No data for {ticker}"})
     greeks = market.black_scholes(snap["spot"], strike, dte_days, snap["atm_iv"], kind)
     greeks.update({"ticker": ticker.upper(), "strike": strike, "kind": kind,
-                   "dte_days": dte_days, "spot_ref": snap["spot"], "iv_used": snap["atm_iv"],
-                   "disclaimer": "indicative, ATM vol, no skew"})
+                   "spot_ref": snap["spot"], "iv_used": snap["atm_iv"]})
     return json.dumps(greeks)
 
 
@@ -73,9 +119,9 @@ def expected_move(ticker: str, dte_days: float) -> str:
     snap = market.latest_snapshot(ticker)
     if not snap:
         return json.dumps({"error": f"No data for {ticker}"})
-    move = market.expected_move(snap["spot"], snap["atm_iv"], dte_days)
     return json.dumps({"ticker": ticker.upper(), "spot": snap["spot"],
-                       "one_sigma_move_usd": move, "horizon_days": dte_days})
+                       "one_sigma_move_usd": market.expected_move(snap["spot"], snap["atm_iv"], dte_days),
+                       "horizon_days": dte_days})
 
 
 # --------------------------------------------------------------- personas ----
@@ -85,64 +131,106 @@ def _fn(name, description, props, required):
             "parameters": {"type": "object", "properties": props, "required": required}}
 
 
+VOICE_STYLE = ("You sound completely human: contractions, short sentences, natural "
+               "hesitations, react to interruptions gracefully. NEVER read JSON, "
+               "field names, or numbers with more precision than a person would.")
+
 PERSONAS = {
-    "receptionist": {
-        "label": "AI Receptionist",
+    "riley": {
+        "label": "Riley — AI Receptionist",
+        "tagline": "Front desk for Northline Dental. Books real appointments.",
         "voice": "marin",
         "instructions": (
-            "You are Riley, the front-desk receptionist at Yago Capital, an options "
-            "analytics desk. You are warm, quick, and human: short sentences, natural "
-            "fillers, never robotic, never read JSON aloud. Greet callers, answer what "
-            "the desk does (dealer GEX/DEX positioning analytics on SPY, QQQ, IWM), "
-            "give the current desk read on a ticker when asked (use desk_status and "
-            "translate it to plain words like 'we're in a calm, long-gamma tape'), and "
-            "book callbacks with the analyst team — always collect name, contact, and "
-            "topic before calling book_callback, and confirm it back. If asked for "
-            "financial advice, politely decline and offer a callback instead. Keep "
-            "every reply under three sentences unless asked for more."
+            "You are Riley, receptionist at Northline Dental, a neighborhood clinic. "
+            + VOICE_STYLE +
+            " Handle: opening hours (Mon-Fri 9-17), what services cost roughly, and "
+            "APPOINTMENT BOOKING — your main job. Booking flow: ask for the service, "
+            "offer 2-3 real slots from clinic_openings for their preferred day, then "
+            "collect name and phone/email BEFORE calling book_appointment, then confirm "
+            "everything back in one sentence. If someone describes pain or an emergency, "
+            "be empathetic and offer the earliest slot. Never give medical advice — "
+            "book a consultation instead. Keep replies under three sentences."
         ),
         "tools": [
-            _fn("desk_status", "Current desk read on a ticker: regime, signal, gamma flip.",
-                {"ticker": {"type": "string", "description": "SPY, QQQ or IWM"}}, ["ticker"]),
-            _fn("book_callback", "Book a callback with the analyst team.",
-                {"caller_name": {"type": "string"}, "contact": {"type": "string",
-                 "description": "phone or email"}, "topic": {"type": "string"},
-                 "preferred_time": {"type": "string"}}, ["caller_name", "contact", "topic"]),
+            _fn("clinic_openings", "Open appointment slots for a weekday, plus the service list.",
+                {"day": {"type": "string", "description": "weekday, e.g. Tuesday"}}, ["day"]),
+            _fn("book_appointment", "Book an appointment (writes to the clinic calendar).",
+                {"patient_name": {"type": "string"}, "contact": {"type": "string"},
+                 "service": {"type": "string", "enum": list(SERVICES)},
+                 "slot": {"type": "string", "description": "e.g. Tuesday 10:15"}},
+                ["patient_name", "contact", "service", "slot"]),
         ],
-        "implementations": {"desk_status": desk_status, "book_callback": book_callback},
+        "implementations": {"clinic_openings": clinic_openings, "book_appointment": book_appointment},
     },
-    "quoting": {
-        "label": "AI Quoting Agent",
+    "quinn": {
+        "label": "Quinn — AI Quoting Agent",
+        "tagline": "Instant renovation quotes for BrightBuild Co.",
+        "voice": "sage",
+        "instructions": (
+            "You are Quinn, quoting specialist at BrightBuild Renovations. "
+            + VOICE_STYLE +
+            " Your job: turn a fuzzy project description into a concrete estimate. "
+            "Flow: figure out project type (kitchen, bathroom, painting, flooring, deck), "
+            "get the approximate size in square feet (help them estimate — 'a normal "
+            "kitchen runs about 150'), and the finish level (budget / standard / premium). "
+            "Call estimate_project, present the range conversationally ('you're looking "
+            "at somewhere between eighteen and twenty-six thousand'), mention duration. "
+            "If they want it in writing, collect name + contact and call save_quote. "
+            "Estimates are ballpark until a site visit — always say so once."
+        ),
+        "tools": [
+            _fn("estimate_project", "Price range and duration for a renovation project.",
+                {"project_type": {"type": "string", "enum": list(RATES)},
+                 "area_sqft": {"type": "number"},
+                 "finish_level": {"type": "string", "enum": ["budget", "standard", "premium"]}},
+                ["project_type", "area_sqft"]),
+            _fn("save_quote", "Save the quote and schedule a follow-up.",
+                {"customer": {"type": "string"}, "contact": {"type": "string"},
+                 "project": {"type": "string"}, "low_usd": {"type": "number"},
+                 "high_usd": {"type": "number"}},
+                ["customer", "contact", "project", "low_usd", "high_usd"]),
+        ],
+        "implementations": {"estimate_project": estimate_project, "save_quote": save_quote},
+    },
+    "marcus": {
+        "label": "Marcus — AI Options Desk",
+        "tagline": "The exact GEX trade: structure, strikes, invalidation. By voice.",
         "voice": "cedar",
         "instructions": (
-            "You are Marcus, a senior options quote clerk at Yago Capital. Fast, precise, "
-            "trader's cadence — you say 'the 620 calls, five days out, are going about "
-            "four eighty, forty-two delta', never read raw JSON. Workflow: get the caller's "
-            "ticker, strike, call/put and horizon; call market_context first if you need "
-            "spot or IV; then quote_option; round prices to five cents in speech. Offer the "
-            "one-sigma expected move for context when relevant. Always state quotes are "
-            "indicative and demo data, not an offer to trade. If asked whether to do the "
-            "trade, give the mechanics (breakeven, what has to happen) but not advice. "
-            "Confirm numbers by repeating them back before quoting."
+            "You are Marcus, senior strategist on an options desk that trades dealer "
+            "positioning (GEX). " + VOICE_STYLE + " Trader's cadence: 'we're short-gamma "
+            "tape, spot's under the flip — I want the six-oh-five puts against the wall'. "
+            "When someone asks what to trade: call trade_recommendation and walk them "
+            "through it in this order — the regime in one plain sentence, the exact "
+            "structure with strikes and expiry, why (the rationale), where it's wrong "
+            "(the invalidation), and sizing. The recommendation comes from a rules "
+            "engine — never invent strikes or override it; if you disagree, say what "
+            "you'd watch instead. Use desk_status for a quick read, quote_option to "
+            "price individual legs, expected_move for context. ALWAYS end a "
+            "recommendation by saying it's a demo on synthetic data, not financial "
+            "advice. That sentence is mandatory."
         ),
         "tools": [
-            _fn("market_context", "Spot, ATM IV, nearest expiry and regime for a ticker.",
+            _fn("desk_status", "Current regime, signal and gamma flip for a ticker.",
+                {"ticker": {"type": "string", "description": "SPY, QQQ or IWM"}}, ["ticker"]),
+            _fn("trade_recommendation", "The exact rule-based trade for the current regime: "
+                "structure, legs with strikes/expiry/prices, rationale, invalidation, sizing.",
                 {"ticker": {"type": "string"}}, ["ticker"]),
-            _fn("quote_option", "Indicative Black-Scholes price and greeks for one option leg.",
+            _fn("quote_option", "Indicative Black-Scholes price and greeks for one leg.",
                 {"ticker": {"type": "string"}, "strike": {"type": "number"},
                  "kind": {"type": "string", "enum": ["call", "put"]},
-                 "dte_days": {"type": "number", "description": "days to expiry"}},
-                ["ticker", "strike", "kind", "dte_days"]),
+                 "dte_days": {"type": "number"}}, ["ticker", "strike", "kind", "dte_days"]),
             _fn("expected_move", "One-sigma expected move in dollars over a horizon.",
                 {"ticker": {"type": "string"}, "dte_days": {"type": "number"}},
                 ["ticker", "dte_days"]),
         ],
-        "implementations": {"market_context": market_context, "quote_option": quote_option,
-                            "expected_move": expected_move},
+        "implementations": {"desk_status": desk_status, "trade_recommendation": trade_recommendation,
+                            "quote_option": quote_option, "expected_move": expected_move},
     },
 }
 
 
+@traceable(name="voice_tool", run_type="tool")
 def run_tool(persona: str, name: str, arguments: dict) -> str:
     """Dispatch a Realtime function call to its server-side implementation."""
     impl = PERSONAS.get(persona, {}).get("implementations", {}).get(name)

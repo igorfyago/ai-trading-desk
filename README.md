@@ -13,9 +13,9 @@ Each level introduces exactly one new set of concepts on top of the previous one
 | 3 | [GEX Repo Interpreter](agents/03_repo_interpreter/) | LangChain | embeddings, agentic RAG, citations | answers "how does the code work?" over the real repo |
 | 4 | [Research Graph](agents/04_research_graph/) | LangGraph | StateGraph, conditional edges, reducers, reflection loop | plan → multi-tool research → critic → revise |
 | 5 | [Desk Analyst](agents/05_desk_analyst/) | LangGraph | routing, parallel sub-agents + join, critique loop, **human-in-the-loop interrupt**, checkpointing | regime-routed signal memo, human must approve |
-| 6 | [Voice Agents](agents/06_voice/) | OpenAI Realtime | speech-to-speech, WebRTC, ephemeral credentials, server-side tools | AI receptionist + AI quoting agent you can *talk to* |
+| 6 | [Voice Agents](agents/06_voice/) | OpenAI Realtime | speech-to-speech, WebRTC, ephemeral credentials, server-side tools | 3 voice agents: generalist receptionist, generalist quoting agent, and an **AI Options Desk** that tells you the exact GEX trade |
 
-**+ [a live demo site](web/)** where anyone can voice-chat with the receptionist or get option quotes read to them by the quoting agent.
+**+ [the web app](web/)** — one big conversation UI over all of it: switch agents mid-chat, watch tools fire as chips, approve the desk analyst's memo with buttons, and **press the mic to talk to any agent** (a Realtime "voice bridge" wraps the text agents, so you can literally have a phone call with a LangGraph).
 
 ## The system at a glance
 
@@ -63,7 +63,25 @@ uvicorn web.server:app --reload                     # http://localhost:8000 → 
 
 Agent 3 additionally needs a checkout of [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) (`GEX_REPO_PATH` in `.env`), then `--index` once.
 
-Set `LANGSMITH_API_KEY` + `LANGSMITH_TRACING=true` and every agent run is traced in [LangSmith](https://smith.langchain.com) for free — worth it from level 4 up, where the graphs get interesting.
+## The web app
+
+`uvicorn web.server:app` serves a single-page app that puts all six agents in **one conversation**:
+
+- **Agent switcher** — the full ladder in the sidebar; switch mid-conversation, the transcript keeps flowing.
+- **Live execution view** — LangGraph node progress and tool calls render as chips while the agent works; answers stream in.
+- **Human-in-the-loop in the UI** — when the Desk Analyst wants to publish, the chat shows the memo with *Approve / Request changes / Reject* buttons wired to `interrupt()`/`Command(resume=…)`.
+- **Voice on every agent** — the three voice-native personas talk directly; for the text agents a **voice bridge** mints a Realtime session whose only tool is `ask_agent`, so the model converses naturally and delegates the thinking to the LangChain/LangGraph agent server-side. Approving the analyst's memo *by voice* works too.
+
+## Observability (LangSmith)
+
+Every chat run, every graph node, every sub-agent and **every voice tool call** is traced. Setup is three env vars in `.env` (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `LANGSMITH_PROJECT=ai-trading-desk`) — LangChain/LangGraph pick them up automatically, and the voice path is instrumented with `@traceable`. Web runs are tagged (`web-ui`, agent id, session) so you can filter one user's conversation, inspect the Desk Analyst's parallel branches, token costs, and latencies, or replay a failing SQL loop step by step.
+
+## Roadmap
+
+- **Simple mode** — the same desk, explained so a 10-year-old gets it (agent output rewritten to plain language + voice)
+- **Execution** — IBKR paper-trading integration so approved memos become staged orders (behind the same human-approval interrupt)
+- **Signal fusion** — blend GEX with volume profile, VWAP σ-bands, RSI and pattern detection (the chart-reading traders do by eye, systematized)
+- **Hosting** — AWS (single EC2 like options-flow-analytics, or ECS Fargate + ALB for TLS/WebRTC)
 
 ## Why finance, why GEX?
 

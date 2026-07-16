@@ -67,6 +67,25 @@ CREATE TABLE IF NOT EXISTS callbacks (
     preferred_time TEXT
 );
 
+CREATE TABLE IF NOT EXISTS appointments (
+    id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    patient_name TEXT NOT NULL,
+    contact TEXT NOT NULL,
+    service TEXT NOT NULL,
+    slot TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS quotes (
+    id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    customer TEXT NOT NULL,
+    contact TEXT NOT NULL,
+    project TEXT NOT NULL,
+    low_usd REAL NOT NULL,
+    high_usd REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_ticker_time ON snapshots (ticker, captured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_levels_snapshot ON strike_levels (snapshot_id);
 """

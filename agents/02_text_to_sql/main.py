@@ -98,8 +98,9 @@ Notes: net_gex_total > 0 means dealers are long gamma (vol-dampening regime);
 negative means short gamma (vol-amplifying). Timestamps are ISO-8601 UTC strings."""
 
 
-def build_agent():
-    return create_agent(model=get_model(), tools=[get_schema, run_sql], system_prompt=SYSTEM)
+def build_agent(checkpointer=None):
+    return create_agent(model=get_model(), tools=[get_schema, run_sql],
+                        system_prompt=SYSTEM, checkpointer=checkpointer)
 
 
 if __name__ == "__main__":

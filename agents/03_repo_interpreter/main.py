@@ -113,8 +113,9 @@ Rules:
 - If the code genuinely doesn't answer the question, say so — never invent code."""
 
 
-def build_agent():
-    return create_agent(model=get_model(), tools=[search_codebase], system_prompt=SYSTEM)
+def build_agent(checkpointer=None):
+    return create_agent(model=get_model(), tools=[search_codebase],
+                        system_prompt=SYSTEM, checkpointer=checkpointer)
 
 
 if __name__ == "__main__":

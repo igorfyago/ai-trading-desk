@@ -273,7 +273,8 @@ def build_graph(checkpointer=None):
 if __name__ == "__main__":
     ticker = (sys.argv[1] if len(sys.argv) > 1 else "SPY").upper()
     graph = build_graph()
-    config = {"configurable": {"thread_id": f"desk-{ticker}"}, "recursion_limit": 80}
+    config = {"configurable": {"thread_id": f"desk-{ticker}"}, "recursion_limit": 80,
+              "run_name": "cli:desk-analyst", "tags": ["cli", "analyst"]}
 
     result = graph.invoke({"ticker": ticker, "analyses": [], "rounds": 0}, config)
 

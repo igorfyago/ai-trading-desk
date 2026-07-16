@@ -213,11 +213,11 @@ if __name__ == "__main__":
     final = None
     for event in graph.stream(
         {"question": question, "messages": [], "revisions": 0},
-        config={"recursion_limit": 60},
+        config={"recursion_limit": 60, "run_name": "cli:research-graph", "tags": ["cli", "research"]},
         stream_mode="updates",
     ):
         for node, update in event.items():
-            console.print(f"[dim]• node: {node}[/dim]")
+            console.print(f"[dim]* node: {node}[/dim]")
             final = update
     console.print("\n[bold]Research report:[/bold]\n")
     console.print(final.get("report", "(no report produced)"))

@@ -127,6 +127,6 @@ if __name__ == "__main__":
     agent = build_agent()
     result = agent.invoke(
         {"messages": [{"role": "user", "content": question}]},
-        config={"recursion_limit": 15},
+        config={"recursion_limit": 15, "run_name": "cli:repo-interpreter", "tags": ["cli", "repo"]},
     )
     console.print(result["messages"][-1].content)

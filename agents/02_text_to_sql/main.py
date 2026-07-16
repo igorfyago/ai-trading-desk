@@ -111,12 +111,12 @@ if __name__ == "__main__":
     agent = build_agent()
     result = agent.invoke(
         {"messages": [{"role": "user", "content": question}]},
-        config={"recursion_limit": 25},
+        config={"recursion_limit": 25, "run_name": "cli:text-to-sql", "tags": ["cli", "sql"]},
     )
     for msg in result["messages"]:
         if getattr(msg, "tool_calls", None):
             for tc in msg.tool_calls:
                 arg = tc["args"].get("sql", "")
-                console.print(f"[dim]→ {tc['name']}[/dim] [cyan]{arg[:120]}[/cyan]")
+                console.print(f"[dim]-> {tc['name']}[/dim] [cyan]{arg[:120]}[/cyan]")
     console.print("\n[bold]Answer:[/bold]")
     console.print(result["messages"][-1].content)

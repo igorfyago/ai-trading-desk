@@ -41,9 +41,9 @@ def list_handles() -> list[str]:
     """The desk's curated X list (X_LIST_HANDLES=comma,separated,handles).
     When set, the pulse reads ONLY those accounts — the signal list, not the
     whole firehose. (The X API can't enumerate a list URL without auth, so
-    the membership is mirrored into env by hand.)"""
+    the membership is mirrored into env.)"""
     raw = os.getenv("X_LIST_HANDLES", "")
-    return [h.strip().lstrip("@") for h in raw.split(",") if h.strip()][:50]
+    return [h.strip().lstrip("@") for h in raw.split(",") if h.strip()][:100]
 
 
 def pulse(ticker: str) -> dict | None:
@@ -62,6 +62,12 @@ def pulse(ticker: str) -> dict | None:
     tool: dict = {"type": "x_search", "from_date": since}
     scope = "traders on X"
     if handles:
+        # xAI caps allowed_x_handles at 20 per request; the desk list is
+        # bigger, so rotate a 20-account window each cache cycle — the whole
+        # list gets read over successive refreshes at single-call cost.
+        if len(handles) > 20:
+            start = (int(time.time()) // _TTL_SECONDS) % len(handles)
+            handles = (handles + handles)[start:start + 20]
         tool["allowed_x_handles"] = handles
         scope = "the desk's watched accounts"
     try:
@@ -82,7 +88,7 @@ def pulse(ticker: str) -> dict | None:
                 }],
                 "tools": [tool],
             },
-            timeout=45,
+            timeout=90,   # x_search over a 20-handle window can run long
         )
         resp.raise_for_status()
         data = resp.json()

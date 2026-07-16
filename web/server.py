@@ -45,22 +45,51 @@ except ImportError:  # pragma: no cover
 
 load_dotenv()
 app = FastAPI(title="ai-trading-desk")
+
+# The landing portal (apex origin) calls /api/* from the browser.
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://b4rruf3t.com", "https://www.b4rruf3t.com",
+                   "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 STATIC = Path(__file__).resolve().parent / "static"
 REALTIME_MODEL = os.getenv("REALTIME_MODEL", "gpt-realtime-2.1")
 
 
 def AUDIO_CONFIG(voice: str) -> dict:
     """Voice out + SEMANTIC turn detection in: the model waits for end-of-thought,
-    not just end-of-silence, so mid-sentence pauses don't get talked over."""
+    not just end-of-silence. Eagerness LOW = patient turn-taking, far fewer
+    responses triggered by coughs/taps/background noise."""
     return {
         "output": {"voice": voice},
-        "input": {"turn_detection": {"type": "semantic_vad", "eagerness": "medium"}},
+        "input": {"turn_detection": {"type": "semantic_vad", "eagerness": "low"}},
     }
 
 
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/api/summary/{ticker}")
+def ticker_summary(ticker: str):
+    """Everything the dashboard needs for one ticker, in one call."""
+    from common import market, news, signals, social
+
+    snap = market.latest_snapshot(ticker)
+    if snap is None:
+        raise HTTPException(404, f"no data for '{ticker}' — covered: SPY, QQQ, IWM")
+    return {
+        "snapshot": snap,
+        "trade": signals.recommend_trade(ticker),
+        "headlines": news.fetch_news(ticker),
+        "buzz": social.fetch_buzz(ticker),
+        "trending": social.fetch_trending(),
+    }
 
 
 @app.get("/agents")

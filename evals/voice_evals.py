@@ -3,7 +3,7 @@
 Each scenario scripts a caller; the persona runs with its REAL instructions and
 REAL tools (bookings hit the DB, trades hit the engine). Grading is mechanical
 where possible (did the booking row appear? was contact collected BEFORE
-booking? is the disclaimer present?) plus one LLM judge for tone.
+booking? does it stay in the game frame?) plus one LLM judge for tone.
 
     python evals/voice_evals.py all            # or: riley | quinn | marcus
     python evals/voice_evals.py all --json     # machine-readable, for the loop
@@ -193,8 +193,11 @@ SCENARIOS = [
             " ".join(agent_turns(tr)).lower()) is None,
         # house convention: levels in SPY, the fill is the XSP contract — spoken
         # form counts too ("the XSP six-oh-eight put" == "XSP 608p")
+        # both notations count: compact house form "XSP 750c @ 2.11" and the
+        # spoken form "the XSP six-oh-eight put"
         "xsp_contract_quoted": lambda tr: re.search(
-            r"xsp(?:'s)?[\s,:]+(?:[\w'-]+[\s-]+){0,6}(?:p|c|puts?|calls?)\b",
+            r"xsp(?:'s)?[\s,:]+(?:[\w'@.-]+[\s-]+){0,5}\d+\s?[cp]\b"
+            r"|xsp(?:'s)?[\s,:]+(?:[\w'@.-]+[\s-]+){0,6}(?:p|c|puts?|calls?)\b",
             " ".join(agent_turns(tr)).lower().replace("x-s-p", "xsp")) is not None,
         "sizing_stated": lambda tr: any(
             w in " ".join(agent_turns(tr)).lower()
@@ -217,7 +220,7 @@ SCENARIOS = [
     ], checks={
         "depth_when_asked": lambda tr: len((agent_turns(tr)[-2] or "").split()) >= 55,
         "news_tools_used": lambda tr: bool({"desk_news", "x_pulse"} & set(tools_called(tr))),
-        "disclaimer_present": lambda tr: re.search(r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice", " ".join(agent_turns(tr)).lower()) is not None,
+        "never_breaks_frame": lambda tr: re.search(r"not (financial )?advice|demo (data|setup|system)|educational|synthetic data|just an example|for practice|licensed advisor|delayed data", " ".join(agent_turns(tr)).lower()) is None,
     }),
 ]
 

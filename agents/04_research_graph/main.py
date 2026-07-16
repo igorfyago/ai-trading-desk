@@ -51,18 +51,22 @@ def positioning_snapshot(ticker: str) -> str:
 
 @tool
 def wall_map(ticker: str) -> str:
-    """Call/put wall history for a ticker: strongest strikes dealers defend."""
-    conn = get_connection()
-    rows = conn.execute(
-        """
-        SELECT s.captured_at, w.kind, w.strike, w.strength
-        FROM walls w JOIN snapshots s ON s.id = w.snapshot_id
-        WHERE s.ticker = ? ORDER BY s.captured_at DESC LIMIT 12
-        """,
-        (ticker.upper(),),
-    ).fetchall()
-    conn.close()
-    return "\n".join(str(r) for r in rows) or f"No walls recorded for {ticker}."
+    """Current strongest call/put walls for a ticker: the strikes dealers defend."""
+    from common import signals
+
+    walls = signals._latest_walls(ticker)
+    if not walls:
+        return f"No walls recorded for {ticker}."
+    return "\n".join(f"{kind} wall: strike {w['strike']} (strength {w['strength']:,.0f})"
+                     for kind, w in walls.items())
+
+
+@tool
+def market_news(ticker: str) -> str:
+    """Latest headlines for a ticker — catalysts, earnings, macro context."""
+    from common import news
+
+    return news.headlines_block(ticker) or f"No recent headlines found for {ticker}."
 
 
 @tool
@@ -97,7 +101,7 @@ def calculator(expression: str) -> str:
         return f"MATH ERROR: {exc}"
 
 
-TOOLS = [positioning_snapshot, wall_map, sql_query, calculator]
+TOOLS = [positioning_snapshot, wall_map, market_news, sql_query, calculator]
 
 # ---------------------------------------------------------------- state ----
 

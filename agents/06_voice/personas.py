@@ -124,6 +124,17 @@ def expected_move(ticker: str, dte_days: float) -> str:
                        "horizon_days": dte_days})
 
 
+def desk_news(ticker: str) -> str:
+    from common import news
+
+    items = news.fetch_news(ticker)
+    if not items:
+        return json.dumps({"ticker": ticker.upper(), "headlines": [],
+                           "note": "no recent headlines on the feed"})
+    return json.dumps({"ticker": ticker.upper(),
+                       "headlines": [i["title"] for i in items]})
+
+
 # --------------------------------------------------------------- personas ----
 
 def _fn(name, description, props, required):
@@ -154,7 +165,11 @@ VOICE_STYLE = (
     "- Numbers as a person says them: 'about four eighty', 'six-oh-five'. Never "
     "read JSON, field names, or long decimals aloud.\n"
     "- Contractions always. Never announce you're an AI unless directly asked — "
-    "then be honest and relaxed about it."
+    "then be honest and relaxed about it.\n"
+    "- NEVER speak unprompted after your greeting. If you hear background noise, "
+    "typing, or anything that isn't clearly speech directed at you, stay silent. "
+    "If the caller goes quiet, wait — do not fill the silence or restart the "
+    "conversation on your own."
 )
 
 PERSONAS = {
@@ -349,9 +364,12 @@ PERSONAS = {
             _fn("expected_move", "One-sigma expected move in dollars over a horizon.",
                 {"ticker": {"type": "string"}, "dte_days": {"type": "number"}},
                 ["ticker", "dte_days"]),
+            _fn("desk_news", "Latest headlines for a ticker — catalysts and context.",
+                {"ticker": {"type": "string"}}, ["ticker"]),
         ],
         "implementations": {"desk_status": desk_status, "trade_recommendation": trade_recommendation,
-                            "quote_option": quote_option, "expected_move": expected_move},
+                            "quote_option": quote_option, "expected_move": expected_move,
+                            "desk_news": desk_news},
     },
 }
 

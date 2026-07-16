@@ -8,7 +8,15 @@ const sessionId = crypto.randomUUID
 let catalog = null;
 let current = null;            // {kind: 'text'|'persona', id, name, desc, hint}
 let busy = false;
-let voice = { live: false, pc: null, dc: null, mic: null, agentLine: null };
+let voice = { live: false, pc: null, dc: null, mic: null, agentLine: null, lastActivity: 0 };
+const VOICE_IDLE_MS = 3 * 60 * 1000;   // auto-hangup: an open mic left alone is
+                                       // background-noise triggers + token burn
+setInterval(() => {
+  if (voice.live && Date.now() - voice.lastActivity > VOICE_IDLE_MS) {
+    hangUp();
+    divider("call ended — idle for 3 minutes");
+  }
+}, 15000);
 
 const md = (text) => DOMPurify.sanitize(marked.parse(text ?? ""));
 
@@ -277,6 +285,7 @@ async function toggleVoice() {
     await voice.pc.setRemoteDescription({ type: "answer", sdp });
 
     voice.live = true;
+    voice.lastActivity = Date.now();
     ambStart();
     $("mic").classList.add("live");
     $("voice-state").textContent = `voice live — ${sess.label}`;
@@ -304,6 +313,10 @@ function hangUp(silent) {
 }
 
 async function handleVoiceEvent(ev) {
+  if (ev.type === "conversation.item.input_audio_transcription.completed" ||
+      ev.type === "response.output_audio_transcript.delta") {
+    voice.lastActivity = Date.now();   // real conversation keeps the line open
+  }
   switch (ev.type) {
     case "response.output_audio_transcript.delta": {
       if (!voice.agentLine) {

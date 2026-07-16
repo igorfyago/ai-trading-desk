@@ -88,6 +88,7 @@ class DeskState(TypedDict):
     ticker: str
     snapshot: dict
     profile: list
+    headlines: str
     playbook: str
     analyses: Annotated[list[str], operator.add]   # parallel branches append here
     memo: dict
@@ -118,8 +119,12 @@ def fetch(state: DeskState) -> Command[Literal["long_gamma_playbook", "short_gam
         console.print(f"[red]No data for {state['ticker']}[/red]")
         return Command(update={}, goto=END)
     profile = market.gex_profile(state["ticker"])
+    from common import news
+
+    headlines = news.headlines_block(state["ticker"])  # failure-safe: "" when feed is down
     goto = "long_gamma_playbook" if snap["regime"] == "positive_gamma" else "short_gamma_playbook"
-    return Command(update={"snapshot": snap, "profile": profile}, goto=goto)
+    return Command(update={"snapshot": snap, "profile": profile, "headlines": headlines},
+                   goto=goto)
 
 
 def long_gamma_playbook(state: DeskState) -> dict:
@@ -154,7 +159,8 @@ def _specialist(name: str, focus: str, tools: list) -> callable:
         result = sub_agent.invoke(
             {"messages": [{"role": "user", "content": (
                 f"Ticker: {state['ticker']}\nSnapshot: {state['snapshot']}\n"
-                f"Per-strike GEX/DEX profile: {state['profile']}\n{state['playbook']}"
+                f"Per-strike GEX/DEX profile: {state['profile']}\n"
+                f"{state.get('headlines', '')}\n{state['playbook']}"
             )}]},
             config={"recursion_limit": 15},
         )

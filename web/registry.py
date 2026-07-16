@@ -40,6 +40,26 @@ AGENT_META = [
 
 TICKER_RE = re.compile(r"\b(SPY|QQQ|IWM)\b", re.I)
 
+
+def _live_context(text: str) -> str:
+    """One source of truth for every financial agent: latest snapshots for the
+    tickers mentioned (all covered tickers if none named) plus fresh headlines."""
+    from common import market, news
+
+    tickers = list({m.upper() for m in TICKER_RE.findall(text)}) or ["SPY", "QQQ", "IWM"]
+    parts = []
+    for t in tickers[:3]:
+        snap = market.latest_snapshot(t)
+        if snap:
+            parts.append(
+                f"{t}: spot {snap['spot']}, regime {snap['regime']}, gamma flip "
+                f"{snap['gamma_flip']}, signal {snap['signal_score']}, ATM IV "
+                f"{snap['atm_iv']}, as of {snap['captured_at']}")
+    block = news.headlines_block(tickers[0])
+    if block:
+        parts.append(block)
+    return "\n".join(parts)
+
 _lock = threading.Lock()
 _rt: dict = {}
 _threads: dict = {}   # (session, agent) -> thread_id for checkpointed agents
@@ -113,11 +133,9 @@ def stream_chat(agent_id: str, text: str, session: str):
 
     try:
         if agent_id == "brief":
-            result = rt["brief"].run(text)
-            md = (f"**{result.intent.upper()}** · {', '.join(result.tickers) or '—'} · "
-                  f"{result.horizon} · confidence {result.confidence:.0%}\n\n"
-                  f"*{result.restated_question}*\n\n{result.answer}\n\n"
-                  f"`metrics: {', '.join(result.metrics)}`")
+            result = rt["brief"].run(text, context=_live_context(text))
+            meta = " · ".join(x for x in (", ".join(result.tickers), result.horizon) if x and x != "N/A")
+            md = result.answer + (f"\n\n<small>*{meta}*</small>" if meta else "")
             yield {"type": "final", "text": md}
 
         elif agent_id in ("sql", "repo"):

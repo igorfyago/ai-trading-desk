@@ -40,11 +40,15 @@ gamma regimes, walls, charm/vanna flows). Be precise and quantitative where poss
 If the question needs live data you don't have, say what data you would check."""
 
 
-def run(question: str) -> MarketQuery:
+def run(question: str, context: str = "") -> MarketQuery:
+    """context: optional live desk data (snapshots, headlines) injected by the
+    web layer so this zero-tool agent still answers from the same sources as
+    the rest of the desk."""
     model = get_model()
     structured = model.with_structured_output(MarketQuery)
+    system = SYSTEM + (f"\n\nLive desk data you may use:\n{context}" if context else "")
     return structured.invoke(
-        [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
+        [{"role": "system", "content": system}, {"role": "user", "content": question}]
     )
 
 

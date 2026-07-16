@@ -49,6 +49,15 @@ STATIC = Path(__file__).resolve().parent / "static"
 REALTIME_MODEL = os.getenv("REALTIME_MODEL", "gpt-realtime-2.1")
 
 
+def AUDIO_CONFIG(voice: str) -> dict:
+    """Voice out + SEMANTIC turn detection in: the model waits for end-of-thought,
+    not just end-of-silence, so mid-sentence pauses don't get talked over."""
+    return {
+        "output": {"voice": voice},
+        "input": {"turn_detection": {"type": "semantic_vad", "eagerness": "medium"}},
+    }
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
@@ -155,7 +164,7 @@ async def create_bridge_session(agent_id: str):
             "way a person would say them, structure summarized not recited." + extra +
             " This is a demo on synthetic data; say so if the caller asks about real money."),
         "tools": tools, "tool_choice": "auto",
-        "audio": {"output": {"voice": "alloy"}},
+        "audio": AUDIO_CONFIG("alloy"),
     })
     return {"client_secret": data["value"], "label": f"{meta['name']} (voice bridge)",
             "model": REALTIME_MODEL}
@@ -170,7 +179,7 @@ async def create_session(persona: str):
         "type": "realtime", "model": REALTIME_MODEL,
         "instructions": p["instructions"],
         "tools": p["tools"], "tool_choice": "auto",
-        "audio": {"output": {"voice": p["voice"]}},
+        "audio": AUDIO_CONFIG(p["voice"]),
     })
     return {"client_secret": data["value"], "label": p["label"], "model": REALTIME_MODEL}
 

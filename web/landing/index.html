@@ -139,7 +139,14 @@
     <section class="pane" id="dash">
       <div class="watch" id="watchlist"></div>
       <div class="dgrid">
-        <div id="tv-wrap"><div id="tv-chart" style="height:100%"></div></div>
+        <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
+          <div class="watch" style="justify-content:space-between">
+            <div class="watch" id="intervals"></div>
+            <a id="tv-full" href="#" target="_blank" class="wchip add"
+               style="text-decoration:none">full chart on TradingView ↗</a>
+          </div>
+          <div id="tv-wrap" style="flex:1"><div id="tv-chart" style="height:100%"></div></div>
+        </div>
         <div class="dcol">
           <div class="dcard"><h4>Dealer positioning <span id="d-asof" style="text-transform:none"></span></h4>
             <div class="tiles" id="d-tiles"><div class="dnote">loading…</div></div>
@@ -254,14 +261,43 @@
     } catch { card.style.display = "none"; }
   }
 
+  /* House chart setup: interval row + VWAP, EMA21, SMA100, SMA200, DC96, volume.
+     (VRVP + custom community scripts aren't available in the free embed —
+     the ↗ link opens the full chart in YOUR TradingView, with your layout.) */
+  const INTERVALS = [["3m","3"],["5m","5"],["15m","15"],["45m","45"],["4h","240"],["D","D"],["W","W"]];
+  let interval = localStorage.getItem("tv_interval") || "240";
+
+  function renderIntervals() {
+    const el = document.getElementById("intervals");
+    el.innerHTML = "";
+    for (const [label, val] of INTERVALS) {
+      const b = document.createElement("button");
+      b.className = "wchip" + (val === interval ? " focus" : "");
+      b.style.padding = "4px 12px";
+      b.textContent = label;
+      b.onclick = () => { interval = val; localStorage.setItem("tv_interval", val); mountChart(focus); };
+      el.appendChild(b);
+    }
+  }
+
   function mountChart(symbol) {
+    renderIntervals();
+    document.getElementById("tv-full").href =
+      `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${interval}`;
     const mount = () => {
       document.getElementById("tv-chart").innerHTML = "";
       new TradingView.widget({
         container_id: "tv-chart", symbol, autosize: true, theme: "dark",
-        style: "1", interval: "15", timezone: "Etc/UTC", locale: "en",
-        hide_side_toolbar: true, allow_symbol_change: false,
+        style: "1", interval, timezone: "Etc/UTC", locale: "en",
+        hide_side_toolbar: true, hide_top_toolbar: false, allow_symbol_change: false,
         backgroundColor: "#10141f",
+        studies: [
+          { id: "VWAP@tv-basicstudies" },
+          { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },
+          { id: "MASimple@tv-basicstudies", inputs: { length: 100 } },
+          { id: "MASimple@tv-basicstudies", inputs: { length: 200 } },
+          { id: "DonchianChannels@tv-basicstudies", inputs: { length: 96 } },
+        ],
       });
     };
     if (tvLoaded) return mount();

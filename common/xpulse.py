@@ -9,6 +9,7 @@ never breaks anything, and repeated dashboard loads don't re-bill Grok.
 """
 
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -69,7 +70,9 @@ def pulse(ticker: str) -> dict | None:
         )
         resp.raise_for_status()
         data = resp.json()
-        result = {"summary": _extract_text(data), "citations": _extract_citations(data)}
+        summary, inline_cites = _clean_inline_citations(_extract_text(data))
+        citations = _extract_citations(data) or inline_cites
+        result = {"summary": summary, "citations": citations}
         if not result["summary"]:
             result = None
     except Exception:
@@ -87,6 +90,21 @@ def _extract_text(data: dict) -> str:
             if isinstance(chunk, dict) and chunk.get("type") in ("output_text", "text"):
                 parts.append(chunk.get("text", ""))
     return "\n".join(p for p in parts if p).strip()
+
+
+def _clean_inline_citations(text: str) -> tuple[str, list[str]]:
+    """Grok often embeds citations as markdown links; lift them out so the
+    summary reads clean and the links render as [1] [2] chips."""
+    urls: list[str] = []
+
+    def repl(m):
+        url = m.group(1)
+        if url not in urls:
+            urls.append(url)
+        return f" [{urls.index(url) + 1}]"
+
+    cleaned = re.sub(r"\[+[^\]]*\]+\((https?://[^)]+)\)", repl, text)
+    return cleaned.strip(), urls[:8]
 
 
 def _extract_citations(data: dict) -> list[str]:

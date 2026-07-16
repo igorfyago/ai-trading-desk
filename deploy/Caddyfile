@@ -8,3 +8,9 @@ desk.{$BASE_DOMAIN} {
 gex.{$BASE_DOMAIN} {
     reverse_proxy gex-api:3000
 }
+
+# Pre-DNS fallback: plain HTTP on the raw IP serves the desk (no mic without
+# TLS, but chat + dashboard work). Becomes irrelevant once DNS points here.
+:80 {
+    reverse_proxy desk:8000
+}

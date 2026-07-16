@@ -4,6 +4,8 @@
 
 **Six AI agents that staff an options trading desk — a deliberate ladder from a single LLM call to multi-path LangGraph workflows and real-time voice agents.**
 
+**🟢 Live: [desk.b4rruf3t.com](https://desk.b4rruf3t.com)** — chat with any agent or press the mic and *talk* to them (try Marcus: *"what's the trade on SPY?"*). Powered by real dealer-positioning data computed 24/7 by [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) on the same box — live dashboard at [gex.b4rruf3t.com](https://gex.b4rruf3t.com). Demo system, synthetic-adjacent delayed data, not financial advice.
+
 Built with **LangChain 1.0** and **LangGraph 1.0** (Python), the **OpenAI Realtime API** for speech-to-speech voice, and grounded in a real system: my [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) service (Rust + PostgreSQL + Node.js), which computes live dealer gamma/delta exposure (GEX/DEX) from option chains. Every agent works out of the box on a bundled, auto-seeded SQLite mirror of that production schema — clone, add one API key, run.
 
 Each level introduces exactly one new set of concepts on top of the previous one. The point of the repo is the *ladder*: read them in order and you've walked from "prompt" to "production agent system."

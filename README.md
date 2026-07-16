@@ -96,6 +96,10 @@ The suite is designed around what can go wrong in an agent system, not just line
 
 CI runs the keyless suite on every push (badge above). Tests never spend tokens unless you set `RUN_LIVE=1`.
 
+## Agent evals
+
+Tests check the code; [evals](evals/) check the agents' *judgment*. `python evals/run_evals.py all` runs graded datasets through the agents and publishes experiments to LangSmith: text-to-SQL is graded by **executing reference SQL** against the deterministic DB and demanding the true numbers in the answer (no judge needed), extraction is exact-matched, and RAG answers get a citation check plus an LLM-as-judge verdict against author-written references. Baseline: SQL 100% across 6 tasks; the eval suite also surfaced its first real finding — RAG answers are semantically correct (judge: 100%) but under-cite source files (62%), now a measurable iteration target. See [evals/README.md](evals/README.md).
+
 ## Roadmap
 
 - **Simple mode** — the same desk, explained so a 10-year-old gets it (agent output rewritten to plain language + voice)

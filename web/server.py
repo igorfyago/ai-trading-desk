@@ -115,8 +115,8 @@ async def openai_webhook(request: Request):
 
 @app.post("/webhook/tradingview")
 async def tradingview_webhook(request: Request, token: str = ""):
-    """Receives TradingView alert webhooks :
-    custom indicators fire -> the desk knows within seconds. Token-gated."""
+    """Receives TradingView alert webhooks: custom TA indicators fire ->
+    the desk knows within seconds. Token-gated."""
     expected = os.getenv("TV_WEBHOOK_TOKEN")
     if not expected or token != expected:
         raise HTTPException(403, "bad token")

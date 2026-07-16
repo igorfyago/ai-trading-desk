@@ -140,3 +140,54 @@ def test_watch_quotes_batches_and_maps(monkeypatch):
     assert [r["sym"] for r in rows] == ["TSLA", "BTCUSD"]
     assert rows[0]["chg_pct"] == 25.0                    # vs prev close 80
     assert rows[0]["ext_pct"] == round((100 / 90 - 1) * 100, 2)     # vs reg close
+
+
+def test_watch_quotes_rescues_frozen_prints(monkeypatch):
+    """IEX frozen at the close (hours stale) must lose to a fresher yahoo
+    print; a 15-min delayed-SIP print is fresh enough and must NOT trigger
+    a yahoo call."""
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("QUOTES_PROVIDER", "auto")
+    monkeypatch.setenv("ALPACA_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    now = datetime.now(timezone.utc)
+    calls = {"yahoo": 0}
+
+    def fake_yahoo(sym):
+        calls["yahoo"] += 1
+        return {"ticker": sym, "price": 749.0,
+                "ts": (now - timedelta(seconds=30)).isoformat(),
+                "source": "yahoo", "delayed": False, "session": "post"}
+
+    monkeypatch.setattr(quotes, "_spot_yahoo", fake_yahoo)
+    monkeypatch.setattr(quotes, "_closes", lambda s: (None, None))
+
+    # frozen: 3h-old print -> rescued by yahoo
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "SPY": {"ticker": "SPY", "price": 750.87,
+                "ts": (now - timedelta(hours=3)).isoformat(),
+                "source": "alpaca·iex", "delayed": False, "session": "rth"}})
+    quotes._watch_cache = None
+    quotes._rescue_at.clear()
+    rows = quotes.watch_quotes(["SPY"])
+    assert rows[0]["price"] == 749.0 and calls["yahoo"] == 1
+
+    # fresh enough: 15-min sip print -> no yahoo call
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "SPY": {"ticker": "SPY", "price": 750.2,
+                "ts": (now - timedelta(minutes=15)).isoformat(),
+                "source": "alpaca·sip15", "delayed": True, "session": "post"}})
+    quotes._watch_cache = None
+    rows = quotes.watch_quotes(["SPY"])
+    assert rows[0]["price"] == 750.2 and calls["yahoo"] == 1
+
+    # market closed for days (weekend): don't ask anyone
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "SPY": {"ticker": "SPY", "price": 748.0,
+                "ts": (now - timedelta(hours=40)).isoformat(),
+                "source": "alpaca·sip15", "delayed": True, "session": "post"}})
+    quotes._watch_cache = None
+    quotes._rescue_at.clear()
+    rows = quotes.watch_quotes(["SPY"])
+    assert rows[0]["price"] == 748.0 and calls["yahoo"] == 1

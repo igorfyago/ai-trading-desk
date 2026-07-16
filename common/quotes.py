@@ -379,6 +379,7 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
 _closes_cache: dict[str, tuple[float, float | None, float | None]] = {}
 _CLOSES_TTL = 2 * 3600.0     # prev-close changes once a session
 _watch_cache: tuple[float, tuple, list] | None = None   # (t, key, rows)
+_rescue_at: dict[str, float] = {}    # sym -> last stale-rescue (monotonic)
 
 
 def _closes(symbol: str) -> tuple[float | None, float | None]:
@@ -428,14 +429,29 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
         except Exception:
             pass
     if provider_order():
+        # yahoo fills the gaps AND rescues frozen prints (e.g. IEX stuck at
+        # the close): hunt when 30min < age < 12h. Beyond 12h the market is
+        # simply closed — nothing anywhere is fresher, so don't ask. Bounded:
+        # >=300s between rescues per symbol, <=25 rescues per call.
+        now_m = time.monotonic()
+        rescued = 0
         for s in syms:
-            if s not in quotes_out:
-                try:
-                    q = _spot_yahoo(s)
-                    if q:
-                        quotes_out[s] = q
-                except Exception:
-                    continue
+            q = quotes_out.get(s)
+            age = _age_s(q["ts"]) if q else 1e9
+            missing = q is None
+            frozen = 30 * 60 < age < 12 * 3600
+            if not missing and not frozen:
+                continue
+            if rescued >= 25 or (not missing and now_m - _rescue_at.get(s, -1e9) < 300):
+                continue
+            _rescue_at[s] = now_m
+            rescued += 1
+            try:
+                y = _spot_yahoo(s)
+            except Exception:
+                continue
+            if y and (missing or _age_s(y["ts"]) < age):
+                quotes_out[s] = y
 
     rows = []
     for s in syms:

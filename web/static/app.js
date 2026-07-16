@@ -334,7 +334,11 @@ async function handleVoiceEvent(ev) {
     }
     case "conversation.item.input_audio_transcription.completed": {
       const b = bubble("You (voice)", "user");
-      b.querySelector(".md").textContent = ev.transcript || "(audio)";
+      b.querySelector(".md").textContent = (ev.transcript || "").trim() || "(audio)";
+      // transcription lands async — keep it ABOVE the agent's in-flight reply
+      const agentBubble = voice.agentLine && voice.agentLine.closest(".bubble");
+      if (agentBubble) $("log").insertBefore(b, agentBubble);
+      scroll();
       break;
     }
     case "response.done": {

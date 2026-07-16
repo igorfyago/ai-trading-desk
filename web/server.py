@@ -66,7 +66,11 @@ def AUDIO_CONFIG(voice: str) -> dict:
     responses triggered by coughs/taps/background noise."""
     return {
         "output": {"voice": voice},
-        "input": {"turn_detection": {"type": "semantic_vad", "eagerness": "low"}},
+        "input": {
+            "turn_detection": {"type": "semantic_vad", "eagerness": "low"},
+            # transcribe the caller so their words render in the chat log
+            "transcription": {"model": "gpt-4o-mini-transcribe"},
+        },
     }
 
 

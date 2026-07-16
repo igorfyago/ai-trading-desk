@@ -8,7 +8,7 @@
 }
 * { box-sizing: border-box; margin: 0; }
 html, body, #app { height: 100%; }
-body { color: var(--text); font: 15px/1.55 "Inter", system-ui, sans-serif;
+body { color: var(--text); font: 15px/1.55 var(--font, "Inter", system-ui, sans-serif);
   background: var(--bg); }
 #app { display: flex; }
 h1, h2, h3, h4 { font-family: var(--display); letter-spacing: -.01em; }
@@ -33,7 +33,7 @@ h1, h2, h3, h4 { font-family: var(--display); letter-spacing: -.01em; }
 .agent-btn .lvl { background: rgba(255,255,255,.06); color: var(--dim); border-radius: 6px;
   min-width: 26px; text-align: center; font-size: 10.5px; padding: 3px 0; margin-top: 2px;
   font-family: var(--mono); }
-.agent-btn.active .lvl { background: var(--accent); color: #fff; }
+.agent-btn.active .lvl { background: var(--accent); color: var(--accent-contrast, #fff); }
 .agent-btn .nm { font-size: 13.5px; font-weight: 600; }
 .agent-btn .ds { font-size: 11.5px; color: var(--dim); }
 footer { margin-top: auto; padding-top: 14px; display: flex; flex-direction: column; gap: 4px;
@@ -99,7 +99,7 @@ footer a { color: var(--accent); text-decoration: none; }
   color: var(--text); padding: 11px 14px; font: inherit; }
 #input:focus { outline: none; border-color: var(--accent); }
 #send, #mic { border: 0; border-radius: 10px; padding: 0 18px; font: inherit; cursor: pointer; }
-#send { background: var(--accent); color: #fff; }
+#send { background: var(--accent); color: var(--accent-contrast, #fff); }
 #send:disabled { background: var(--line); color: var(--dim); }
 #mic { background: var(--panel2); border: 1px solid var(--line); font-size: 17px; }
 #mic.live { background: var(--green); border-color: var(--green); animation: micpulse 1.4s infinite; }

@@ -7,7 +7,8 @@
 <title>b4rruf3t — AI Trading Desk</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://desk.b4rruf3t.com/static/themes.js" defer></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg:#13151b;                              /* oklch(~14%) cool-tinted, not black */
@@ -21,7 +22,7 @@
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; }
   body { background:var(--bg); color:var(--text);
-         font:15px/1.65 "Inter",system-ui,-apple-system,sans-serif; display:flex;
+         font:15px/1.65 var(--font, "Inter", system-ui, sans-serif); display:flex;
          -webkit-font-smoothing:antialiased; }
   h1,h2,h3 { font-weight:600; letter-spacing:-0.02em; text-wrap:balance; }
   p { text-wrap:pretty; }
@@ -84,10 +85,10 @@
   .wchip.add { color:var(--dim); border-style:dashed; }
   .dgrid { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(320px,1fr); gap:16px;
            flex:1; min-height:0; }
-  #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+  #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px);
              overflow:hidden; min-height:480px; }
   .dcol { display:flex; flex-direction:column; gap:16px; overflow-y:auto; min-height:0; }
-  .dcard { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:20px; }
+  .dcard { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px); padding:20px; }
   .dcard h4 { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--dim);
               margin-bottom:14px; font-family:var(--mono); font-weight:500; }
   .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:10px; }
@@ -112,7 +113,7 @@
   #kit .khero b { color:var(--text); font-weight:500; }
   .kgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px;
            max-width:1060px; }
-  .kcalc { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:22px; }
+  .kcalc { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px); padding:22px; }
   .kcalc h3 { font-size:15px; font-weight:500; margin-bottom:4px; }
   .kcalc p.sub { color:var(--dim); font-size:12.5px; margin-bottom:16px; }
   .kcalc label { display:flex; justify-content:space-between; gap:10px; font-size:12.5px;
@@ -168,6 +169,7 @@
     <a class="tab" href="https://github.com/igorfyago/options-flow-analytics" target="_blank"><span class="ic">🦀</span>
       <span>The Engine<small>github · rust GEX pipeline</small></span></a>
 
+    <div id="theme-dots"></div>
     <footer>
       Built by <a href="https://github.com/igorfyago" target="_blank">Igor Yago</a> —
       AI engineer.<br>
@@ -425,14 +427,23 @@
   const NW = 200, NH = 50, GX = 264, GY = 96, PAD = 30;
   const clean = (n) => n.replace(/^__|__$/g, "");
 
+  function themeColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n, fb) => (cs.getPropertyValue(n) || fb).trim();
+    return { accent: v("--accent", "#7c8aff"), text: v("--text", "#eceef4"),
+             dim: v("--dim", "#9ba3b2"), line: v("--line", "rgba(255,255,255,.16)"),
+             panel: v("--panel2", "rgba(255,255,255,.05)") };
+  }
+
   function drawGraph(g) {
+    const C = themeColors();
     const { pos, nCols, maxRows } = atlasLayout(g.nodes, g.edges);
     const W = PAD * 2 + (nCols - 1) * GX + NW, H = PAD * 2 + maxRows * GY;
     const xy = (n) => ({ x: PAD + pos[n].col * GX, y: PAD + pos[n].row * GY });
     let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${Math.round(W*1.25)}px" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-          <path d="M0,0.6 L7.4,4 L0,7.4 Z" fill="#7e8595"/>
+          <path d="M0,0.6 L7.4,4 L0,7.4 Z" fill="${C.dim}"/>
         </marker>
       </defs>`;
     const seen = new Set();
@@ -452,7 +463,7 @@
         const dip = Math.max(y1, y2) + 34 + (twin ? 10 : 0);
         d = `M${x1},${y1} C${x1},${dip} ${x2},${dip} ${x2},${y2}`;
       }
-      s += `<path d="${d}" fill="none" stroke="#5d6474" stroke-width="1.4"
+      s += `<path d="${d}" fill="none" stroke="${C.dim}" stroke-width="1.4" stroke-opacity=".55"
              opacity=".95" marker-end="url(#ah)"
              ${e.cond ? 'stroke-dasharray="5 6"' : ""}/>`;
     }
@@ -462,14 +473,34 @@
       const port = n === "__start__" || n === "__end__" || label === "caller audio" || label === "question";
       s += `<g>
         <rect x="${x}" y="${y}" width="${NW}" height="${NH}" rx="${port ? 24 : 8}"
-          fill="rgba(255,255,255,.05)"
-          stroke="${port ? "#7c8aff" : "rgba(255,255,255,.16)"}" stroke-width="${port ? 1.4 : 1}"/>
+          fill="${C.panel}"
+          stroke="${port ? C.accent : C.line}" stroke-width="${port ? 1.4 : 1}"/>
         <text x="${x + NW / 2}" y="${y + NH / 2 + 4}" text-anchor="middle"
           font-family="IBM Plex Mono,monospace" font-size="13"
-          fill="${port ? "#a9b3ff" : "#eceef4"}">${label.length > 22 ? label.slice(0, 21) + "…" : label}</text>
+          fill="${port ? C.accent : C.text}">${label.length > 22 ? label.slice(0, 21) + "…" : label}</text>
       </g>`;
     }
     return s + "</svg>";
+  }
+
+  window.addEventListener("themechange", () => {
+    if (window.__atlasData) { atlasStarted = false; renderAtlas(window.__atlasData); }
+  });
+
+  function renderAtlas(data) {
+    atlasStarted = true;
+    const grid = document.getElementById("atlas-grid");
+    window.__atlasData = data;
+    grid.innerHTML = "";
+    const badge = { finance: "📈 finance", agency: "🏢 voice agency" };
+    for (const g of data.graphs) {
+      const card = document.createElement("div");
+      card.className = "dcard";
+      card.innerHTML = `<h4>${g.name} <span style="text-transform:none;color:var(--dim)">
+        · ${badge[g.category] || g.category} · ${g.kind}</span></h4>
+        <div style="overflow-x:auto">${drawGraph(g)}</div>`;
+      grid.appendChild(card);
+    }
   }
 
   async function initAtlas() {
@@ -482,6 +513,7 @@
         grid.innerHTML = `<div class="dnote">${data.error || "no graphs"}</div>`;
         return;
       }
+      window.__atlasData = data;
       grid.innerHTML = "";
       const badge = { finance: "📈 finance", agency: "🏢 voice agency" };
       for (const g of data.graphs) {

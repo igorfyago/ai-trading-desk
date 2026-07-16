@@ -135,6 +135,14 @@ def desk_news(ticker: str) -> str:
                        "headlines": [i["title"] for i in items]})
 
 
+def x_pulse(ticker: str) -> str:
+    from common import xpulse
+
+    block = xpulse.pulse_block(ticker)
+    return json.dumps({"ticker": ticker.upper(),
+                       "x_chatter": block or "unavailable on this line"})
+
+
 # --------------------------------------------------------------- personas ----
 
 def _fn(name, description, props, required):
@@ -373,10 +381,13 @@ PERSONAS = {
                 ["ticker", "dte_days"]),
             _fn("desk_news", "Latest headlines for a ticker — catalysts and context.",
                 {"ticker": {"type": "string"}}, ["ticker"]),
+            _fn("x_pulse", "What traders on X are saying about a ticker in the last "
+                "24h (sentiment, catalysts, rumors) via live X search.",
+                {"ticker": {"type": "string"}}, ["ticker"]),
         ],
         "implementations": {"desk_status": desk_status, "trade_recommendation": trade_recommendation,
                             "quote_option": quote_option, "expected_move": expected_move,
-                            "desk_news": desk_news},
+                            "desk_news": desk_news, "x_pulse": x_pulse},
     },
 }
 

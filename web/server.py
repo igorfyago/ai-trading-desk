@@ -92,6 +92,18 @@ def ticker_summary(ticker: str):
     }
 
 
+@app.get("/api/xpulse/{ticker}")
+def x_pulse(ticker: str):
+    """X chatter summary via Grok x_search — separate endpoint because the
+    live search takes seconds; the dashboard loads it async."""
+    from common import xpulse
+
+    if not xpulse.available():
+        return {"available": False}
+    p = xpulse.pulse(ticker)
+    return {"available": True, "pulse": p}
+
+
 @app.get("/agents")
 def agents():
     return {

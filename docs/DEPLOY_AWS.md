@@ -26,7 +26,7 @@ git clone https://github.com/igorfyago/options-flow-analytics
 git clone https://github.com/igorfyago/ai-trading-desk
 cd ai-trading-desk/deploy
 # pull secrets from SSM into .env (script this)
-for p in OPENAI_API_KEY LANGSMITH_API_KEY POSTGRES_PASSWORD; do
+for p in OPENAI_API_KEY XAI_API_KEY LANGSMITH_API_KEY POSTGRES_PASSWORD; do
   echo "$p=$(aws ssm get-parameter --name /desk/$p --with-decryption --query Parameter.Value --output text)" >> .env
 done
 echo "BASE_DOMAIN=<your-domain>" >> .env

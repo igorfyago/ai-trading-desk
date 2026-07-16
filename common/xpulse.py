@@ -1,0 +1,88 @@
+"""X pulse — what traders on X are saying, via the official xAI (Grok) API.
+
+Grok's server-side x_search tool reads live X posts and returns a grounded
+summary with citations. This is the legitimate version of "the agents can
+see X": the desk's own API key, no user login, no scraping.
+
+Requires XAI_API_KEY. Failure-safe and cache-heavy: the pulse being down
+never breaks anything, and repeated dashboard loads don't re-bill Grok.
+"""
+
+import os
+import time
+from datetime import datetime, timedelta, timezone
+
+import httpx
+
+_CACHE: dict[str, tuple[float, dict | None]] = {}
+_TTL_SECONDS = 240
+
+
+def available() -> bool:
+    return bool(os.getenv("XAI_API_KEY"))
+
+
+def pulse(ticker: str) -> dict | None:
+    """{summary, citations:[urls]} for the last ~24h of X chatter, or None."""
+    if not available():
+        return None
+    key = ticker.upper()
+    now = time.time()
+    if key in _CACHE and now - _CACHE[key][0] < _TTL_SECONDS:
+        return _CACHE[key][1]
+
+    since = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+    try:
+        resp = httpx.post(
+            "https://api.x.ai/v1/responses",
+            headers={"Authorization": f"Bearer {os.environ['XAI_API_KEY']}"},
+            json={
+                "model": "grok-4.5",
+                "input": [{
+                    "role": "user",
+                    "content": (
+                        f"What are traders on X saying about ${key} in the last 24 hours? "
+                        "Answer with 3-5 terse bullets: concrete catalysts, overall mood, "
+                        "and any widely-repeated claims (mark rumors as rumors). "
+                        "Plain text bullets starting with '- ', no preamble, no markdown headers."
+                    ),
+                }],
+                "tools": [{"type": "x_search", "from_date": since}],
+            },
+            timeout=45,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        result = {"summary": _extract_text(data), "citations": _extract_citations(data)}
+        if not result["summary"]:
+            result = None
+    except Exception:
+        result = None
+    _CACHE[key] = (now, result)
+    return result
+
+
+def _extract_text(data: dict) -> str:
+    if isinstance(data.get("output_text"), str):
+        return data["output_text"].strip()
+    parts = []
+    for item in data.get("output", []) or []:
+        for chunk in item.get("content", []) or []:
+            if isinstance(chunk, dict) and chunk.get("type") in ("output_text", "text"):
+                parts.append(chunk.get("text", ""))
+    return "\n".join(p for p in parts if p).strip()
+
+
+def _extract_citations(data: dict) -> list[str]:
+    cites = data.get("citations") or []
+    if isinstance(cites, list):
+        return [c if isinstance(c, str) else c.get("url", "") for c in cites][:8]
+    return []
+
+
+def pulse_block(ticker: str) -> str:
+    """Prompt/tool-friendly text block; empty string when unavailable."""
+    p = pulse(ticker)
+    if not p:
+        return ""
+    return f"X chatter on {ticker.upper()} (via Grok x_search):\n{p['summary']}"

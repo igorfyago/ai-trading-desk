@@ -147,6 +147,9 @@
           <div class="dcard"><h4>The trade (rules engine)</h4>
             <div id="d-trade" class="dnote">loading…</div>
           </div>
+          <div class="dcard" id="d-xpulse-card" style="display:none"><h4>X pulse · grok x_search</h4>
+            <div id="d-xpulse" class="dnote">asking Grok…</div>
+          </div>
           <div class="dcard"><h4>Headlines</h4>
             <div id="d-news" class="dnote">loading…</div>
           </div>
@@ -230,6 +233,25 @@
     renderWatch();
     mountChart(t);
     loadSummary();
+    loadXPulse(t);
+  }
+
+  async function loadXPulse(t) {
+    const card = document.getElementById("d-xpulse-card");
+    const body = document.getElementById("d-xpulse");
+    body.innerHTML = `<span class="dnote">asking Grok about $${t} on X…</span>`;
+    try {
+      const d = await fetch(`${API}/api/xpulse/${t}`).then(r => r.json());
+      if (t !== focus) return;
+      if (!d.available) { card.style.display = "none"; return; }
+      card.style.display = "";
+      if (!d.pulse) { body.innerHTML = `<span class="dnote">no read on $${t} right now</span>`; return; }
+      const bullets = d.pulse.summary.split("\n").filter(l => l.trim())
+        .map(l => `<div class="nitem">${l.replace(/^[-•]\s*/, "").replace(/</g, "&lt;")}</div>`).join("");
+      const cites = (d.pulse.citations || []).slice(0, 4).map((u, i) =>
+        `<a href="${u}" target="_blank" style="color:var(--accent);font-size:11px;margin-right:8px">[${i + 1}]</a>`).join("");
+      body.innerHTML = bullets + (cites ? `<div style="margin-top:8px">${cites}</div>` : "");
+    } catch { card.style.display = "none"; }
   }
 
   function mountChart(symbol) {

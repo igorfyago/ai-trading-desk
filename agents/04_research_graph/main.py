@@ -70,6 +70,15 @@ def market_news(ticker: str) -> str:
 
 
 @tool
+def x_pulse(ticker: str) -> str:
+    """What traders on X are saying about a ticker right now (last 24h),
+    grounded via Grok's live X search. Use for sentiment and rumor checks."""
+    from common import xpulse
+
+    return xpulse.pulse_block(ticker) or "X pulse unavailable (no XAI_API_KEY or no read)."
+
+
+@tool
 def sql_query(sql: str) -> str:
     """Run a read-only SELECT against the positioning DB for anything the
     other tools don't cover. Demo DB tables: snapshots (captured_at, ticker,
@@ -101,7 +110,7 @@ def calculator(expression: str) -> str:
         return f"MATH ERROR: {exc}"
 
 
-TOOLS = [positioning_snapshot, wall_map, market_news, sql_query, calculator]
+TOOLS = [positioning_snapshot, wall_map, market_news, x_pulse, sql_query, calculator]
 
 # ---------------------------------------------------------------- state ----
 

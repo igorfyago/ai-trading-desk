@@ -1,10 +1,10 @@
 :root {
   --bg: #070a12; --panel: #0c101c; --panel2: #131a2b; --line: rgba(255,255,255,.08);
-  --text: #e9edf6; --dim: #8a93a8; --accent: #6d8dff; --accent2: #a06bff;
+  --text: #e9edf6; --dim: #9aa3b5; --accent: #6d8dff; --accent2: #a06bff;
   --green: #2fe39c; --amber: #ffb454; --red: #ff5c7a; --user: #1c2749;
   --grad: linear-gradient(120deg, #6d8dff, #a06bff);
   --mono: "IBM Plex Mono", ui-monospace, monospace;
-  --display: "Space Grotesk", system-ui, sans-serif;
+  --display: "Inter", system-ui, sans-serif;
 }
 * { box-sizing: border-box; margin: 0; }
 html, body, #app { height: 100%; }
@@ -22,8 +22,7 @@ h1, h2, h3, h4 { font-family: var(--display); letter-spacing: -.01em; }
 #sidebar { width: 300px; min-width: 300px; background: var(--panel); border-right: 1px solid var(--line);
   display: flex; flex-direction: column; padding: 20px 14px; gap: 10px; overflow-y: auto; }
 #brand h1 { font-size: 17px; letter-spacing: .02em; font-weight: 700; }
-#brand h1 span { background: var(--grad); -webkit-background-clip: text;
-  background-clip: text; color: transparent; }
+#brand h1 span { color: var(--accent); }
 #brand p { color: var(--dim); font-size: 12.5px; margin-top: 6px; }
 .section-label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px;
   margin-top: 12px; }
@@ -37,7 +36,7 @@ h1, h2, h3, h4 { font-family: var(--display); letter-spacing: -.01em; }
 .agent-btn .lvl { background: rgba(255,255,255,.06); color: var(--dim); border-radius: 6px;
   min-width: 26px; text-align: center; font-size: 10.5px; padding: 3px 0; margin-top: 2px;
   font-family: var(--mono); }
-.agent-btn.active .lvl { background: var(--grad); color: #fff; }
+.agent-btn.active .lvl { background: var(--accent); color: #fff; }
 .agent-btn .nm { font-size: 13.5px; font-weight: 600; }
 .agent-btn .ds { font-size: 11.5px; color: var(--dim); }
 footer { margin-top: auto; padding-top: 14px; display: flex; flex-direction: column; gap: 4px;

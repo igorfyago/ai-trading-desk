@@ -44,7 +44,46 @@ except ImportError:  # pragma: no cover
         return lambda f: f
 
 load_dotenv()
-app = FastAPI(title="ai-trading-desk")
+
+
+async def _pnl_loop():
+    """Mark open trades to the live feed and push P&L to the dock every 5s."""
+    import asyncio
+
+    from common import bus, trades
+
+    while True:
+        rows = []
+        try:
+            rows = await asyncio.to_thread(trades.positions_snapshot)
+            if rows:
+                bus.publish({"type": "pnl", "positions": rows})
+        except Exception:
+            pass
+        await asyncio.sleep(5 if rows else 15)
+
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    """One live feed for the whole desk: the watch loop pushes ticks onto the
+    bus; SSE endpoints fan them out to every open chart."""
+    import asyncio
+
+    from common import bus, quotes
+
+    bus.set_loop(asyncio.get_running_loop())
+    tasks = [asyncio.create_task(_pnl_loop())]
+    if quotes.provider_order():
+        tasks.append(asyncio.create_task(quotes.watch_loop()))
+    yield
+    for t in tasks:
+        t.cancel()
+
+
+app = FastAPI(title="ai-trading-desk", lifespan=_lifespan)
 
 # The landing portal (apex origin) calls /api/* from the browser.
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
@@ -87,8 +126,12 @@ def ticker_summary(ticker: str):
     snap = market.latest_snapshot(ticker)
     if snap is None:
         raise HTTPException(404, f"no data for '{ticker}' — covered: SPY, QQQ, IWM")
+    feed = market.resolve_feed(ticker)[0]
     return {
         "snapshot": snap,
+        "live_spot": market.live_spot(ticker),
+        "gex_live": market.live_gex(ticker),
+        "walls": signals._latest_walls(feed),
         "trade": signals.recommend_trade(ticker),
         "headlines": news.fetch_news(ticker),
         "buzz": social.fetch_buzz(ticker),
@@ -156,16 +199,113 @@ def latest_ta_signals(ticker: str, limit: int = 5) -> list[dict]:
 
 @app.get("/api/spot/{ticker}")
 def spot(ticker: str):
-    """Lightweight spot for always-on price chips (SPY + the XSP estimate)."""
+    """Lightweight spot for always-on price chips: LIVE feed first, the
+    collector snapshot as the offline fallback."""
     from common import market, signals
 
-    snap = market.latest_snapshot(ticker)
-    if snap is None:
-        raise HTTPException(404, f"no data for '{ticker}'")
-    out = {"ticker": snap["ticker"], "spot": snap["spot"], "as_of": snap["captured_at"]}
+    live = market.live_spot(ticker)
+    if live:
+        out = {"ticker": ticker.upper(), "spot": live["price"], "as_of": live["ts"],
+               "source": live["source"], "delayed": live["delayed"]}
+    else:
+        snap = market.latest_snapshot(ticker)
+        if snap is None:
+            raise HTTPException(404, f"no data for '{ticker}'")
+        out = {"ticker": snap["ticker"], "spot": snap["spot"],
+               "as_of": snap["captured_at"], "source": "snapshot", "delayed": True}
     if ticker.upper() in ("SPY", "XSP"):
-        out["xsp_est"] = round(snap["spot"] + signals.XSP_OFFSET, 2)
+        out["xsp_est"] = round(out["spot"] + signals.XSP_OFFSET, 2)
     return out
+
+
+@app.get("/api/bars/{ticker}")
+def bars(ticker: str, interval: str = "5m", limit: int = 600):
+    """Candles for the site's own chart (lightweight-charts): live feed data,
+    keyless fallbacks included. Interval labels: 1m 3m 5m 15m 45m 4h D W."""
+    from common import quotes
+
+    if quotes.normalize_interval(interval) is None:
+        raise HTTPException(422, f"unknown interval '{interval}'")
+    data = quotes.get_bars(ticker, interval, min(max(limit, 50), 1000))
+    if data is None:
+        raise HTTPException(503, "no candle feed available (set ALPACA keys, or "
+                                 "the fallback providers are unreachable)")
+    return data
+
+
+def _sse(gen):
+    return StreamingResponse(gen, media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/stream/quotes")
+async def stream_quotes(symbols: str = ""):
+    """SSE: live ticks for the requested symbols (default: the watch list).
+    One shared upstream feed, any number of browser subscribers."""
+    import asyncio
+
+    from common import bus, quotes
+
+    want = {s.strip().upper() for s in symbols.split(",") if s.strip()} or \
+        set(quotes.watch_symbols())
+
+    async def gen():
+        q = bus.subscribe()
+        try:
+            for sym in sorted(want):   # current state first, ticks after
+                spot = quotes.get_spot(sym)
+                if spot:
+                    yield f"data: {json.dumps({'type': 'quote', **spot})}\n\n"
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                if ev.get("type") == "quote" and ev.get("ticker") in want:
+                    yield f"data: {json.dumps(ev, default=str)}\n\n"
+        finally:
+            bus.unsubscribe(q)
+
+    return _sse(gen())
+
+
+@app.get("/api/stream/events")
+async def stream_events():
+    """SSE: trade lifecycle + P&L marks for the dock chart."""
+    import asyncio
+
+    from common import bus, trades
+
+    async def gen():
+        q = bus.subscribe()
+        try:
+            boot = {"type": "boot",
+                    "positions": trades.positions_snapshot(),
+                    "recent": trades.recent_trades(8)}
+            yield f"data: {json.dumps(boot, default=str)}\n\n"
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                if ev.get("type") in ("trade", "pnl"):
+                    yield f"data: {json.dumps(ev, default=str)}\n\n"
+        finally:
+            bus.unsubscribe(q)
+
+    return _sse(gen())
+
+
+@app.get("/api/trades")
+def list_trades(limit: int = 12):
+    """Trade log + live-marked open positions (the dock's boot state)."""
+    from common import trades
+
+    return {"positions": trades.positions_snapshot(),
+            "recent": trades.recent_trades(min(max(limit, 1), 50))}
 
 
 @app.get("/api/xpulse/{ticker}")
@@ -397,7 +537,8 @@ def execute_bridge_tool(agent_id: str, call: ToolCall):
 @app.post("/tool/{persona}")
 def execute_tool(persona: str, call: ToolCall):
     if persona in PERSONAS:
-        return {"output": run_tool(persona, call.name, call.arguments)}
+        return {"output": run_tool(persona, call.name, call.arguments,
+                                   session=call.session)}
     from web import personas_store
 
     if personas_store.resolve(persona) is None:

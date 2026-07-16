@@ -71,6 +71,15 @@ def recommend_trade(ticker: str) -> dict:
     if "call" not in walls or "put" not in walls:
         return {"error": f"No wall data for {ticker}."}
 
+    # The house split: structure (walls/flip/IV) moves slowly and comes from
+    # the chain snapshot; SPOT is fast and comes from the live feed when up —
+    # but only when the two agree (blendable_spot's 2% coherence band).
+    live = market.blendable_spot(ticker, snap)
+    spot_source = "snapshot"
+    if live:
+        snap = {**snap, "spot": live["price"]}
+        spot_source = live["source"]
+
     spot, flip = snap["spot"], snap["gamma_flip"] or snap["spot"]
     dte = market.days_to(snap["expiry"])
     # index ETFs/XSP trade $1 strikes; 0.5%-spaced grid only for anything else
@@ -129,6 +138,7 @@ def recommend_trade(ticker: str) -> dict:
                                 execution)
     return {
         "ticker": snap["ticker"], "as_of": snap["captured_at"], "spot": spot,
+        "spot_source": spot_source, "snapshot_iv": snap["atm_iv"],
         "regime": snap["regime"], "gamma_flip": flip, "signal_score": score,
         "structure": name, "bias": bias, "legs": legs,
         "one_sigma_move": em, "expected_move_band": [round(spot - em, 2), round(spot + em, 2)],

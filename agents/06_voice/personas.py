@@ -93,35 +93,121 @@ def save_quote(customer: str, contact: str, project: str, low_usd: float, high_u
 
 # ----------------------------------------------------- options desk tools ----
 
+def _spot_and_iv(ticker: str) -> tuple[float, float, str] | None:
+    """House rule: LIVE spot when the feed is up AND coherent with the
+    snapshot structure, snapshot IV for the vol."""
+    snap = market.latest_snapshot(ticker)
+    if not snap:
+        return None
+    live = market.blendable_spot(ticker, snap)
+    if live:
+        return live["price"], snap["atm_iv"], live["source"]
+    return snap["spot"], snap["atm_iv"], "snapshot"
+
+
 def desk_status(ticker: str) -> str:
     snap = market.latest_snapshot(ticker)
     if not snap:
         return json.dumps({"error": f"No data for {ticker}. We cover SPY, QQQ, IWM."})
-    return json.dumps({k: snap[k] for k in ("ticker", "spot", "regime", "traffic_light",
-                                            "signal_score", "gamma_flip", "atm_iv", "captured_at")})
+    out = {k: snap[k] for k in ("ticker", "spot", "regime", "traffic_light",
+                                "signal_score", "gamma_flip", "atm_iv", "captured_at")}
+    gl = market.live_gex(ticker)
+    if gl:
+        out.update({"spot": gl["spot_live"], "spot_source": gl["spot_source"],
+                    "regime_live": gl["regime_live"], "side": gl["side"],
+                    "distance_to_flip": gl["distance_to_flip"]})
+    return json.dumps(out)
 
 
-def trade_recommendation(ticker: str) -> str:
-    return json.dumps(signals.recommend_trade(ticker))
+def trade_recommendation(ticker: str, session: str = "voice") -> str:
+    rec = signals.recommend_trade(ticker)
+    if "error" not in rec:
+        from common import trades
+
+        pinned = trades.log_quote(session, rec, source="marcus")
+        if pinned:
+            rec["trade_log"] = "pinned to the desk chart automatically"
+    return json.dumps(rec)
 
 
 def quote_option(ticker: str, strike: float, kind: str, dte_days: float) -> str:
-    snap = market.latest_snapshot(ticker)
-    if not snap:
+    ref = _spot_and_iv(ticker)
+    if not ref:
         return json.dumps({"error": f"No data for {ticker}"})
-    greeks = market.black_scholes(snap["spot"], strike, dte_days, snap["atm_iv"], kind)
+    spot, iv, source = ref
+    greeks = market.black_scholes(spot, strike, dte_days, iv, kind)
     greeks.update({"ticker": ticker.upper(), "strike": strike, "kind": kind,
-                   "spot_ref": snap["spot"], "iv_used": snap["atm_iv"]})
+                   "spot_ref": spot, "spot_source": source, "iv_used": iv})
     return json.dumps(greeks)
 
 
 def expected_move(ticker: str, dte_days: float) -> str:
-    snap = market.latest_snapshot(ticker)
-    if not snap:
+    ref = _spot_and_iv(ticker)
+    if not ref:
         return json.dumps({"error": f"No data for {ticker}"})
-    return json.dumps({"ticker": ticker.upper(), "spot": snap["spot"],
-                       "one_sigma_move_usd": market.expected_move(snap["spot"], snap["atm_iv"], dte_days),
+    spot, iv, source = ref
+    return json.dumps({"ticker": ticker.upper(), "spot": spot, "spot_source": source,
+                       "one_sigma_move_usd": market.expected_move(spot, iv, dte_days),
                        "horizon_days": dte_days})
+
+
+# ------------------------------------------------- trade log (the chart) ----
+
+def _say_px(px: float | None) -> str:
+    return f"{px:.2f}" if px is not None else "?"
+
+
+def confirm_entry(session: str = "voice", fill_price: float | None = None,
+                  contracts: int | None = None) -> str:
+    from common import trades
+
+    t = trades.confirm_entry(session, fill_price, contracts)
+    if "error" in t:
+        return json.dumps(t)
+    return json.dumps({"status": "open", "contract": f"{t['contract_ticker']} "
+                       f"{t['strike']:g}{t['kind'][0]}", "entry_px": t["entry_px"],
+                       "contracts": t["contracts_open"],
+                       "say": f"Logged — in at {_say_px(t['entry_px'])}."})
+
+
+def trim_half(session: str = "voice", price: float | None = None) -> str:
+    from common import trades
+
+    t = trades.trim_half(session, price)
+    if "error" in t:
+        return json.dumps(t)
+    return json.dumps({"status": t["status"], "trim_px": t["trim_px"],
+                       "runner_contracts": t["contracts_open"],
+                       "realized_usd": t["realized_usd"],
+                       "say": f"Half off at {_say_px(t['trim_px'])} — runner rides."})
+
+
+def close_position(session: str = "voice", price: float | None = None) -> str:
+    from common import trades
+
+    t = trades.close_trade(session, price)
+    if "error" in t:
+        return json.dumps(t)
+    return json.dumps({"status": "closed", "close_px": t["close_px"],
+                       "realized_usd": t["realized_usd"],
+                       "say": f"Flat at {_say_px(t['close_px'])} — "
+                              f"{'up' if t['realized_usd'] >= 0 else 'down'} "
+                              f"{abs(t['realized_usd']):.0f} bucks on the trade."})
+
+
+def position_status(session: str = "voice") -> str:
+    from common import trades
+
+    rows = trades.positions_snapshot()
+    if not rows:
+        return json.dumps({"positions": [], "note": "flat — nothing on the book"})
+    return json.dumps({"positions": [
+        {"contract": f"{r['contract_ticker']} {r['strike']:g}{r['kind'][0]}",
+         "status": r["status"], "contracts": r["contracts_open"],
+         "entry_px": r["entry_px"], "mark": r["mark"],
+         "unreal_usd": r["unreal_usd"], "unreal_pct": r["unreal_pct"],
+         "tp_hit": r["tp_hit"], "spot": r["spot"]}
+        for r in rows]})
 
 
 def desk_news(ticker: str) -> str:
@@ -396,6 +482,20 @@ PERSONAS = {
             "4) DETAIL — quote_option for individual legs, expected_move for "
             "context. After any quote, offer the expected move.\n"
             "5) CLOSE — 'anything else on the board?'\n\n"
+            "# Trade log — the chart next to the chat\n"
+            "Every trade_recommendation is pinned to the caller's chart "
+            "automatically — you may mention it once, five words max ('it's on "
+            "your chart'). The log moves ONLY on their explicit words, never "
+            "yours — never assume, never volunteer a log action:\n"
+            "- they say they took it ('I'm in', 'bought it', 'filled at two "
+            "ninety') -> confirm_entry, with their fill price and size if they "
+            "said one.\n"
+            "- 'sold half' / 'trimmed' -> trim_half (their price if stated).\n"
+            "- 'I'm out' / 'flat' / 'closed it' -> close_position.\n"
+            "- 'how's the position' -> position_status, answer with the P&L "
+            "in plain words.\n"
+            "After a log tool, confirm in six words or less, using the tool's "
+            "'say' line as the shape ('Logged — in at two ninety.').\n\n"
             "# Safety & Escalation\n"
             "- MANDATORY: end every trade recommendation with one plain sentence "
             "that this is a demo on synthetic data, not financial advice. Never "
@@ -425,20 +525,40 @@ PERSONAS = {
             _fn("ta_signals", "The desk's TradingView alerts that fired recently "
                 "for a ticker (market-structure breaks, VWAP bands, channel breaks).",
                 {"ticker": {"type": "string"}}, ["ticker"]),
+            _fn("confirm_entry", "Log that the caller ENTERED the last quoted trade "
+                "(only when they explicitly say they bought it / are in).",
+                {"fill_price": {"type": "number", "description": "their fill, if they said one"},
+                 "contracts": {"type": "integer", "description": "size, if they said one"}}, []),
+            _fn("trim_half", "Log that the caller sold HALF the open position "
+                "(only on their explicit words).",
+                {"price": {"type": "number", "description": "their price, if stated"}}, []),
+            _fn("close_position", "Log that the caller closed the position / went flat "
+                "(only on their explicit words).",
+                {"price": {"type": "number", "description": "their price, if stated"}}, []),
+            _fn("position_status", "Current open position with live mark and P&L.", {}, []),
         ],
         "implementations": {"desk_status": desk_status, "trade_recommendation": trade_recommendation,
                             "quote_option": quote_option, "expected_move": expected_move,
-                            "desk_news": desk_news, "x_pulse": x_pulse, "ta_signals": ta_signals},
+                            "desk_news": desk_news, "x_pulse": x_pulse, "ta_signals": ta_signals,
+                            "confirm_entry": confirm_entry, "trim_half": trim_half,
+                            "close_position": close_position, "position_status": position_status},
     },
 }
 
+# Tools whose implementations key the trade log to the conversation; run_tool
+# injects the caller's session id so "I'm in" acts on the trade THIS convo quoted.
+SESSION_TOOLS = {"trade_recommendation", "confirm_entry", "trim_half",
+                 "close_position", "position_status"}
+
 
 @traceable(name="voice_tool", run_type="tool")
-def run_tool(persona: str, name: str, arguments: dict) -> str:
+def run_tool(persona: str, name: str, arguments: dict, session: str = "voice") -> str:
     """Dispatch a Realtime function call to its server-side implementation."""
     impl = PERSONAS.get(persona, {}).get("implementations", {}).get(name)
     if impl is None:
         return json.dumps({"error": f"unknown tool {name} for persona {persona}"})
+    if name in SESSION_TOOLS:
+        arguments = {**arguments, "session": session or "voice"}
     try:
         return impl(**arguments)
     except Exception as exc:

@@ -70,8 +70,16 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-ai-trading-desk-prod}
+      # live quotes feed: real-time IEX with Alpaca keys, labeled keyless
+      # fallbacks without (yahoo -> cboe 15m -> DB snapshot)
+      ALPACA_KEY_ID: ${ALPACA_KEY_ID:-}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
+      WATCH_SYMBOLS: ${WATCH_SYMBOLS:-SPY,QQQ,IWM}
       # the agents query the LIVE dealer-positioning DB, not the demo SQLite:
       DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
+    volumes:
+      - deskdata:/app/data                 # trades log, custom personas, TA
+                                           # signals survive rebuilds
     ports:
       - "127.0.0.1:8000:8000"              # agents app (proxied by caddy)
 
@@ -92,3 +100,4 @@ services:
 volumes:
   pgdata:
   caddy_data:
+  deskdata:

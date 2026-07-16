@@ -164,3 +164,75 @@ def expected_move(spot: float, iv: float, dte_days: float) -> float:
 def days_to(expiry_iso: str) -> float:
     d = date.fromisoformat(expiry_iso)
     return max((d - datetime.now(timezone.utc).date()).days, 0.5)
+
+
+# Live spot may only be blended into snapshot STRUCTURE when the two agree
+# (2% band). Wider gap = the structure is stale or it's demo seed data —
+# mixing a live 751 spot with 620-level walls would produce nonsense trades.
+SANE_SPOT_GAP = 0.02
+
+
+def live_spot(ticker: str) -> dict | None:
+    """Freshest spot from the shared live feed (None when no feed is up).
+    The alias rule applies: XSP reads the SPY feed."""
+    from common import quotes
+
+    feed, _ = resolve_feed(ticker)
+    return quotes.get_spot(feed)
+
+
+def blendable_spot(ticker: str, snap: dict) -> dict | None:
+    """live_spot() only if it's real-time AND coherent with the snapshot."""
+    live = live_spot(ticker)
+    if (live and not live["delayed"] and snap.get("spot")
+            and abs(live["price"] / snap["spot"] - 1) < SANE_SPOT_GAP):
+        return live
+    return None
+
+
+def live_gex(ticker: str) -> dict | None:
+    """The dealer-gamma picture recomputed against the LIVE spot.
+
+    Open interest only changes overnight, so intraday the structure (walls,
+    flip) is slow while gamma itself moves with spot. Between collector
+    snapshots we re-scale each strike's stored GEX by
+    gamma(strike, live_spot) / gamma(strike, snap_spot) x (S1/S0)^2 —
+    the same approximation the retail GEX products ship as "live".
+    """
+    snap = latest_snapshot(ticker)
+    if snap is None:
+        return None
+    live = blendable_spot(ticker, snap)
+    if live is None:
+        return None
+    s0, s1 = snap["spot"], live["price"]
+    iv = snap["atm_iv"] or 0.15
+    dte = days_to(str(snap["expiry"]))
+    profile = gex_profile(ticker)
+
+    net = 0.0
+    if profile and s0:
+        for row in profile:
+            k = row.get("strike")
+            if not k:
+                continue
+            g0 = black_scholes(s0, k, dte, iv, "call")["gamma"]
+            g1 = black_scholes(s1, k, dte, iv, "call")["gamma"]
+            ratio = (g1 * s1 * s1) / (g0 * s0 * s0) if g0 > 1e-9 else 1.0
+            net += (row.get("gex") or 0) * min(max(ratio, 0.0), 10.0)
+    else:
+        net = snap["net_gex_total"]
+
+    flip = snap["gamma_flip"] or s1
+    return {
+        "ticker": snap["ticker"],
+        "spot_live": s1, "spot_source": live["source"], "spot_delayed": live["delayed"],
+        "structure_as_of": snap["captured_at"],
+        "net_gex_total_live": round(net),
+        "regime_live": "positive_gamma" if net >= 0 else "negative_gamma",
+        "gamma_flip": flip,
+        "side": "above_flip" if s1 >= flip else "below_flip",
+        "distance_to_flip": round(s1 - flip, 2),
+        "note": "structure (OI/walls/flip) from the latest chain snapshot; "
+                "gamma re-marked to the live spot",
+    }

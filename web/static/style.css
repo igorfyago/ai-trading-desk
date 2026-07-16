@@ -142,3 +142,28 @@ footer a { color: var(--accent); text-decoration: none; }
 body.embed #sidebar { display: none; }
 body.embed #log { padding: 14px 4%; }
 body.embed #composer { padding: 10px 4% 14px; }
+
+/* ------------------------------------------------------------ trade dock */
+#dock { border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
+#dock-head { display: flex; align-items: center; gap: 10px; padding: 8px 18px;
+  font-family: var(--mono, "IBM Plex Mono", monospace); font-size: 12px; color: var(--dim); }
+#dock-status { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+#dock-status.open { background: var(--green); }
+#dock-status.trimmed { background: var(--accent); }
+#dock-status.closed { background: var(--dim); }
+#dock-title { color: var(--text); font-weight: 500; }
+#dock-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dock-pnl { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 500; }
+#dock-pnl.pos { color: var(--green); }
+#dock-pnl.neg { color: var(--red); }
+.dock-btns { display: flex; gap: 6px; }
+#dock-pnl:empty + .dock-btns { margin-left: auto; }
+.dock-btns button { background: none; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--dim); cursor: pointer; padding: 2px 8px; font-size: 11px; }
+.dock-btns button:hover { color: var(--text); border-color: rgba(255,255,255,.28); }
+#dock-body { height: 200px; padding: 0 10px 10px; }
+#dock-chart { height: 100%; }
+#dock.min #dock-body { display: none; }
+body.dock-pip { margin: 0; background: var(--bg); }
+body.dock-pip #dock { height: 100vh; display: flex; flex-direction: column; border: 0; }
+body.dock-pip #dock-body { flex: 1; height: auto; }

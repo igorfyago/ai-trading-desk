@@ -96,6 +96,33 @@ CREATE TABLE IF NOT EXISTS quotes (
     high_usd REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    session TEXT,                       -- chat/voice session that authored it
+    source TEXT,                        -- 'marcus' | 'desk'
+    underlying TEXT NOT NULL,           -- analysis ticker (SPY): chart + levels
+    contract_ticker TEXT NOT NULL,      -- execution ticker (XSP)
+    kind TEXT NOT NULL,                 -- 'call' | 'put'
+    strike REAL NOT NULL,               -- contract strike (XSP terms)
+    strike_underlying REAL,             -- same strike in underlying terms (chart)
+    expiry TEXT NOT NULL,
+    contracts_total INTEGER NOT NULL DEFAULT 1,
+    contracts_open INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL,               -- quoted | open | trimmed | closed
+    quoted_px REAL,                     -- engine estimate at quote time
+    entry_px REAL, trim_px REAL, close_px REAL,
+    entry_underlying REAL,              -- underlying level at entry
+    tp50_px REAL, tp50_underlying REAL, -- sell-half target (+50 pct on the contract)
+    thesis_reference REAL,              -- the tipping point (never a stop)
+    iv_entry REAL,
+    entry_at TEXT, trim_at TEXT, close_at TEXT,
+    realized_usd REAL NOT NULL DEFAULT 0,
+    note TEXT,
+    payload TEXT                        -- full engine output at quote time
+);
+
 CREATE INDEX IF NOT EXISTS idx_snapshots_ticker_time ON snapshots (ticker, captured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_levels_snapshot ON strike_levels (snapshot_id);
 """

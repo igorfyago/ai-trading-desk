@@ -42,17 +42,23 @@ TICKER_RE = re.compile(r"\b(SPY|QQQ|IWM|XSP)\b", re.I)
 
 
 def _live_context(text: str) -> str:
-    """One source of truth for every financial agent: latest snapshots for the
-    tickers mentioned (all covered tickers if none named) plus fresh headlines."""
+    """One source of truth for every financial agent: LIVE spot from the shared
+    feed, the latest chain snapshot (structure), plus fresh headlines."""
     from common import market, news
 
     tickers = list({m.upper() for m in TICKER_RE.findall(text)}) or ["SPY", "QQQ", "IWM"]
     parts = []
     for t in tickers[:3]:
+        live = market.live_spot(t)
+        if live:
+            parts.append(
+                f"{t} LIVE spot {live['price']} ({live['source']}"
+                f"{', 15m-delayed' if live['delayed'] else ''}, {live['ts']})")
         snap = market.latest_snapshot(t)
         if snap:
             parts.append(
-                f"{t}: spot {snap['spot']}, regime {snap['regime']}, gamma flip "
+                f"{t} structure: {'spot ' + str(snap['spot']) + ', ' if not live else ''}"
+                f"regime {snap['regime']}, gamma flip "
                 f"{snap['gamma_flip']}, signal {snap['signal_score']}, ATM IV "
                 f"{snap['atm_iv']}, as of {snap['captured_at']}")
     block = news.headlines_block(tickers[0])

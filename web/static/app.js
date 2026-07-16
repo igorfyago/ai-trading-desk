@@ -25,12 +25,20 @@ const md = (text) => DOMPurify.sanitize(marked.parse(text ?? ""));
 const urlParams = new URLSearchParams(location.search);
 if (urlParams.get("embed") === "1") document.body.classList.add("embed");
 
+let spyLive = false;   // true once the SSE stream is painting the chip
+
+function paintSpy(price, sourceNote) {
+  const xsp = (price + 2).toFixed(2);   // display estimate; engine owns the real offset
+  $("spy-chip").innerHTML =
+    `SPY <b>${price}</b> &nbsp;→&nbsp; XSP ≈ <b>${xsp}</b>` +
+    ` <span style="opacity:.6">· ${sourceNote}</span>`;
+}
+
 async function refreshSpy() {
+  if (spyLive) return;                  // stream owns the chip when up
   try {
     const d = await fetch("/api/spot/SPY").then((r) => r.json());
-    $("spy-chip").innerHTML =
-      `SPY <b>${d.spot}</b> &nbsp;→&nbsp; XSP ≈ <b>${d.xsp_est}</b>` +
-      ` <span style="opacity:.6">· ${String(d.as_of).slice(11, 16)}Z</span>`;
+    paintSpy(d.spot, d.delayed ? "delayed" : (d.source || "live"));
   } catch { $("spy-chip").textContent = ""; }
 }
 refreshSpy();
@@ -367,3 +375,207 @@ $("input").addEventListener("keydown", (e) => {
 });
 $("mic").onclick = toggleVoice;
 boot();
+
+/* ---------------------------------------------------------- trade dock ----
+   The chart that lives NEXT TO the conversation. Marcus pins every quoted
+   trade here automatically; "I'm in" / "sold half" / "I'm out" move it
+   through its lifecycle and the P&L badge marks to the live feed. Mounted in
+   the shell (not a tab), so it survives agent switches — and the ⧉ button
+   pops it into a Document Picture-in-Picture window that floats above every
+   browser tab and app while a paper position is on. */
+
+const dock = { chart: null, active: null, pip: null, quotesES: null, eventsES: null };
+const DOCK_SECS = 300;   // 5m candles — the trade-management timeframe
+
+function fmtUsd(x) {
+  if (x === null || x === undefined) return "";
+  return (x >= 0 ? "+$" : "−$") + Math.abs(x).toFixed(0);
+}
+
+function dockContract(t) {
+  return `${t.contract_ticker} ${Number(t.strike)}${t.kind[0]}`;
+}
+
+function dockShow() {
+  const d = $("dock");
+  if (d.hidden) d.hidden = false;
+}
+
+function dockRender() {
+  const t = dock.active;
+  if (!t) return;
+  dockShow();
+  $("dock-status").className = t.status;
+  $("dock-title").textContent = `${dockContract(t)} · ${t.expiry.slice(5)}`;
+  const notes = {
+    quoted: `quoted ~${t.quoted_px}`,
+    open: `in @ ${t.entry_px} × ${t.contracts_open}`,
+    trimmed: `runner × ${t.contracts_open} · banked ${fmtUsd(t.realized_usd)}`,
+    closed: `closed · ${fmtUsd(t.realized_usd)} realized`,
+  };
+  $("dock-note").textContent = notes[t.status] || "";
+  if (t.status === "closed") {
+    const pnl = $("dock-pnl");
+    pnl.textContent = fmtUsd(t.realized_usd);
+    pnl.className = t.realized_usd >= 0 ? "pos" : "neg";
+  } else if (t.status === "quoted") {
+    $("dock-pnl").textContent = "";
+  }
+  dockLevels(t);
+  dockMarkers(t);
+}
+
+function dockLevels(t) {
+  if (!dock.chart) return;
+  const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  dock.chart.setLevels([
+    t.entry_underlying && {
+      price: t.entry_underlying, color: cssv("--text") || "#eceef4",
+      style: 0, title: t.status === "quoted" ? "entry" : "in",
+    },
+    t.tp50_underlying && {
+      price: t.tp50_underlying, color: cssv("--green") || "#3ecf8e",
+      style: 2, title: "trim +50%",
+    },
+    t.thesis_reference && {
+      price: t.thesis_reference, color: cssv("--dim") || "#9ba3b2",
+      style: 3, title: "thesis",
+    },
+  ].filter(Boolean));
+}
+
+function dockMarkers(t) {
+  if (!dock.chart) return;
+  const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const ts = (iso) => Math.floor(Date.parse(iso) / 1000);
+  const ms = [];
+  if (t.created_at) ms.push({ time: ts(t.created_at), position: "belowBar",
+    shape: "circle", color: cssv("--dim"), text: "quoted" });
+  if (t.entry_at) ms.push({ time: ts(t.entry_at), position: "belowBar",
+    shape: "arrowUp", color: cssv("--green"), text: "in" });
+  if (t.trim_at) ms.push({ time: ts(t.trim_at), position: "aboveBar",
+    shape: "circle", color: cssv("--accent"), text: "½ off" });
+  if (t.close_at) ms.push({ time: ts(t.close_at), position: "aboveBar",
+    shape: "arrowDown", color: cssv("--red"), text: "out" });
+  dock.chart.setMarkers(ms);
+}
+
+async function dockChartBoot(underlying) {
+  if (dock.chart || !window.DeskChart) return;
+  try {
+    const data = await fetch(`/api/bars/${underlying || "SPY"}?interval=5m&limit=400`)
+      .then((r) => (r.ok ? r.json() : null));
+    if (!data || !(data.bars || []).length) return;   // text-only dock still works
+    dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS });
+    dock.chart.setData(data.bars, DOCK_SECS);
+    if (dock.active) { dockLevels(dock.active); dockMarkers(dock.active); }
+  } catch { /* chart is a bonus; the pill always works */ }
+}
+
+function dockPnl(positions) {
+  const t = dock.active;
+  if (!t) return;
+  const row = (positions || []).find((p) => p.id === t.id);
+  if (!row) return;
+  dock.active = { ...t, ...row };
+  const pnl = $("dock-pnl");
+  if (row.unreal_usd !== null && row.unreal_usd !== undefined) {
+    pnl.textContent = `${fmtUsd(row.unreal_usd)} · ${row.unreal_pct >= 0 ? "+" : ""}${row.unreal_pct}%`;
+    pnl.className = row.unreal_usd >= 0 ? "pos" : "neg";
+    if (row.tp_hit) pnl.textContent += " · TRIM ZONE";
+  }
+}
+
+function handleDeskEvent(d) {
+  if (d.type === "boot") {
+    const open = (d.positions || [])[0];
+    const latest = open || (d.recent || []).find((t) => t.status === "quoted");
+    if (latest) {
+      dock.active = latest;
+      dockRender();
+      dockChartBoot(latest.underlying);
+      if (open) dockPnl(d.positions);
+    }
+    return;
+  }
+  if (d.type === "trade") {
+    dock.active = d.trade;
+    dockRender();
+    dockChartBoot(d.trade.underlying);
+    const lines = {
+      quoted: `Marcus pinned ${dockContract(d.trade)} ~${d.trade.quoted_px} — on the chart ↑`,
+      opened: `you're IN ${dockContract(d.trade)} @ ${d.trade.entry_px} — monitoring P&L ↑`,
+      trimmed: `half off @ ${d.trade.trim_px} — runner rides`,
+      closed: `flat — ${fmtUsd(d.trade.realized_usd)} on the trade`,
+    };
+    if (lines[d.event]) divider(lines[d.event]);
+    return;
+  }
+  if (d.type === "pnl") dockPnl(d.positions);
+}
+
+function dockStreams() {
+  dock.eventsES = new EventSource("/api/stream/events");
+  dock.eventsES.onmessage = (e) => {
+    let d; try { d = JSON.parse(e.data); } catch { return; }
+    handleDeskEvent(d);
+  };
+  dock.quotesES = new EventSource("/api/stream/quotes?symbols=SPY");
+  dock.quotesES.onmessage = (e) => {
+    let d; try { d = JSON.parse(e.data); } catch { return; }
+    if (d.type !== "quote" || d.ticker !== "SPY") return;
+    spyLive = true;
+    paintSpy(d.price, d.delayed ? "delayed" : "live · " + (d.source || ""));
+    if (dock.chart) {
+      const t = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : Math.floor(Date.now() / 1000);
+      dock.chart.applyTick(d.price, t);
+    }
+  };
+}
+
+async function dockPopOut() {
+  if (dock.pip) { dock.pip.close(); return; }
+  try {
+    const pip = await documentPictureInPicture.requestWindow({ width: 480, height: 320 });
+    for (const ss of document.styleSheets) {
+      try {
+        const style = pip.document.createElement("style");
+        style.textContent = [...ss.cssRules].map((r) => r.cssText).join("\n");
+        pip.document.head.appendChild(style);
+      } catch {
+        if (ss.href) {
+          const link = pip.document.createElement("link");
+          link.rel = "stylesheet"; link.href = ss.href;
+          pip.document.head.appendChild(link);
+        }
+      }
+    }
+    // carry the live theme vars (themes.js sets them inline on <html>)
+    pip.document.documentElement.style.cssText = document.documentElement.style.cssText;
+    pip.document.body.className = "dock-pip";
+    pip.document.body.appendChild($("dock"));
+    dock.pip = pip;
+    $("dock-pop").textContent = "⧈";
+    pip.addEventListener("pagehide", () => {
+      $("chat-header").after($("dock"));
+      dock.pip = null;
+      $("dock-pop").textContent = "⧉";
+    });
+  } catch { /* PiP denied/unsupported: dock stays in the shell */ }
+}
+
+function dockInit() {
+  $("dock-min").onclick = () => {
+    const min = $("dock").classList.toggle("min");
+    $("dock-min").textContent = min ? "▸" : "▾";
+    localStorage.setItem("dock-min", min ? "1" : "0");
+  };
+  if (localStorage.getItem("dock-min") === "1") {
+    $("dock").classList.add("min");
+    $("dock-min").textContent = "▸";
+  }
+  if ("documentPictureInPicture" in window) $("dock-pop").onclick = dockPopOut;
+  else $("dock-pop").style.display = "none";
+  dockStreams();
+}
+dockInit();

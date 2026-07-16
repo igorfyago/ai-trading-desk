@@ -229,8 +229,11 @@
         <div style="display:flex;flex-direction:column;gap:8px;min-height:0">
           <div class="watch" style="justify-content:space-between">
             <div class="watch" id="intervals"></div>
-            <a id="tv-full" href="#" target="_blank" class="wchip add"
-               style="text-decoration:none">full chart on TradingView ↗</a>
+            <div class="watch">
+              <span id="feed-chip" class="wchip" style="pointer-events:none;display:none"></span>
+              <a id="tv-full" href="#" target="_blank" class="wchip add"
+                 style="text-decoration:none">full chart on TradingView ↗</a>
+            </div>
           </div>
           <div id="tv-wrap"><div id="tv-chart" style="height:100%"></div></div>
           <div id="agent-dock">
@@ -599,7 +602,7 @@
     watch = ["SPY", ...watch.filter(t => t !== "SPY" && t !== "XSP")];
     localStorage.setItem("watchlist", JSON.stringify(watch));
   }
-  let focus = watch[0], dashStarted = false, tvLoaded = false, refreshTimer = null;
+  let focus = watch[0], dashStarted = false, refreshTimer = null;
 
   function initDash() {
     if (dashStarted) return;
@@ -608,6 +611,7 @@
     if (dock && !dock.src) dock.src = dock.dataset.src;
     renderWatch();
     setFocus(focus);
+    openQuoteStream();
     refreshTimer = setInterval(() => document.querySelector("#dash.active") && loadSummary(), 60000);
   }
 
@@ -625,6 +629,7 @@
         localStorage.setItem("watchlist", JSON.stringify(watch));
         if (focus === t && watch.length) setFocus(watch[0]);
         renderWatch();
+        if (dashStarted) openQuoteStream();
       };
       el.appendChild(b);
     }
@@ -637,6 +642,7 @@
         watch.push(t);
         localStorage.setItem("watchlist", JSON.stringify(watch));
         setFocus(t);
+        if (dashStarted) openQuoteStream();
       }
     };
     el.appendChild(add);
@@ -668,11 +674,16 @@
     } catch { card.style.display = "none"; }
   }
 
-  /* House chart setup: interval row + VWAP, EMA21, SMA100, SMA200, DC96, volume.
-     (VRVP + custom community scripts aren't available in the free embed —
-     the ↗ link opens the full chart in YOUR TradingView, with your layout.) */
-  const INTERVALS = [["3m","3"],["5m","5"],["15m","15"],["45m","45"],["4h","240"],["D","D"],["W","W"]];
-  let interval = localStorage.getItem("tv_interval") || "240";
+  /* House chart setup on OUR OWN chart (lightweight-charts + the desk's live feed):
+     VWAP with 1σ/2σ bands (impossible in the old free TV embed), EMA21,
+     SMA100, SMA200, DC96, volume — plus the GEX walls/flip as price lines.
+     The ↗ link still opens the full chart in YOUR TradingView, your layout. */
+  const INTERVALS = [["3m","3m"],["5m","5m"],["15m","15m"],["45m","45m"],["4h","4h"],["D","D"],["W","W"]];
+  const IV_SECS = { "1m":60,"3m":180,"5m":300,"15m":900,"45m":2700,"4h":14400,"D":86400,"W":604800 };
+  const IV_TV = { "1m":"1","3m":"3","5m":"5","15m":"15","45m":"45","4h":"240","D":"D","W":"W" };
+  const IV_OLD = { "1":"1m","3":"3m","5":"5m","15":"15m","45":"45m","240":"4h" }; // old widget values
+  let interval = localStorage.getItem("tv_interval") || "4h";
+  interval = IV_OLD[interval] || (IV_SECS[interval] ? interval : "4h");
 
   function renderIntervals() {
     const el = document.getElementById("intervals");
@@ -687,31 +698,87 @@
     }
   }
 
-  function mountChart(symbol) {
+  let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null;
+
+  function ensureChartLib() {
+    if (window.DeskChart) return Promise.resolve();
+    if (chartLib) return chartLib;
+    const load = (src) => new Promise((ok, no) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = ok; s.onerror = no;
+      document.head.appendChild(s);
+    });
+    chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js`)
+      .then(() => load(`${API}/static/desk-chart.js`));
+    return chartLib;
+  }
+
+  function setFeedChip(info) {
+    const chip = document.getElementById("feed-chip");
+    if (!info || !info.source) { chip.style.display = "none"; return; }
+    const live = !info.delayed;
+    chip.style.display = "";
+    chip.textContent = live ? `● live · ${info.source}` : `● delayed 15m · ${info.source}`;
+    chip.style.color = live ? "var(--green)" : "var(--dim)";
+    chip.style.borderColor = live ? "var(--green)" : "var(--line)";
+  }
+
+  function applyGexLevels() {
+    if (!deskChart) return;
+    if (!gexLevels || !GEX_COVERED.includes(focus)) { deskChart.setLevels([]); return; }
+    const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    deskChart.setLevels([
+      gexLevels.call && { price: gexLevels.call, color: cssv("--green"), style: 2, title: "call wall" },
+      gexLevels.put && { price: gexLevels.put, color: cssv("--red"), style: 2, title: "put wall" },
+      gexLevels.flip && { price: gexLevels.flip, color: cssv("--accent"), style: 3, title: "flip" },
+    ].filter(Boolean));
+  }
+
+  function openQuoteStream() {
+    if (quotesES) quotesES.close();
+    quotesES = new EventSource(`${API}/api/stream/quotes?symbols=${watch.join(",")}`);
+    quotesES.onmessage = (e) => {
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type !== "quote") return;
+      if (d.ticker === focus) {
+        setFeedChip(d);
+        const tile = document.getElementById("tile-spot");
+        if (tile) tile.textContent = d.price;
+        if (deskChart) {
+          const ts = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : Math.floor(Date.now() / 1000);
+          deskChart.applyTick(d.price, ts);
+        }
+      }
+    };
+  }
+
+  async function mountChart(symbol) {
     renderIntervals();
     document.getElementById("tv-full").href =
-      `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${interval}`;
-    const mount = () => {
-      document.getElementById("tv-chart").innerHTML = "";
-      new TradingView.widget({
-        container_id: "tv-chart", symbol, autosize: true, theme: "dark",
-        style: "1", interval, timezone: "Etc/UTC", locale: "en",
-        hide_side_toolbar: true, hide_top_toolbar: false, allow_symbol_change: false,
-        
-        studies: [
-          { id: "VWAP@tv-basicstudies" },
-          { id: "MAExp@tv-basicstudies", inputs: { length: 21 } },
-          { id: "MASimple@tv-basicstudies", inputs: { length: 100 } },
-          { id: "MASimple@tv-basicstudies", inputs: { length: 200 } },
-          { id: "DonchianChannels@tv-basicstudies", inputs: { length: 96 } },
-        ],
-      });
-    };
-    if (tvLoaded) return mount();
-    const s = document.createElement("script");
-    s.src = "https://s3.tradingview.com/tv.js";
-    s.onload = () => { tvLoaded = true; mount(); };
-    document.head.appendChild(s);
+      `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${IV_TV[interval] || "240"}`;
+    const seq = ++chartSeq;
+    const wrap = document.getElementById("tv-chart");
+    try {
+      await ensureChartLib();
+      const data = await fetch(`${API}/api/bars/${symbol}?interval=${interval}&limit=600`)
+        .then((r) => (r.ok ? r.json() : null));
+      if (seq !== chartSeq) return;                 // user moved on mid-fetch
+      if (!data || !(data.bars || []).length) throw new Error("no bars");
+      if (!deskChart) {
+        wrap.innerHTML = "";
+        deskChart = DeskChart.create(wrap, { intervalSec: IV_SECS[interval] });
+      }
+      deskChart.setData(data.bars, IV_SECS[interval]);
+      setFeedChip(data);
+      applyGexLevels();
+    } catch {
+      if (seq !== chartSeq) return;
+      if (deskChart) { deskChart.destroy(); deskChart = null; }
+      wrap.innerHTML = `<div class="dnote" style="padding:24px">candle feed unreachable —
+        <a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}"
+           target="_blank" style="color:var(--accent)">open on TradingView ↗</a></div>`;
+      setFeedChip(null);
+    }
   }
 
   async function loadSummary() {
@@ -728,12 +795,22 @@
     try {
       const d = await fetch(`${API}/api/summary/${t}`).then(r => r.json());
       if (t !== focus) return;                       // user moved on mid-fetch
-      const s = d.snapshot, pos = s.regime === "positive_gamma";
-      document.getElementById("d-asof").textContent = "· " + s.captured_at.slice(11, 16) + " UTC";
+      const s = d.snapshot, gl = d.gex_live;
+      const regime = (gl && gl.regime_live) || s.regime, pos = regime === "positive_gamma";
+      const spotNow = (d.live_spot && d.live_spot.price) ?? s.spot;
+      gexLevels = {
+        call: d.walls && d.walls.call && d.walls.call.strike,
+        put: d.walls && d.walls.put && d.walls.put.strike,
+        flip: (gl && gl.gamma_flip) || s.gamma_flip,
+      };
+      applyGexLevels();
+      document.getElementById("d-asof").textContent =
+        "· structure " + s.captured_at.slice(11, 16) + " UTC" +
+        (d.live_spot && !d.live_spot.delayed ? " · spot live" : "");
       tiles.innerHTML = `
-        <div class="tile"><b>${s.spot}</b><span>spot</span></div>
+        <div class="tile"><b id="tile-spot">${spotNow}</b><span>spot${d.live_spot && !d.live_spot.delayed ? " · live" : ""}</span></div>
         <div class="tile"><b class="${pos ? "pos" : "neg"}">${pos ? "LONG γ" : "SHORT γ"}</b><span>regime</span></div>
-        <div class="tile"><b>${s.gamma_flip ? Number(s.gamma_flip).toFixed(0) : "—"}</b><span>flip</span></div>
+        <div class="tile"><b>${gexLevels.flip ? Number(gexLevels.flip).toFixed(0) : "—"}</b><span>flip</span></div>
         <div class="tile"><b>${s.signal_score ?? "—"}</b><span>signal</span></div>
         <div class="tile"><b>${(s.atm_iv * 100).toFixed(1)}%</b><span>atm iv</span></div>
         <div class="tile"><b>${s.vix ?? "—"}</b><span>vix</span></div>`;

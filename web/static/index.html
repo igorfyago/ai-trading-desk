@@ -43,9 +43,22 @@
         <div id="current-name">Market Brief</div>
         <div id="current-desc"></div>
       </div>
-      <div id="spy-chip" title="delayed feed"></div>
+      <div id="spy-chip" title="market feed"></div>
       <div id="voice-state"></div>
     </header>
+    <div id="dock" hidden>
+      <div id="dock-head">
+        <span id="dock-status"></span>
+        <span id="dock-title">—</span>
+        <span id="dock-note"></span>
+        <span id="dock-pnl"></span>
+        <span class="dock-btns">
+          <button id="dock-pop" title="Pop out — floats above every tab and app">⧉</button>
+          <button id="dock-min" title="Collapse to a pill">▾</button>
+        </span>
+      </div>
+      <div id="dock-body"><div id="dock-chart"></div></div>
+    </div>
     <div id="log"></div>
     <div id="composer">
       <button id="mic" title="Talk to this agent">🎙</button>
@@ -75,6 +88,8 @@
   </div>
 </div>
 <script src="/static/themes.js"></script>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/desk-chart.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

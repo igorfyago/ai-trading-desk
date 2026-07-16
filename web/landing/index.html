@@ -568,8 +568,8 @@
 
   /* ------------------------------------------------------- dashboard ---- */
   const API = "https://desk.b4rruf3t.com";
-  const GEX_COVERED = ["SPY", "QQQ", "IWM"];
-  let watch = JSON.parse(localStorage.getItem("watchlist") || '["SPY","QQQ","IWM"]');
+  const GEX_COVERED = ["SPY", "QQQ", "IWM", "XSP"];
+  let watch = JSON.parse(localStorage.getItem("watchlist") || '["XSP","SPY","QQQ","IWM"]');
   let focus = watch[0], dashStarted = false, tvLoaded = false, refreshTimer = null;
 
   function initDash() {

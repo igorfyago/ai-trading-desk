@@ -61,8 +61,8 @@ def recommend_trade(ticker: str) -> dict:
     """Exact trade for the current regime, or an error dict."""
     snap = market.latest_snapshot(ticker)
     if snap is None:
-        return {"error": f"No data for {ticker}. Covered: SPY, QQQ, IWM."}
-    walls = _latest_walls(ticker)
+        return {"error": f"No data for {ticker}. Covered: SPY, QQQ, IWM, XSP."}
+    walls = _latest_walls(market.resolve_feed(ticker)[0])
     if "call" not in walls or "put" not in walls:
         return {"error": f"No wall data for {ticker}."}
 
@@ -113,6 +113,13 @@ def recommend_trade(ticker: str) -> dict:
                      f"Sell premium at the walls dealers defend. Signal score {score:+.0f}.")
 
     execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em)
+    if snap["ticker"] == "XSP":
+        # house rule: XSP fills are ugly on spreads - single direction only
+        name = f"long {execution['kind']} (XSP: single-leg only, no spreads)"
+        legs = [_leg(snap, execution["strike"], execution["kind"], "buy", dte)]
+    plain = _plain_english_exec(snap["ticker"], execution)
+    if snap.get("levels_note"):
+        plain += f" ({snap['levels_note']}.)"
     return {
         "ticker": snap["ticker"], "as_of": snap["captured_at"], "spot": spot,
         "regime": snap["regime"], "gamma_flip": flip, "signal_score": score,
@@ -120,72 +127,96 @@ def recommend_trade(ticker: str) -> dict:
         "one_sigma_move": em, "expected_move_band": [round(spot - em, 2), round(spot + em, 2)],
         "rationale": rationale,
         "execution": execution,
-        "plain_english": _plain_english_exec(snap["ticker"], execution),
+        "plain_english": plain,
+        "levels_note": snap.get("levels_note"),
         "invalidation": f"Exit if {invalidation}.",
         "sizing": "Risk no more than 1% of account on the structure's max loss.",
         "disclaimer": DISCLAIMER,
     }
 
 
+def _spot_for_option_price(target_px, strike, dte, iv, kind, spot_hint):
+    """Invert Black-Scholes: the underlying level where the option trades at
+    target_px. Bisection — price is monotonic in spot for a single leg."""
+    lo, hi = spot_hint * 0.55, spot_hint * 1.6
+    for _ in range(70):
+        mid = (lo + hi) / 2
+        px = market.black_scholes(mid, strike, dte, iv, kind)["price"]
+        if kind == "call":            # call price rises with spot
+            if px < target_px:
+                lo = mid
+            else:
+                hi = mid
+        else:                         # put price falls as spot rises
+            if px < target_px:
+                hi = mid
+            else:
+                lo = mid
+    return round((lo + hi) / 2, 2)
+
+
 def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em) -> dict:
-    """The desk format: ONE option to buy (0-5 DTE), the underlying
-    entry level + condition, the underlying level to sell HALF at (with the
-    option's rough value there), and a hard stop. All rule-derived.
+    """The desk's management rules, computed deterministically:
+      - ONE option to buy (0-5 DTE), direction from the GEX regime
+      - take profit on OPTION P&L: sell HALF at +50%% on the contract,
+        with the underlying level where that happens (BS inversion)
+      - NO stop-loss: size small, hold to zero if wrong, let the runner ride;
+        the tipping point is a thesis reference, never a tripwire
     """
     regime = snap["regime"]
+    ticker = snap["ticker"]
     if regime == "negative_gamma":
         bullish = spot >= flip
-        kind = "call" if bullish else "put"
-        entry_u, condition = spot, (f"while {snap['ticker']} holds "
-                                    f"{'above' if bullish else 'below'} {flip:g}")
-        tp50_u = call_wall if bullish else put_wall
-        stop_u, conviction = flip, "standard"
+        headline = f"GEX says {'bullish' if bullish else 'bearish'} momentum holds today"
+        why = ("dealers are forced to chase the move until the tipping point "
+               f"at {flip:g} breaks")
     else:
         bullish = score >= 0
-        kind = "call" if bullish else "put"
-        entry_u = put_wall if bullish else call_wall     # buy the bounce off the wall
-        condition = (f"on a touch of the {'put' if bullish else 'call'} wall at {entry_u:g} "
-                     "(long-gamma tape mean-reverts — don't chase mid-range)")
-        tp50_u = call_wall if bullish else put_wall
-        stop_u = round(entry_u - step if bullish else entry_u + step, 2)
-        conviction = "reduced - long-gamma tape dampens moves; prefer the credit structure"
+        headline = "GEX says pinned, mean-reversion tape today"
+        why = (f"dealers defend the {put_wall:g}-{call_wall:g} range, so moves fade; "
+               "lean " + ("long from the low end" if bullish else "short from the high end"))
 
-    # target must be worth taking: at least 0.6 sigma from entry, else extend
-    min_dist = max(em * 0.6, step)
-    if abs(tp50_u - entry_u) < min_dist:
-        tp50_u = round(entry_u + min_dist if bullish else entry_u - min_dist, 2)
+    kind = "call" if bullish else "put"
+    entry_px = market.black_scholes(spot, atm, dte, snap["atm_iv"], kind)["price"]
+    tp_dte = max(dte * 0.6, 0.4)
+    tp50_px = round(entry_px * 1.5, 2)
+    tp50_u = _spot_for_option_price(tp50_px, atm, tp_dte, snap["atm_iv"], kind, spot)
 
-    strike = atm if regime == "negative_gamma" else (
-        round(entry_u / step) * step if step else entry_u)
-    entry_px = market.black_scholes(entry_u, strike, dte, snap["atm_iv"], kind)["price"]
-    tp_dte = max(dte * 0.5, 0.5)                          # rough: target hit mid-horizon
-    tp50_px = market.black_scholes(tp50_u, strike, tp_dte, snap["atm_iv"], kind)["price"]
     return {
-        "action": "buy", "kind": kind, "strike": strike, "expiry": snap["expiry"],
+        "gex_headline": headline, "gex_why": why,
+        "action": "buy", "kind": kind, "strike": atm, "expiry": snap["expiry"],
         "dte_days": round(dte, 1),
-        "entry_underlying": round(entry_u, 2), "entry_condition": condition,
+        "entry_underlying": round(spot, 2),
         "entry_option_price_est": entry_px,
-        "tp50_underlying": round(tp50_u, 2), "tp50_option_price_est": tp50_px,
-        "tp50_rule": "sell HALF at the target, let the rest run, never past the stop",
-        "stop_underlying": round(stop_u, 2),
-        "conviction": conviction,
-        "estimates_note": "option prices are Black-Scholes estimates at ATM vol; "
-                          "theta/vol shift will move them",
+        "tp_rule": "sell HALF when the option is up 50%",
+        "tp50_option_price": tp50_px,
+        "tp50_underlying_est": tp50_u,
+        "runner_rule": "after the trim, let the rest ride to the target or expiry - "
+                       "no management, worst case it expires worthless",
+        "stop": None,
+        "risk_plan": "no stop-loss by design: size small (half a percent of the "
+                     "account max) and accept the contract can go to zero",
+        "thesis_reference": round(flip, 2),
+        "thesis_note": f"the tipping point at {flip:g} is the line for the THESIS - "
+                       "if it breaks, don't add and don't re-enter, but the position "
+                       "itself is managed by the +50% trim and small sizing",
+        "estimates_note": "option prices are Black-Scholes estimates at ATM vol",
     }
 
 
 def _plain_english_exec(ticker: str, x: dict) -> str:
-    """His format, four sentences, ~one number each — engine-authored."""
+    """The desk script: headline, the buy, the trim, the risk frame."""
     return (
+        f"{x['gex_headline']} - {x['gex_why']}. "
         f"Buy the {ticker} {x['strike']:g} {x['kind']}s expiring {x['expiry']} "
-        f"({x['dte_days']:g} days), {x['entry_condition']} — about "
-        f"{x['entry_option_price_est']:.2f} per contract with {ticker} at "
-        f"{x['entry_underlying']:g}. "
-        f"Sell HALF when {ticker} touches {x['tp50_underlying']:g} — those "
-        f"{x['kind']}s should be worth roughly {x['tp50_option_price_est']:.2f}. "
-        f"Let the rest run, but if {ticker} crosses {x['stop_underlying']:g} the trade "
-        f"is over — out completely. "
-        f"Risk about one percent of your account, no more."
+        f"({x['dte_days']:g} days), about {x['entry_option_price_est']:.2f} per "
+        f"contract with {ticker} at {x['entry_underlying']:g}. "
+        f"Sell HALF when the contract is up fifty percent - around "
+        f"{x['tp50_option_price']:.2f}, which is {ticker} near "
+        f"{x['tp50_underlying_est']:g} - then let the rest ride. "
+        f"No stop-loss: size it small, half a percent of the account, and accept "
+        f"it can go to zero; the tipping point at {x['thesis_reference']:g} only "
+        f"tells you whether the thesis still stands."
     )
 
 

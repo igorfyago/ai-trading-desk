@@ -15,6 +15,20 @@ from common.db import get_connection
 # Production (options-flow-analytics) and demo scales differ; normalize both ways.
 _LIGHTS = {"amber": "yellow"}
 
+# Tickers served from another feed when no native rows exist. XSP (mini-SPX)
+# rides SPY dealer positioning - same S&P complex, levels track ~1:1.
+ALIASES = {"XSP": ("SPY", "levels read from SPY dealer positioning (same S&P complex)")}
+
+
+def resolve_feed(ticker: str) -> tuple[str, str | None]:
+    """(feed_ticker, note) - native if data exists, else the alias source."""
+    t = ticker.upper()
+    if t in ALIASES:
+        probe = _native_latest(t)
+        if probe is None:
+            return ALIASES[t][0], ALIASES[t][1]
+    return t, None
+
 
 def _norm_score(score: float | None) -> float | None:
     """Production emits -1..1; the demo uses -100..100. Normalize to -100..100."""
@@ -43,7 +57,7 @@ def _pg_latest_snapshot(ticker: str) -> dict | None:
     }
 
 
-def latest_snapshot(ticker: str) -> dict | None:
+def _native_latest(ticker: str) -> dict | None:
     """Most recent dealer-positioning snapshot for a ticker.
 
     Live options-flow-analytics Postgres when DATABASE_URL is set (production),
@@ -64,8 +78,20 @@ def latest_snapshot(ticker: str) -> dict | None:
     return dict(zip(cols, row))
 
 
+def latest_snapshot(ticker: str) -> dict | None:
+    """Most recent dealer-positioning snapshot; XSP falls back to the SPY feed
+    (flagged via 'levels_note') until the collector carries it natively."""
+    feed, note = resolve_feed(ticker)
+    snap = _native_latest(feed)
+    if snap and note:
+        snap["ticker"] = ticker.upper()
+        snap["levels_note"] = note
+    return snap
+
+
 def gex_profile(ticker: str) -> list[dict]:
     """Per-strike GEX/DEX profile of the latest snapshot."""
+    ticker, _ = resolve_feed(ticker)
     if db.using_live_db():
         rows = db.run_readonly(
             "SELECT gex_per_strike FROM gex_dex_snapshots WHERE ticker = %s"

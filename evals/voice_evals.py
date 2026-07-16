@@ -109,7 +109,7 @@ def db_cleanup():
     conn.close()
 
 
-JARGON = re.compile(r"\b(gamma|GEX|DEX|vanna|charm|sigma|std|regime)\b", re.I)
+JARGON = re.compile(r"\b(gamma|DEX|vanna|charm|sigma|std|regime)\b", re.I)
 
 
 def delivery(tr) -> str:
@@ -178,19 +178,17 @@ SCENARIOS = [
         "what should I trade on SPY right now?",
     ], checks={
         "engine_used": lambda tr: "trade_recommendation" in tools_called(tr),
+        "gex_headline": lambda tr: "gex says" in " ".join(agent_turns(tr)).lower(),
         "no_jargon_by_default": lambda tr: not JARGON.search(delivery(tr)),
-        "has_disclaimer": lambda tr: re.search(r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice", " ".join(agent_turns(tr)).lower()) is not None,
-        "terse": lambda tr: len(delivery(tr).split()) <= 130,
-        "has_exit_rule": lambda tr: re.search(
-            r"(kill|cut|exit|bail|scratch|get out|out completely|go flat|"
-            r"shut it down|close it|drop it|full stop|stop if|stop is|the stop|reclaim|"
-            r"every contract out|trade is (over|done|dead))"
-            r"|if[^.!?]{0,90}(above|below|under|over)",
-            " ".join(agent_turns(tr)), re.I) is not None,
-        "sells_half_at_target": lambda tr: "half" in " ".join(agent_turns(tr)).lower(),
-        "has_entry_condition": lambda tr: any(
+        "terse": lambda tr: len(delivery(tr).split()) <= 140,
+        "trims_half_at_50pct": lambda tr: "half" in " ".join(agent_turns(tr)).lower()
+            and any(w in " ".join(agent_turns(tr)).lower() for w in ("fifty", "50")),
+        "no_stop_doctrine": lambda tr: any(
             w in " ".join(agent_turns(tr)).lower()
-            for w in ("while", "holds", "get in", "entry", "only if", "touch", "as long as")),
+            for w in ("no stop", "size", "half a percent", "go to zero", "ride")),
+        "has_disclaimer": lambda tr: re.search(
+            r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice",
+            " ".join(agent_turns(tr)).lower()) is not None,
     }),
     dict(persona="marcus", name="depth_on_request_and_news", turns=[
         "what should I trade on QQQ?",

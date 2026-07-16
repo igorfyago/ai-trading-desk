@@ -38,7 +38,7 @@ AGENT_META = [   # category: finance | agency | custom
      "hint": "Run the desk on SPY"},
 ]
 
-TICKER_RE = re.compile(r"\b(SPY|QQQ|IWM)\b", re.I)
+TICKER_RE = re.compile(r"\b(SPY|QQQ|IWM|XSP)\b", re.I)
 
 
 def _live_context(text: str) -> str:

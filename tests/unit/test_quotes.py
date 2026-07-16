@@ -83,3 +83,36 @@ def test_fetch_spots_falls_through_providers(monkeypatch):
     quotes._spot_cache.clear()
     out = quotes.fetch_spots(["SPY"])
     assert out["SPY"]["delayed"] is True and out["SPY"]["source"] == "cboe·15m"
+
+
+def test_session_label_covers_the_24h_clock():
+    # July = EDT (UTC-4); January = EST (UTC-5); weekend = the 24h tape
+    assert quotes.session_label("2026-07-16T15:00:00Z") == "rth"        # 11:00 ET
+    assert quotes.session_label("2026-07-16T21:30:00Z") == "post"      # 17:30 ET
+    assert quotes.session_label("2026-07-17T01:00:00Z") == "overnight"  # 21:00 ET
+    assert quotes.session_label("2026-07-16T12:00:00Z") == "pre"       # 08:00 ET
+    assert quotes.session_label("2026-01-16T15:00:00Z") == "rth"       # 10:00 EST
+    assert quotes.session_label("2026-07-19T15:00:00Z") == "overnight"  # Saturday
+    assert quotes.session_label(None) is None
+
+
+def test_fetch_spots_newest_print_wins(monkeypatch):
+    """After the close a stale 'real-time' print must lose to a fresher tape."""
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("QUOTES_PROVIDER", "auto")
+    monkeypatch.setenv("ALPACA_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    now = datetime.now(timezone.utc)
+    stale = (now - timedelta(hours=3)).isoformat()   # IEX frozen at the close
+    fresh = (now - timedelta(seconds=30)).isoformat()
+
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "SPY": {"ticker": "SPY", "price": 750.87, "ts": stale,
+                "source": "alpaca·iex", "delayed": False, "session": "rth"}})
+    monkeypatch.setattr(quotes, "_spot_yahoo", lambda sym: {
+        "ticker": sym, "price": 749.82, "ts": fresh,
+        "source": "yahoo", "delayed": False, "session": "post"})
+    quotes._spot_cache.clear()
+    out = quotes.fetch_spots(["SPY"])
+    assert out["SPY"]["price"] == 749.82 and out["SPY"]["session"] == "post"

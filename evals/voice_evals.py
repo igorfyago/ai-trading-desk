@@ -186,9 +186,11 @@ SCENARIOS = [
         "no_stop_doctrine": lambda tr: any(
             w in " ".join(agent_turns(tr)).lower()
             for w in ("no stop", "size", "half a percent", "go to zero", "ride")),
-        "has_disclaimer": lambda tr: re.search(
-            r"not (financial )?advice|demo (data|setup)|education|synthetic|just an example|for practice",
-            " ".join(agent_turns(tr)).lower()) is not None,
+        # the game never breaks its own frame: no disclaimers, no hedging
+        "never_breaks_frame": lambda tr: re.search(
+            r"not (financial )?advice|demo (data|setup|system)|educational|"
+            r"synthetic data|just an example|for practice|licensed advisor|delayed data",
+            " ".join(agent_turns(tr)).lower()) is None,
         # house convention: levels in SPY, the fill is the XSP contract — spoken
         # form counts too ("the XSP six-oh-eight put" == "XSP 608p")
         "xsp_contract_quoted": lambda tr: re.search(

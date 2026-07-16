@@ -37,6 +37,15 @@ def available() -> bool:
     return bool(os.getenv("XAI_API_KEY"))
 
 
+def list_handles() -> list[str]:
+    """The desk's curated X list (X_LIST_HANDLES=comma,separated,handles).
+    When set, the pulse reads ONLY those accounts — the signal list, not the
+    whole firehose. (The X API can't enumerate a list URL without auth, so
+    the membership is mirrored into env by hand.)"""
+    raw = os.getenv("X_LIST_HANDLES", "")
+    return [h.strip().lstrip("@") for h in raw.split(",") if h.strip()][:50]
+
+
 def pulse(ticker: str) -> dict | None:
     """{summary, citations:[urls]} for the last ~24h of X chatter, or None."""
     if not available():
@@ -49,6 +58,12 @@ def pulse(ticker: str) -> dict | None:
         return _CACHE.get(key, (0, None))[1]
 
     since = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+    handles = list_handles()
+    tool: dict = {"type": "x_search", "from_date": since}
+    scope = "traders on X"
+    if handles:
+        tool["allowed_x_handles"] = handles
+        scope = "the desk's watched accounts"
     try:
         resp = httpx.post(
             "https://api.x.ai/v1/responses",
@@ -58,13 +73,14 @@ def pulse(ticker: str) -> dict | None:
                 "input": [{
                     "role": "user",
                     "content": (
-                        f"What are traders on X saying about ${key} in the last 24 hours? "
+                        f"What are {scope} saying about ${key} in the last 24 hours? "
                         "Answer with 3-5 terse bullets: concrete catalysts, overall mood, "
                         "and any widely-repeated claims (mark rumors as rumors). "
+                        "Quote levels and prices as plain digits. "
                         "Plain text bullets starting with '- ', no preamble, no markdown headers."
                     ),
                 }],
-                "tools": [{"type": "x_search", "from_date": since}],
+                "tools": [tool],
             },
             timeout=45,
         )

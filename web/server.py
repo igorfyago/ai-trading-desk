@@ -92,7 +92,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://b4rruf3t.com", "https://www.b4rruf3t.com",
                    "http://localhost:8000", "http://127.0.0.1:8000"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],   # POST = the sim's position buttons
     allow_headers=["*"],
 )
 STATIC = Path(__file__).resolve().parent / "static"
@@ -206,7 +206,8 @@ def spot(ticker: str):
     live = market.live_spot(ticker)
     if live:
         out = {"ticker": ticker.upper(), "spot": live["price"], "as_of": live["ts"],
-               "source": live["source"], "delayed": live["delayed"]}
+               "source": live["source"], "delayed": live["delayed"],
+               "session": live.get("session")}
     else:
         snap = market.latest_snapshot(ticker)
         if snap is None:
@@ -306,6 +307,43 @@ def list_trades(limit: int = 12):
 
     return {"positions": trades.positions_snapshot(),
             "recent": trades.recent_trades(min(max(limit, 1), 50))}
+
+
+class TradeAction(BaseModel):
+    action: str                 # add | sell | close
+    qty: int = 1
+    price: float | None = None  # defaults to the live model mark
+
+
+@app.post("/api/trades/{trade_id}/action")
+def trade_action(trade_id: int, body: TradeAction):
+    """The sim's order ticket: ADD / SELL / CLOSE buttons on a position."""
+    from common import trades
+
+    out = trades.adjust(trade_id, body.action, body.qty, body.price)
+    if "error" in out:
+        raise HTTPException(422, out["error"])
+    return out
+
+
+@app.get("/api/score")
+def game_score():
+    """The scoreboard chip: realized + live unrealized P&L across the book."""
+    from common import trades
+
+    return trades.score()
+
+
+@app.get("/api/tape/{ticker}")
+def tape_read(ticker: str, interval: str = "15m"):
+    """The house tape read: VWAP bands + RSI state + volume-profile walls/gaps
+    + Heikin-Ashi thickness, staged the way the desk trades it."""
+    from common import tape
+
+    out = tape.get_tape_read(ticker, interval)
+    if out is None:
+        raise HTTPException(503, "no candle feed available for a tape read")
+    return out
 
 
 @app.get("/api/xpulse/{ticker}")
@@ -547,3 +585,7 @@ def execute_tool(persona: str, call: ToolCall):
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+# Local dev convenience: the landing portal (served by Caddy in prod) is
+# browsable at /landing so layout work can be verified without a deploy.
+app.mount("/landing", StaticFiles(directory=STATIC.parent / "landing", html=True),
+          name="landing")

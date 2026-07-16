@@ -1,0 +1,119 @@
+"""The house tape read, fully offline: indicators, volume profile, and the
+arm/confirm/trigger stage machine on scripted synthetic bars."""
+
+from common import tape
+
+# One NY session: (t - 4h) // 86400 constant for < 58 15m bars from the open.
+_T0 = 20_000 * 86400 + 4 * 3600 + 34_200  # 09:30 New York, arbitrary day
+
+
+def _bar(t, o, h, l, c, v):
+    return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v}
+
+
+def _falling_closes(n=40, start=100.0):
+    # Mostly-down staircase: small up-wiggle every 3rd step keeps RSI honest.
+    closes, px = [], start
+    for i in range(n):
+        px += 0.3 if i % 3 == 0 else -0.7
+        closes.append(px)
+    return closes
+
+
+def test_rsi_bounds_and_falling_market():
+    closes = _falling_closes()
+    out = tape.rsi(closes)
+    assert len(out) == len(closes)
+    assert all(v is None for v in out[:tape.RSI_N])
+    vals = [v for v in out if v is not None]
+    assert vals and all(0.0 <= v <= 100.0 for v in vals)
+    assert out[-1] < 50.0                       # persistent selling => weak RSI
+    assert tape.sma([1, 2, 3, 4], 2) == [None, 1.5, 2.5, 3.5]
+    assert tape.sma([None, 2, 4], 2) == [None, None, 3.0]
+
+
+def test_volume_profile_two_bands_wall_gap_poc():
+    bars, t = [], _T0
+    # Heavy band A, peaked near 97 (the heavier of the two: POC lives here).
+    for _ in range(20):
+        bars.append(_bar(t, 96.7, 97.5, 96.5, 97.3, 6000)); t += 900
+    for i in range(10):
+        px = 95.5 + (i % 4) * 1.0                # spread 95.0..99.0
+        bars.append(_bar(t, px - 0.4, px + 0.5, px - 0.5, px + 0.4, 1500)); t += 900
+    # Quiet traverse 99 -> 101: the low-volume gap between the bands.
+    for _ in range(2):
+        bars.append(_bar(t, 99.0, 101.0, 99.0, 101.0, 40)); t += 900
+    # Heavy band B, peaked near 103, lighter than A.
+    for _ in range(20):
+        bars.append(_bar(t, 102.7, 103.5, 102.5, 102.9, 5000)); t += 900
+    for i in range(10):
+        px = 101.5 + (i % 4) * 1.0               # spread 101.0..105.0
+        bars.append(_bar(t, px - 0.4, px + 0.5, px - 0.5, px + 0.4, 1200)); t += 900
+
+    prof = tape.volume_profile(bars, rows=20)
+    assert len(prof["rows"]) == 20
+    assert sum(r["total"] for r in prof["rows"]) > 0
+    assert len(prof["walls"]) >= 2               # a wall in each band
+    assert any(w < 99.0 for w in prof["walls"]) and any(w > 101.0 for w in prof["walls"])
+    assert any(g["lo"] >= 98.4 and g["hi"] <= 101.6 for g in prof["gaps"])
+    assert 96.0 <= prof["poc"] <= 98.0           # heavier band carries the POC
+
+
+def test_heikin_body_ratio_bounded():
+    bars, t, px = [], _T0, 100.0
+    for i in range(25):
+        o = px
+        c = px + (0.8 if i % 2 == 0 else -0.6)
+        h = max(o, c) + 0.3
+        l = min(o, c) - 0.3
+        bars.append(_bar(t, o, h, l, c, 1000)); t += 900; px = c
+    ha = tape.heikin(bars)
+    assert len(ha) == len(bars)
+    assert all(0.0 <= h["body_ratio"] <= 1.0 for h in ha)
+    # First bar seeds from its own raw open/close.
+    assert ha[0]["o"] == (bars[0]["o"] + bars[0]["c"]) / 2
+    assert ha[0]["c"] == sum(bars[0][k] for k in "ohlc") / 4
+
+
+def _scripted_long_setup():
+    """Downtrend -> -2 sigma flush -> high-volume hammer back into -1 ->
+    thick up HA candles pushing through the lower wall."""
+    bars, t, px = [], _T0, 101.0
+    for i in range(30):                          # gentle bleed 101 -> ~99.2
+        o = px                                   # mixed deltas keep RSI off 0
+        c = px + (0.20 if i % 3 == 0 else -0.19)
+        bars.append(_bar(t, o, max(o, c) + 0.15, min(o, c) - 0.15, c, 1000))
+        t += 900; px = c
+    flush = [(99.2, 98.6, 98.5, 99.3, 1500),     # (o, c, l, h, v): tags -2 band
+             (98.6, 98.0, 97.9, 98.7, 1800),
+             (98.0, 97.7, 97.5, 98.1, 2000)]
+    for o, c, l, h, v in flush:
+        bars.append(_bar(t, o, h, l, c, v)); t += 900
+    bars.append(_bar(t, 97.7, 99.4, 97.4, 99.2, 4000)); t += 900   # hammer, 4x vol
+    for o, c, l, h, v in [(99.2, 99.9, 99.1, 100.0, 3000),         # thick up candles
+                          (99.9, 100.5, 99.8, 100.6, 2800),
+                          (100.5, 100.9, 100.4, 101.0, 2600)]:
+        bars.append(_bar(t, o, h, l, c, v)); t += 900
+    return bars
+
+
+def test_read_tape_long_setup_end_to_end():
+    bars = _scripted_long_setup()
+    read = tape.read_tape(bars, ticker="SPY")
+    assert read["bias"] == "long"
+    assert read["stage"] in ("confirming", "triggered")
+    assert read["target"] is not None
+    assert read["spot"] == bars[-1]["c"]
+    assert read["band_position"] in ("-2..-1", "-1..0", "0..+1", "+1..+2", "above_+2")
+    assert read["ha"]["direction"] == "up"
+    assert read["rsi"]["state"] in ("red_curling", "green")
+    assert "SPY" in read["plain"] and str(read["spot"])[:3] in read["plain"]
+    # Quiet tape stays flat: no arm without a band tag.
+    quiet = [_bar(_T0 + i * 900, 100.0, 100.2, 99.8, 100.1, 1000) for i in range(40)]
+    flat = tape.read_tape(quiet)
+    assert flat["stage"] == "none" and flat["bias"] is None
+
+
+def test_get_tape_read_none_when_feed_off(monkeypatch):
+    monkeypatch.setenv("QUOTES_PROVIDER", "off")   # conftest default, made explicit
+    assert tape.get_tape_read("SPY") is None

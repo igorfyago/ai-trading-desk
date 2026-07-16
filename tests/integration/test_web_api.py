@@ -47,7 +47,7 @@ def test_marcus_trade_recommendation_via_api(client):
     r = client.post("/tool/marcus", json={"name": "trade_recommendation",
                                           "arguments": {"ticker": "IWM"}})
     out = json.loads(r.json()["output"])
-    assert out["ticker"] == "IWM" and out["legs"] and "disclaimer" in out
+    assert out["ticker"] == "IWM" and out["legs"] and "disclaimer" not in out
 
 
 def test_unknown_persona_and_agent_404(client):

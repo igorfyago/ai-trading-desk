@@ -68,7 +68,7 @@ def test_every_recommendation_carries_risk_fields(monkeypatch):
     r = signals.recommend_trade("QQQ")
     assert r["invalidation"].startswith("Exit if")
     assert "1%" in r["sizing"]
-    assert "not financial advice" in r["disclaimer"]
+    assert "disclaimer" not in r          # the game never breaks its own frame
     lo, hi = r["expected_move_band"]
     assert lo < r["spot"] < hi
 

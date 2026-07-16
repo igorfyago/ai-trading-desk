@@ -69,6 +69,43 @@ def test_confirm_without_quote_is_a_clean_error(captured_events):
     assert "error" in out
 
 
+def test_adjust_buttons_add_sell_close(quoted):
+    t = trades.adjust(quoted["id"], "add", qty=2, price=2.00)   # first ADD = the entry
+    assert t["status"] == "open" and t["contracts_open"] == 2 and t["entry_px"] == 2.0
+
+    t = trades.adjust(t["id"], "add", qty=2, price=3.00)        # adds re-average
+    assert t["contracts_open"] == 4
+    assert t["entry_px"] == pytest.approx(2.50)
+
+    t = trades.adjust(t["id"], "sell", qty=1, price=3.50)       # partial sell realizes
+    assert t["status"] == "trimmed" and t["contracts_open"] == 3
+    assert t["realized_usd"] == pytest.approx((3.50 - 2.50) * 100)
+
+    t = trades.adjust(t["id"], "close", price=3.00)             # flatten the rest
+    assert t["status"] == "closed" and t["contracts_open"] == 0
+    assert t["realized_usd"] == pytest.approx(100 + (3.00 - 2.50) * 100 * 3)
+
+    s = trades.score()
+    assert s["closed_trades"] >= 1
+    assert s["realized_usd"] == pytest.approx(t["realized_usd"])
+
+
+def test_zero_mark_is_a_real_fill_price(quoted, monkeypatch):
+    """Hold-to-zero is the house style: closing a worthless contract must
+    realize the full loss, not silently fall back to the entry price."""
+    trades.confirm_entry("sess-1", fill_price=2.30, contracts=1)
+    monkeypatch.setattr(trades, "_model_mark", lambda t, **kw: 0.0)
+    t = trades.close_trade("sess-1")
+    assert t["close_px"] == 0.0
+    assert t["realized_usd"] == pytest.approx(-230.0)
+
+
+def test_adjust_guards(quoted):
+    assert "error" in trades.adjust(99999, "add")               # unknown id
+    assert "error" in trades.adjust(quoted["id"], "sell")       # nothing filled yet
+    assert "error" in trades.adjust(quoted["id"], "burn")       # unknown action
+
+
 def test_positions_snapshot_marks_against_snapshot_iv(quoted, monkeypatch):
     trades.confirm_entry("sess-1", fill_price=2.00, contracts=2)
     # live feed off in tests: inject a spot 1% above the entry level

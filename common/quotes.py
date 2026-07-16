@@ -51,6 +51,56 @@ _spot_cache: dict[str, tuple[float, dict]] = {}   # sym -> (monotonic, quote)
 _bars_cache: dict[tuple, tuple[float, dict]] = {}  # (sym, interval) -> (monotonic, payload)
 _SPOT_TTL = {"alpaca": 2.0, "yahoo": 15.0, "cboe": 60.0}
 
+# 24h-freshness contract: the desk always shows the LATEST print — close,
+# post-market, overnight, premarket. A print older than this makes us hunt
+# the other tapes (delayed SIP, Blue Ocean overnight, yahoo pre/post).
+_FRESH_S = 120.0
+
+
+def _ts_utc(iso) -> datetime | None:
+    if not iso:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def _age_s(iso) -> float:
+    ts = _ts_utc(iso)
+    return (datetime.now(timezone.utc) - ts).total_seconds() if ts else 1e9
+
+
+def _et_wall(ts: datetime) -> datetime:
+    """US-Eastern wall clock without tzdata (US DST: 2nd Sun Mar -> 1st Sun Nov)."""
+    def nth_sunday(month: int, n: int) -> datetime:
+        first = datetime(ts.year, month, 1, tzinfo=timezone.utc)
+        return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+
+    dst_start = nth_sunday(3, 2).replace(hour=7)    # 02:00 EST == 07:00 UTC
+    dst_end = nth_sunday(11, 1).replace(hour=6)     # 02:00 EDT == 06:00 UTC
+    offset = -4 if dst_start <= ts < dst_end else -5
+    return ts + timedelta(hours=offset)
+
+
+def session_label(iso) -> str | None:
+    """Which tape printed this: rth / pre / post / overnight (ET clock)."""
+    ts = _ts_utc(iso)
+    if ts is None:
+        return None
+    et = _et_wall(ts)
+    if et.weekday() >= 5:
+        return "overnight"                     # weekend prints = the 24h tape
+    hm = et.hour * 60 + et.minute
+    if 4 * 60 <= hm < 9 * 60 + 30:
+        return "pre"
+    if 9 * 60 + 30 <= hm < 16 * 60:
+        return "rth"
+    if 16 * 60 <= hm < 20 * 60:
+        return "post"
+    return "overnight"
+
 
 def normalize_interval(label: str) -> str | None:
     label = (label or "").strip()
@@ -78,32 +128,65 @@ def provider_order() -> list[str]:
 
 # ------------------------------------------------------------------ spot ----
 
-def _spots_alpaca(symbols: list[str]) -> dict[str, dict]:
-    keys = _alpaca_keys()
-    if not keys:
-        return {}
+def _alpaca_feed(symbols: list[str], feed: str, label: str, delayed: bool,
+                 keys: tuple[str, str]) -> dict[str, dict]:
     r = _client.get(f"{_ALPACA_DATA}/trades/latest",
-                    params={"symbols": ",".join(symbols), "feed": "iex"},
+                    params={"symbols": ",".join(symbols), "feed": feed},
                     headers={"APCA-API-KEY-ID": keys[0], "APCA-API-SECRET-KEY": keys[1]})
-    r.raise_for_status()
+    if r.status_code != 200:     # a tape the plan doesn't carry: not an error
+        return {}
     out = {}
     for sym, t in (r.json().get("trades") or {}).items():
         out[sym] = {"ticker": sym, "price": round(float(t["p"]), 2), "ts": t["t"],
-                    "source": "alpaca·iex", "delayed": False}
+                    "source": f"alpaca·{label}", "delayed": delayed,
+                    "session": session_label(t["t"])}
+    return out
+
+
+def _spots_alpaca(symbols: list[str]) -> dict[str, dict]:
+    """Freshest alpaca print per symbol. IEX is real-time but goes quiet at
+    the close — when its print is stale, the 15-min delayed full SIP tape and
+    the Blue Ocean overnight tape compete; the newest trade wins."""
+    keys = _alpaca_keys()
+    if not keys:
+        return {}
+    out = _alpaca_feed(symbols, "iex", "iex", False, keys)
+    for feed, label in (("delayed_sip", "sip15"), ("overnight", "on")):
+        stale = [s for s in symbols if s not in out or _age_s(out[s]["ts"]) > _FRESH_S]
+        if not stale:
+            break
+        try:
+            cand = _alpaca_feed(stale, feed, label, True, keys)
+        except Exception:
+            cand = {}
+        for s, q in cand.items():
+            if s not in out or _age_s(q["ts"]) < _age_s(out[s]["ts"]):
+                out[s] = q
     return out
 
 
 def _spot_yahoo(symbol: str) -> dict | None:
-    r = _client.get(f"{_YAHOO}/{symbol}", params={"interval": "1m", "range": "1d"})
+    """Last pre/post-inclusive 1m candle — during extended hours this is the
+    real-time print (meta.regularMarketPrice would be the stale 16:00 close)."""
+    r = _client.get(f"{_YAHOO}/{symbol}",
+                    params={"interval": "1m", "range": "1d", "includePrePost": "true"})
     r.raise_for_status()
-    meta = r.json()["chart"]["result"][0]["meta"]
-    px = meta.get("regularMarketPrice")
+    res = r.json()["chart"]["result"][0]
+    px, ts = None, None
+    stamps = res.get("timestamp") or []
+    closes = ((res.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+    for i in range(len(closes) - 1, -1, -1):
+        if closes[i] is not None:
+            px, ts = closes[i], stamps[i]
+            break
+    if px is None:                                   # holiday: meta fallback
+        meta = res["meta"]
+        px, ts = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
     if px is None:
         return None
-    ts = meta.get("regularMarketTime")
-    return {"ticker": symbol, "price": round(float(px), 2),
-            "ts": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None,
-            "source": "yahoo", "delayed": False}
+    iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+    return {"ticker": symbol, "price": round(float(px), 2), "ts": iso,
+            "source": "yahoo", "delayed": False, "session": session_label(iso)}
 
 
 def _spot_cboe(symbol: str) -> dict | None:
@@ -114,29 +197,40 @@ def _spot_cboe(symbol: str) -> dict | None:
     if not px:
         return None
     return {"ticker": symbol, "price": round(float(px), 2),
-            "ts": d.get("last_trade_time"), "source": "cboe·15m", "delayed": True}
+            "ts": d.get("last_trade_time"), "source": "cboe·15m", "delayed": True,
+            "session": session_label(d.get("last_trade_time"))}
 
 
 def fetch_spots(symbols: list[str]) -> dict[str, dict]:
-    """Batched fetch down the provider chain; partial results are fine."""
+    """Batched fetch down the provider chain; partial results are fine.
+    24h contract: providers keep being asked while a symbol's best print is
+    older than _FRESH_S, and the NEWEST print wins — so after the close the
+    chip shows post-market, then overnight, then premarket, never a frozen
+    16:00 close."""
     out: dict[str, dict] = {}
+
+    def _keep_newest(cands: dict[str, dict]) -> None:
+        for s, q in cands.items():
+            if s not in out or _age_s(q["ts"]) < _age_s(out[s]["ts"]):
+                out[s] = q
+
     for prov in provider_order():
-        missing = [s for s in symbols if s not in out]
-        if not missing:
+        want = [s for s in symbols if s not in out or _age_s(out[s]["ts"]) > _FRESH_S]
+        if not want:
             break
         try:
             if prov == "alpaca":
-                out.update(_spots_alpaca(missing))
+                _keep_newest(_spots_alpaca(want))
             elif prov == "yahoo":
-                for s in missing:
+                for s in want:
                     q = _spot_yahoo(s)
                     if q:
-                        out[s] = q
+                        _keep_newest({s: q})
             elif prov == "cboe":
-                for s in missing:
+                for s in want:
                     q = _spot_cboe(s)
                     if q:
-                        out[s] = q
+                        _keep_newest({s: q})
         except Exception:
             continue  # next provider
     now = time.monotonic()
@@ -283,6 +377,11 @@ async def watch_loop(symbols: list[str] | None = None) -> None:
                 if last_px.get(sym) != q["price"]:
                     last_px[sym] = q["price"]
                     bus.publish({"type": "quote", **q})
+            # off-hours the tape prints slowly and every tick hunts several
+            # feeds — ease off so the request budget stays tiny
+            freshest = min((_age_s(q["ts"]) for q in spots.values()), default=1e9)
+            if freshest > 90:
+                cadence = max(cadence, 10.0)
         except Exception:
             pass  # provider hiccup: keep the loop alive
         await asyncio.sleep(cadence)

@@ -38,7 +38,7 @@ async function refreshSpy() {
   if (spyLive) return;                  // stream owns the chip when up
   try {
     const d = await fetch("/api/spot/SPY").then((r) => r.json());
-    paintSpy(d.spot, d.delayed ? "delayed" : (d.source || "live"));
+    paintSpy(d.spot, [d.session, d.source].filter(Boolean).join(" · ") || "live");
   } catch { $("spy-chip").textContent = ""; }
 }
 refreshSpy();
@@ -466,7 +466,7 @@ async function dockChartBoot(underlying) {
     const data = await fetch(`/api/bars/${underlying || "SPY"}?interval=5m&limit=400`)
       .then((r) => (r.ok ? r.json() : null));
     if (!data || !(data.bars || []).length) return;   // text-only dock still works
-    dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS });
+    dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS, mode: "mini" });
     dock.chart.setData(data.bars, DOCK_SECS);
     if (dock.active) { dockLevels(dock.active); dockMarkers(dock.active); }
   } catch { /* chart is a bonus; the pill always works */ }
@@ -514,18 +514,38 @@ function handleDeskEvent(d) {
   if (d.type === "pnl") dockPnl(d.positions);
 }
 
+async function refreshScore() {
+  try {
+    const s = await fetch("/api/score").then((r) => r.json());
+    const el = $("score-chip");
+    if (!el) return;
+    const v = s.score ?? 0;
+    el.textContent = `P&L ${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(0)}` +
+      (s.open_positions ? ` · ${s.open_positions} open` : "");
+    el.className = v >= 0 ? "pos" : "neg";
+  } catch { /* scoreboard is a bonus */ }
+}
+
 function dockStreams() {
-  dock.eventsES = new EventSource("/api/stream/events");
-  dock.eventsES.onmessage = (e) => {
-    let d; try { d = JSON.parse(e.data); } catch { return; }
-    handleDeskEvent(d);
-  };
+  // Embedded inside the landing dashboard (?embed=1) the PARENT page owns the
+  // chart, the score and the trade lines — a second chart in the iframe was
+  // just noise. The embed keeps only the conversation (+ live price chip).
+  const embedded = document.body.classList.contains("embed");
+  if (!embedded) {
+    dock.eventsES = new EventSource("/api/stream/events");
+    dock.eventsES.onmessage = (e) => {
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      handleDeskEvent(d);
+      if (d.type === "trade" || d.type === "pnl") refreshScore();
+    };
+    refreshScore();
+  }
   dock.quotesES = new EventSource("/api/stream/quotes?symbols=SPY");
   dock.quotesES.onmessage = (e) => {
     let d; try { d = JSON.parse(e.data); } catch { return; }
     if (d.type !== "quote" || d.ticker !== "SPY") return;
     spyLive = true;
-    paintSpy(d.price, d.delayed ? "delayed" : "live · " + (d.source || ""));
+    paintSpy(d.price, [d.session, d.source].filter(Boolean).join(" · ") || "live");
     if (dock.chart) {
       const t = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : Math.floor(Date.now() / 1000);
       dock.chart.applyTick(d.price, t);

@@ -167,3 +167,10 @@ body.embed #composer { padding: 10px 4% 14px; }
 body.dock-pip { margin: 0; background: var(--bg); }
 body.dock-pip #dock { height: 100vh; display: flex; flex-direction: column; border: 0; }
 body.dock-pip #dock-body { flex: 1; height: auto; }
+
+/* scoreboard chip (the game) */
+#score-chip { font-family: var(--mono, "IBM Plex Mono", monospace); font-size: 12.5px;
+  font-variant-numeric: tabular-nums; font-weight: 500; margin-left: 12px; }
+#score-chip.pos { color: var(--green); }
+#score-chip.neg { color: var(--red); }
+body.embed #score-chip { display: none; }

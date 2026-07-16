@@ -75,6 +75,7 @@ services:
       ALPACA_KEY_ID: ${ALPACA_KEY_ID:-}
       ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
       WATCH_SYMBOLS: ${WATCH_SYMBOLS:-SPY,QQQ,IWM}
+      X_LIST_HANDLES: ${X_LIST_HANDLES:-}
       # the agents query the LIVE dealer-positioning DB, not the demo SQLite:
       DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
     volumes:

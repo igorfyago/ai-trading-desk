@@ -20,9 +20,6 @@ import json
 from common import db, market
 from common.db import get_connection
 
-DISCLAIMER = ("Demo data + rule-based engine. Educational example only — "
-              "not financial advice, not an offer to trade.")
-
 # House convention: ANALYZE on SPY, EXECUTE in XSP (mini-SPX).
 # XSP usually trades ~+2 over SPY; strikes map SPY level + offset.
 XSP_OFFSET = 2.0
@@ -148,7 +145,6 @@ def recommend_trade(ticker: str) -> dict:
         "levels_note": snap.get("levels_note"),
         "invalidation": f"Exit if {invalidation}.",
         "sizing": "Risk no more than 1% of account on the structure's max loss.",
-        "disclaimer": DISCLAIMER,
     }
 
 
@@ -276,23 +272,25 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
 
 
 def _plain_english_exec(ticker: str, x: dict) -> str:
-    """The desk script: headline, SPY levels, XSP contract, trim, sizing, risk."""
+    """The desk script in house notation (TICKER STRIKEc/p @ PRICE): headline,
+    the exact contract, trim, sizing, risk. Digits, never spelled-out numbers."""
     cp = x.get("contract_plan", {})
-    contract_bit = (f"that's the {cp.get('contract_ticker', ticker)} "
-                    f"{cp.get('contract', '')} " if cp.get("conversion_note") else "")
+    kl = "c" if x["kind"] == "call" else "p"
+    contract = (f"{cp.get('contract_ticker', ticker)} {cp.get('contract', '')}"
+                if cp else f"{ticker} {round(x['strike']):g}{kl}")
     sizing_bit = (
-        f"Clip is {cp.get('budget_usd', 2000):g} dollars: "
-        + (f"all of it now ({cp.get('contracts_now')} contracts) - {cp.get('sizing_why')}. "
+        f"Clip ${cp.get('budget_usd', 2000):g}: "
+        + (f"all of it now ({cp.get('contracts_now')}x) - {cp.get('sizing_why')}. "
            if cp.get("plan") == "full clip" else
-           f"half now ({cp.get('contracts_now')} contracts, {cp.get('now_usd')} dollars), "
+           f"half now ({cp.get('contracts_now')}x, ${cp.get('now_usd')}), "
            f"the other half waits - {cp.get('add_trigger')}. ")
     ) if cp else ""
     return (
         f"{x['gex_headline']} - {x['gex_why']}. "
-        f"With {ticker} at {x['entry_underlying']:g}, buy ATM {x['kind']}s - "
-        f"{contract_bit}expiring {x['expiry']} ({x['dte_days']:g} days), about "
-        f"{x['entry_option_price_est']:.2f} per contract. "
-        f"Sell HALF when the contract is up fifty percent - around "
+        f"With {ticker} at {x['entry_underlying']:g}: buy {contract} @ "
+        f"~{x['entry_option_price_est']:.2f}, expiring {x['expiry']} "
+        f"({x['dte_days']:g} DTE). "
+        f"Sell HALF when the contract is up fifty percent - {contract} @ "
         f"{x['tp50_option_price']:.2f}, {ticker} near {x['tp50_underlying_est']:g} - "
         f"then let the rest ride. "
         f"{sizing_bit}"

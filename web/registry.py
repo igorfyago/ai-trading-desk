@@ -46,7 +46,10 @@ def _live_context(text: str) -> str:
     feed, the latest chain snapshot (structure), plus fresh headlines."""
     from common import market, news
 
-    tickers = list({m.upper() for m in TICKER_RE.findall(text)}) or ["SPY", "QQQ", "IWM"]
+    # SPY is the desk's home ticker: it leads when named, and no ticker at all
+    # means SPY only — QQQ/IWM context arrives when the user asks for them
+    found = {m.upper() for m in TICKER_RE.findall(text)}
+    tickers = sorted(found, key=lambda t: (t != "SPY", t)) or ["SPY"]
     parts = []
     for t in tickers[:3]:
         live = market.live_spot(t)

@@ -111,13 +111,28 @@ def log_quote(session: str, rec: dict, source: str = "marcus") -> dict | None:
     return trade
 
 
+def _fill_px(price, trade: dict, *fallback_cols: str) -> float | None:
+    """Order-ticket fill price: caller's price, else the live model mark, else
+    stored fallbacks. A 0.00 mark is a REAL price (options expire worthless —
+    the house holds to zero), so only None means 'missing'."""
+    if price is not None:
+        return round(float(price), 2)
+    mark = _model_mark(trade)
+    if mark is not None:
+        return mark
+    for col in fallback_cols:
+        if trade.get(col) is not None:
+            return trade[col]
+    return None
+
+
 def confirm_entry(session: str, fill_price: float | None = None,
                   contracts: int | None = None) -> dict:
     trade = _latest(session, ("quoted",))
     if trade is None:
         return {"error": "no quoted trade to confirm — ask for the trade first"}
     now = _now()
-    entry = round(float(fill_price), 2) if fill_price else trade["quoted_px"]
+    entry = round(float(fill_price), 2) if fill_price is not None else trade["quoted_px"]
     total = int(contracts) if contracts else trade["contracts_total"]
     conn = get_connection()
     conn.execute("UPDATE trades SET status='open', entry_px=?, entry_at=?,"
@@ -135,7 +150,7 @@ def trim_half(session: str, price: float | None = None) -> dict:
     if trade is None:
         return {"error": "no open position to trim"}
     now = _now()
-    px = round(float(price), 2) if price else (_model_mark(trade) or trade["tp50_px"])
+    px = _fill_px(price, trade, "tp50_px")
     sold = max(trade["contracts_open"] // 2, 1)
     remaining = trade["contracts_open"] - sold
     realized = trade["realized_usd"] + (px - trade["entry_px"]) * 100 * sold
@@ -156,7 +171,7 @@ def close_trade(session: str, price: float | None = None) -> dict:
     if trade is None:
         return {"error": "no position to close"}
     now = _now()
-    px = round(float(price), 2) if price else (_model_mark(trade) or trade["entry_px"])
+    px = _fill_px(price, trade, "entry_px")
     realized = trade["realized_usd"] + (px - trade["entry_px"]) * 100 * trade["contracts_open"]
     conn = get_connection()
     conn.execute("UPDATE trades SET status='closed', close_px=?, close_at=?,"
@@ -212,3 +227,90 @@ def positions_snapshot() -> list[dict]:
 
 def recent_trades(limit: int = 12) -> list[dict]:
     return _fetch(limit=limit)
+
+
+# ------------------------------------------------------------- the game ----
+
+def adjust(trade_id: int, action: str, qty: int | None = None,
+           price: float | None = None) -> dict:
+    """Position buttons (ADD / SELL / CLOSE) — the sim's order ticket.
+    price defaults to the live model mark; adds re-average the entry."""
+    rows = _fetch("id = ?", (trade_id,), 1)
+    if not rows:
+        return {"error": f"no trade #{trade_id}"}
+    t = rows[0]
+    if t["status"] not in ("quoted", "open", "trimmed"):
+        return {"error": f"trade #{trade_id} is {t['status']}"}
+    px = _fill_px(price, t, "quoted_px", "entry_px")
+    if px is None:
+        return {"error": "no price available to fill at"}
+    qty = max(int(qty or 1), 1)
+    now = _now()
+    conn = get_connection()
+
+    if action == "add":
+        if t["status"] == "quoted":   # first ADD = the entry
+            conn.execute("UPDATE trades SET status='open', entry_px=?, entry_at=?,"
+                         " updated_at=?, contracts_total=?, contracts_open=? WHERE id=?",
+                         (px, now, now, qty, qty, t["id"]))
+            event = "opened"
+        else:
+            open_n, total_n = t["contracts_open"] + qty, t["contracts_total"] + qty
+            avg = round((t["entry_px"] * t["contracts_open"] + px * qty) / open_n, 2)
+            conn.execute("UPDATE trades SET entry_px=?, updated_at=?,"
+                         " contracts_total=?, contracts_open=? WHERE id=?",
+                         (avg, now, total_n, open_n, t["id"]))
+            event = "added"
+    elif action == "sell":
+        if t["status"] == "quoted":
+            conn.close()
+            return {"error": "nothing filled yet — ADD first"}
+        sold = min(qty, t["contracts_open"])
+        remaining = t["contracts_open"] - sold
+        realized = t["realized_usd"] + (px - t["entry_px"]) * 100 * sold
+        status = "closed" if remaining == 0 else "trimmed"
+        conn.execute("UPDATE trades SET status=?, trim_px=?, trim_at=?, updated_at=?,"
+                     " contracts_open=?, realized_usd=?" +
+                     (", close_px=?, close_at=?" if remaining == 0 else "") +
+                     " WHERE id=?",
+                     (status, px, now, now, remaining, round(realized, 2),
+                      *((px, now) if remaining == 0 else ()), t["id"]))
+        event = "closed" if remaining == 0 else "trimmed"
+    elif action == "close":
+        if t["status"] == "quoted":
+            conn.execute("UPDATE trades SET status='closed', close_at=?, updated_at=?,"
+                         " contracts_open=0 WHERE id=?", (now, now, t["id"]))
+            event = "closed"
+        else:
+            realized = t["realized_usd"] + (px - t["entry_px"]) * 100 * t["contracts_open"]
+            conn.execute("UPDATE trades SET status='closed', close_px=?, close_at=?,"
+                         " updated_at=?, contracts_open=0, realized_usd=? WHERE id=?",
+                         (px, now, now, round(realized, 2), t["id"]))
+            event = "closed"
+    else:
+        conn.close()
+        return {"error": f"unknown action '{action}'"}
+
+    conn.commit()
+    conn.close()
+    trade = _fetch("id = ?", (t["id"],), 1)[0]
+    _emit(event, trade)
+    return trade
+
+
+def score() -> dict:
+    """The scoreboard: realized + live-marked unrealized, across the book."""
+    realized = sum(t["realized_usd"] or 0 for t in _fetch("status = 'closed'", (), 200))
+    positions = positions_snapshot()
+    unreal = sum(p["unreal_usd"] or 0 for p in positions)
+    realized += sum(t["realized_usd"] or 0 for t in positions)   # banked trims
+    closed = _fetch("status = 'closed' AND close_px IS NOT NULL", (), 200)
+    wins = sum(1 for t in closed if (t["realized_usd"] or 0) > 0)
+    return {
+        "score": round(realized + unreal, 2),
+        "realized_usd": round(realized, 2),
+        "unrealized_usd": round(unreal, 2),
+        "open_positions": len(positions),
+        "closed_trades": len(closed),
+        "win_rate": round(wins / len(closed) * 100) if closed else None,
+    }

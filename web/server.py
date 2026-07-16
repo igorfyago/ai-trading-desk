@@ -162,16 +162,82 @@ def x_pulse(ticker: str):
     return {"available": True, "pulse": p}
 
 
+PERSONA_CATEGORY = {"marcus": "finance", "riley": "agency", "quinn": "agency"}
+
+
 @app.get("/agents")
 def agents():
+    from web import personas_store
+
     return {
         "text_agents": registry.AGENT_META,
         "voice_personas": [
-            {"id": pid, "label": p["label"], "tagline": p["tagline"]}
+            {"id": pid, "label": p["label"], "tagline": p["tagline"],
+             "category": PERSONA_CATEGORY.get(pid, "agency")}
             for pid, p in PERSONAS.items()
-        ],
+        ] + personas_store.list_customs(),
         "realtime_model": REALTIME_MODEL,
+        "builder": {"voices": personas_store.VOICES, "tools": personas_store.TOOL_ALLOWLIST},
     }
+
+
+class PersonaIn(BaseModel):
+    label: str
+    tagline: str = ""
+    voice: str
+    instructions: str
+    tools: list[str] = []
+
+
+@app.post("/api/personas")
+def create_persona(body: PersonaIn, request: Request):
+    """The agent builder. Admin-gated: requires the admin token to mint new agents."""
+    from web import personas_store
+
+    admin = os.getenv("ADMIN_TOKEN") or os.getenv("TV_WEBHOOK_TOKEN")
+    if not admin or request.headers.get("x-admin-token") != admin:
+        raise HTTPException(403, "admin token required")
+    try:
+        return personas_store.create(body.label, body.tagline or "custom agent",
+                                     body.voice, body.instructions, body.tools)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+
+_ATLAS_CACHE: dict = {}
+
+
+@app.get("/api/atlas")
+def atlas():
+    """The real runtime topology of every agent, as mermaid — drawn from the
+    compiled LangGraph graphs themselves, not hand-made diagrams."""
+    if _ATLAS_CACHE:
+        return _ATLAS_CACHE
+    graphs = []
+    try:
+        rt = registry.runtime()
+        for meta in registry.AGENT_META:
+            aid = meta["id"]
+            if aid == "brief":
+                mmd = ("flowchart LR\n  Q([question]) --> P[prompt + live context]\n"
+                       "  P --> M[LLM structured output]\n  M --> A([typed MarketQuery])")
+            else:
+                mmd = rt[aid].get_graph().draw_mermaid()
+            graphs.append({"id": aid, "name": meta["name"], "category": meta["category"],
+                           "kind": "LangGraph runtime graph" if aid != "brief" else "LangChain call",
+                           "mermaid": mmd})
+    except Exception as exc:
+        return {"error": str(exc), "graphs": []}
+    for pid, p in PERSONAS.items():
+        tools = "\n".join(f"  M -->|{t['name']}| T{i}[{t['name']}]\n  T{i} --> M"
+                          for i, t in enumerate(p["tools"]))
+        graphs.append({"id": pid, "name": p["label"],
+                       "category": PERSONA_CATEGORY.get(pid, "agency"),
+                       "kind": "Realtime voice (WebRTC / SIP)",
+                       "mermaid": "flowchart LR\n  C([caller audio]) <--> M[gpt-realtime-2.1\\n+ persona]\n"
+                                  + tools})
+    _ATLAS_CACHE.update({"graphs": graphs})
+    return _ATLAS_CACHE
 
 
 # ------------------------------------------------------------------- chat ----
@@ -271,9 +337,11 @@ async def create_bridge_session(agent_id: str):
 
 @app.post("/session/{persona}")
 async def create_session(persona: str):
-    if persona not in PERSONAS:
+    from web import personas_store
+
+    p = personas_store.resolve(persona)
+    if p is None:
         raise HTTPException(404, f"unknown persona '{persona}'")
-    p = PERSONAS[persona]
     data = await _mint_secret({
         "type": "realtime", "model": REALTIME_MODEL,
         "instructions": p["instructions"],
@@ -304,9 +372,13 @@ def execute_bridge_tool(agent_id: str, call: ToolCall):
 
 @app.post("/tool/{persona}")
 def execute_tool(persona: str, call: ToolCall):
-    if persona not in PERSONAS:
+    if persona in PERSONAS:
+        return {"output": run_tool(persona, call.name, call.arguments)}
+    from web import personas_store
+
+    if personas_store.resolve(persona) is None:
         raise HTTPException(404, f"unknown persona '{persona}'")
-    return {"output": run_tool(persona, call.name, call.arguments)}
+    return {"output": personas_store.run_custom_tool(persona, call.name, call.arguments)}
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

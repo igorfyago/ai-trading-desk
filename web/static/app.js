@@ -25,15 +25,20 @@ const md = (text) => DOMPurify.sanitize(marked.parse(text ?? ""));
 async function boot() {
   catalog = await fetch("/agents").then((r) => r.json());
   const ta = $("text-agents");
+  ta.innerHTML = "";
   for (const a of catalog.text_agents) {
     ta.appendChild(agentButton({ kind: "text", id: a.id, name: a.name, desc: a.desc, hint: a.hint },
       `L${a.level}`));
   }
-  const vp = $("voice-personas");
+  const groups = { finance: $("finance-voice"), agency: $("agency-personas"), custom: $("custom-personas") };
+  Object.values(groups).forEach((el) => (el.innerHTML = ""));
   for (const p of catalog.voice_personas) {
-    vp.appendChild(agentButton({ kind: "persona", id: p.id, name: p.label, desc: p.tagline }, "🎙"));
+    const target = groups[p.category] || groups.agency;
+    target.appendChild(agentButton({ kind: "persona", id: p.id, name: p.label, desc: p.tagline }, "🎙"));
   }
-  select({ kind: "text", ...catalog.text_agents[0] });
+  $("custom-label").style.display = groups.custom.children.length ? "" : "none";
+  renderBuilderOptions();
+  if (!current) select({ kind: "text", ...catalog.text_agents[0] });
 }
 
 function agentButton(sel, badge) {
@@ -360,6 +365,42 @@ async function runVoiceTool(item) {
 }
 
 /* --------------------------------------------------------------- wire ---- */
+
+/* ------------------------------------------------------------ builder ---- */
+
+function renderBuilderOptions() {
+  const b = catalog.builder || { voices: [], tools: [] };
+  $("b-voice").innerHTML = b.voices.map((v) => `<option>${v}</option>`).join("");
+  $("b-tools").innerHTML = b.tools.map((t) =>
+    `<label><input type="checkbox" value="${t}"> ${t}</label>`).join("");
+}
+
+$("open-builder").onclick = () => $("builder-overlay").classList.add("open");
+$("b-cancel").onclick = () => $("builder-overlay").classList.remove("open");
+
+$("b-create").onclick = async () => {
+  const msg = $("b-msg");
+  msg.className = ""; msg.textContent = "creating…";
+  try {
+    const resp = await fetch("/api/personas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "X-Admin-Token": $("b-token").value.trim() },
+      body: JSON.stringify({
+        label: $("b-name").value.trim(),
+        tagline: $("b-tag").value.trim(),
+        voice: $("b-voice").value,
+        instructions: $("b-instr").value.trim(),
+        tools: [...document.querySelectorAll("#b-tools input:checked")].map((i) => i.value),
+      }),
+    });
+    const d = await resp.json();
+    if (!resp.ok) throw new Error(d.detail || "failed");
+    msg.className = "ok"; msg.textContent = `created "${d.label}" — it's in the sidebar`;
+    await boot();
+    setTimeout(() => $("builder-overlay").classList.remove("open"), 900);
+  } catch (e) { msg.textContent = e.message; }
+};
 
 $("send").onclick = send;
 $("input").addEventListener("keydown", (e) => {

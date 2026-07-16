@@ -19,20 +19,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-AGENT_META = [
-    {"id": "brief", "level": 1, "name": "Market Brief",
+AGENT_META = [   # category: finance | agency | custom
+    {"id": "brief", "category": "finance", "level": 1, "name": "Market Brief",
      "desc": "Structured-output strategist. One LLM call, typed answer.",
      "hint": "Is SPY pinned by dealers into Friday opex?"},
-    {"id": "sql", "level": 2, "name": "SQL Analyst",
+    {"id": "sql", "category": "finance", "level": 2, "name": "SQL Analyst",
      "desc": "English → SQL over the GEX database, self-correcting tool loop.",
      "hint": "Top 5 put walls by strength, with spot at the time"},
-    {"id": "repo", "level": 3, "name": "Repo Guide",
+    {"id": "repo", "category": "finance", "level": 3, "name": "Repo Guide",
      "desc": "RAG over the options-flow-analytics codebase, with citations.",
      "hint": "How is the gamma flip level computed?"},
-    {"id": "research", "level": 4, "name": "Research Desk",
+    {"id": "research", "category": "finance", "level": 4, "name": "Research Desk",
      "desc": "LangGraph: plan → multi-tool research → critic loop → report.",
      "hint": "Compare dealer positioning on SPY vs QQQ"},
-    {"id": "analyst", "level": 5, "name": "Desk Analyst",
+    {"id": "analyst", "category": "finance", "level": 5, "name": "Desk Analyst",
      "desc": "Multi-path graph: regime router, 3 parallel specialists, risk gate, "
              "and YOUR approval before publishing.",
      "hint": "Run the desk on SPY"},

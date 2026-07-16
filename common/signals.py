@@ -73,7 +73,8 @@ def recommend_trade(ticker: str) -> dict:
 
     spot, flip = snap["spot"], snap["gamma_flip"] or snap["spot"]
     dte = market.days_to(snap["expiry"])
-    step = max(round(spot * 0.005), 1)
+    # index ETFs/XSP trade $1 strikes; 0.5%-spaced grid only for anything else
+    step = 1 if ticker in ("SPY", "XSP", "QQQ", "IWM") else max(round(spot * 0.005), 1)
     atm = round(spot / step) * step
     call_wall, put_wall = walls["call"]["strike"], walls["put"]["strike"]
     score = snap["signal_score"] or 0

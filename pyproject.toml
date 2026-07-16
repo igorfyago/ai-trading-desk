@@ -1,0 +1,30 @@
+[project]
+name = "ai-trading-desk"
+version = "0.1.0"
+description = "A ladder of finance AI agents — from a single structured LLM call to multi-path LangGraph workflows and real-time voice agents staffing an options trading desk."
+requires-python = ">=3.10"
+dependencies = [
+    "langchain>=1.0,<2.0",
+    "langchain-core>=1.0,<2.0",
+    "langgraph>=1.0,<2.0",
+    "langchain-openai>=1.0",
+    "langchain-text-splitters>=1.0",
+    "langchain-chroma>=0.2",
+    "langsmith>=0.3.0",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+postgres = [
+    "psycopg[binary]>=3.1",
+]
+
+[tool.setuptools]
+packages = ["common"]

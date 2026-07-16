@@ -17,6 +17,20 @@ import httpx
 _CACHE: dict[str, tuple[float, dict | None]] = {}
 _TTL_SECONDS = 240
 
+# Public-endpoint billing guard: at most N uncached Grok calls per hour,
+# whole process. Cached reads are unlimited.
+_MAX_LIVE_CALLS_PER_HOUR = 30
+_window: list[float] = []
+
+
+def _budget_ok() -> bool:
+    now = time.time()
+    _window[:] = [t for t in _window if now - t < 3600]
+    if len(_window) >= _MAX_LIVE_CALLS_PER_HOUR:
+        return False
+    _window.append(now)
+    return True
+
 
 def available() -> bool:
     return bool(os.getenv("XAI_API_KEY"))
@@ -30,6 +44,8 @@ def pulse(ticker: str) -> dict | None:
     now = time.time()
     if key in _CACHE and now - _CACHE[key][0] < _TTL_SECONDS:
         return _CACHE[key][1]
+    if not _budget_ok():
+        return _CACHE.get(key, (0, None))[1]
 
     since = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
     try:

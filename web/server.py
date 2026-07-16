@@ -93,6 +93,22 @@ def ticker_summary(ticker: str):
     }
 
 
+@app.post("/webhook/openai")
+async def openai_webhook(request: Request):
+    """Incoming phone calls (Realtime SIP): verify, accept as Riley, and run
+    her tools server-side for the duration of the call. See docs/PHONE.md."""
+    from web import phone
+
+    if not phone.webhook_secret():
+        raise HTTPException(503, "phone line not configured (OPENAI_WEBHOOK_SECRET)")
+    event = phone.verify_and_parse(await request.body(), request.headers)
+    if event is None:
+        raise HTTPException(400, "invalid webhook signature")
+    if event.get("type") == "realtime.call.incoming":
+        return phone.handle_incoming(event)
+    return {"handled": False, "type": event.get("type")}
+
+
 @app.post("/webhook/tradingview")
 async def tradingview_webhook(request: Request, token: str = ""):
     """Receives TradingView alert webhooks :

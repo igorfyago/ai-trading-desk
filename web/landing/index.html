@@ -69,6 +69,28 @@
   .dnote { color:var(--dim); font-size:12.5px; }
   @media (max-width: 980px) { .dgrid { grid-template-columns:1fr; } #tv-wrap { min-height:340px; } }
 
+  /* voice kit */
+  #kit { flex-direction:column; overflow-y:auto; padding:30px 7% 40px; gap:18px; }
+  #kit .khero h2 { font-size:clamp(20px,2.6vw,30px); }
+  #kit .khero p { color:var(--dim); max-width:52em; margin-top:8px; }
+  .kgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr)); gap:14px; }
+  .kcalc { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .kcalc h3 { font-size:14px; margin-bottom:4px; }
+  .kcalc p.sub { color:var(--dim); font-size:12px; margin-bottom:12px; }
+  .kcalc label { display:flex; justify-content:space-between; gap:10px; font-size:12.5px;
+                 color:var(--dim); margin:7px 0; align-items:center; }
+  .kcalc input { width:110px; background:var(--panel2); border:1px solid var(--line);
+                 border-radius:7px; color:var(--text); padding:5px 9px; font:inherit; font-size:13px; }
+  .kout { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; font-size:13.5px; }
+  .kout b { color:var(--green); }
+  .kout .bad { color:#ff6b6b; }
+  .kbooks details { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+                    padding:14px 16px; margin-bottom:10px; }
+  .kbooks summary { cursor:pointer; font-weight:600; font-size:14px; }
+  .kbooks summary small { color:var(--dim); font-weight:400; margin-left:8px; }
+  .kbooks .body { color:var(--dim); font-size:13.5px; line-height:1.65; margin-top:10px; }
+  .kbooks .body b { color:var(--text); }
+
   /* overview */
   #overview { flex-direction:column; overflow-y:auto; padding:7vh 9% 6vh; }
   #overview .tag { color:var(--green); font-size:12.5px; letter-spacing:1.5px;
@@ -99,6 +121,8 @@
       <span>Trading Desk<small>chat &amp; voice with 8 agents</small></span></button>
     <button class="tab" data-pane="gex"><span class="ic">📊</span>
       <span>GEX Dashboard<small>live dealer positioning</small></span></button>
+    <button class="tab" data-pane="kit"><span class="ic">🎙</span>
+      <span>Voice Kit<small>calculators &amp; playbooks that ship</small></span></button>
     <a class="tab" href="https://github.com/igorfyago/ai-trading-desk" target="_blank"><span class="ic">⚙️</span>
       <span>The Code<small>github · agents ladder</small></span></a>
     <a class="tab" href="https://github.com/igorfyago/options-flow-analytics" target="_blank"><span class="ic">🦀</span>
@@ -170,6 +194,112 @@
       </div>
     </section>
 
+    <section class="pane" id="kit">
+      <div class="khero">
+        <h2>The Voice Agent Kit — from someone who ships.</h2>
+        <p>Most voice-AI kits teach you to resell no-code wrappers. This one comes with the
+           receipts: the agents are <b style="color:var(--text)">live on this site</b>, the code is open,
+           and every number below comes from actually building and running them. Use the calculators,
+           read the field notes, then go press the mic.</p>
+      </div>
+
+      <div class="kgrid">
+        <div class="kcalc">
+          <h3>True cost per minute</h3>
+          <p class="sub">Raw APIs vs a no-code platform — where's the breakeven?</p>
+          <label>Minutes / month <input id="c1-min" type="number" value="2000"></label>
+          <label>Platform fee $/min <input id="c1-plat" type="number" step="0.01" value="0.07"></label>
+          <label>Raw model cost $/min <input id="c1-raw" type="number" step="0.01" value="0.10"></label>
+          <label>Your infra $/month <input id="c1-infra" type="number" value="25"></label>
+          <div class="kout" id="c1-out"></div>
+        </div>
+
+        <div class="kcalc">
+          <h3>Latency budget</h3>
+          <p class="sub">Feels human under ~800 ms voice-to-voice. Where does yours go?</p>
+          <label>Speech-to-text ms <input id="c2-stt" type="number" value="150"></label>
+          <label>LLM first token ms <input id="c2-llm" type="number" value="350"></label>
+          <label>Text-to-speech ms <input id="c2-tts" type="number" value="200"></label>
+          <label>Network + VAD ms <input id="c2-net" type="number" value="180"></label>
+          <div class="kout" id="c2-out"></div>
+        </div>
+
+        <div class="kcalc">
+          <h3>Agency pricing</h3>
+          <p class="sub">What a voice-agent client is actually worth.</p>
+          <label>Setup fee $ <input id="c3-setup" type="number" value="1500"></label>
+          <label>Retainer $/month <input id="c3-ret" type="number" value="350"></label>
+          <label>Client minutes / mo <input id="c3-min" type="number" value="1500"></label>
+          <label>Your cost $/min <input id="c3-cost" type="number" step="0.01" value="0.12"></label>
+          <label>Target income $/mo <input id="c3-goal" type="number" value="8000"></label>
+          <div class="kout" id="c3-out"></div>
+        </div>
+      </div>
+
+      <div class="kbooks">
+        <details open>
+          <summary>Raw APIs vs platforms <small>when each one wins</small></summary>
+          <div class="body">Platforms (Vapi, Retell, Bland) resell the same models you can call directly —
+          you pay ~$0.05–0.10/min for a config UI, telephony, and not writing code. Worth it below ~1,000
+          min/month or when the client owns nothing. Raw APIs win when you need <b>custom tools against
+          real systems</b> (databases, calendars, trading engines), sub-vendor costs at scale, or you're
+          selling engineering credibility. The desk on this site is raw: speech-to-speech over WebRTC,
+          tools executing server-side, one ephemeral key per session. Rule of thumb: prototype on either,
+          but if the demo IS the product — go raw and own it.</div>
+        </details>
+        <details>
+          <summary>Personas that sound human <small>what we un-learned the hard way</small></summary>
+          <div class="body">Human ≠ hesitant. Our v1 mandated reaction beats ("oh—yeah…") and engineered
+          mistakes; it read as a broken machine within a day of real calls. What works: <b>confidence as
+          the first rule</b> (direct first words, zero warm-up sounds), filler words as an explicit dial
+          set to "occasionally" or "none", a variety rule (never the same sentence twice), and OpenAI's
+          persona skeleton — Role &amp; Objective, Personality dials, Context, Reference Pronunciations,
+          numbered Conversation Flow with sample phrases, Safety. Every dial is in
+          <b>agents/06_voice/personas.py</b> in the repo.</div>
+        </details>
+        <details>
+          <summary>Turn-taking &amp; noise <small>the #1 demo killer</small></summary>
+          <div class="body">Coughs, keyboards and mumbles will trigger your agent mid-silence and users
+          hate it more than any other flaw. Three-layer fix: <b>semantic VAD with eagerness low</b>
+          (waits for end-of-thought, not end-of-sound), an explicit prompt rule — <b>noise is not speech;
+          the human response to noise is silence</b>, at most one casual "you say something?" — and a
+          client-side idle hang-up (3 min) so an abandoned mic doesn't babble or bill.</div>
+        </details>
+        <details>
+          <summary>Sound design <small>foley yes, drone no</small></summary>
+          <div class="body">Dead digital silence between words screams bot — but a synthetic "office
+          ambience" loop reads as traffic noise. What survived user testing: <b>keyboard foley tied to
+          real tool calls</b> (she says "one sec, pulling that up" and you hear actual typing while the
+          API call runs) plus occasional idle keystrokes. Procedurally generated in ~60 lines of Web
+          Audio — no audio files. Skip the room tone.</div>
+        </details>
+        <details>
+          <summary>Security for public agents <small>the part kits never mention</small></summary>
+          <div class="body">A public voice agent is an open prompt to your infrastructure. Non-negotiables:
+          <b>ephemeral per-session keys</b> minted server-side (the real key never reaches the browser),
+          all tools execute <b>server-side</b>, read-only DB access with keyword guardrails, spend caps on
+          every API key, token-gated webhooks, hourly budget guards on expensive endpoints — and never,
+          ever a personal login wired into a public agent: anything the agent can see, any caller can
+          extract by asking.</div>
+        </details>
+        <details>
+          <summary>Prove it works <small>traces, tests, evals</small></summary>
+          <div class="body">A demo that worked once is not a product. The desk ships with <b>LangSmith
+          traces</b> on every run (including voice tool calls), 48 CI-gated tests (pricing math, SQL
+          injection guardrails, graph topology), and <b>graded evals</b> — text-to-SQL is scored by
+          executing reference queries against a deterministic DB, no LLM judge needed. When a client asks
+          "how do you know it still works?", you show the dashboard, not a shrug.</div>
+        </details>
+      </div>
+
+      <div class="cards">
+        <div class="card" data-pane="desk"><h3>🎙 Don't take our word for it</h3>
+          <p>The agents are live right now — call Riley, ask Marcus for the trade.</p></div>
+        <div class="card" onclick="window.open('https://github.com/igorfyago/ai-trading-desk','_blank')">
+          <h3>⚙️ Take the code</h3><p>MIT-spirit portfolio repo: agents ladder, evals, deploy scripts.</p></div>
+      </div>
+    </section>
+
     <section class="pane" id="desk">
       <iframe data-src="https://desk.b4rruf3t.com" title="Trading Desk"
               allow="microphone; autoplay; clipboard-write"></iframe>
@@ -192,6 +322,41 @@
   }
   document.querySelectorAll("[data-pane]").forEach(el =>
     el.addEventListener("click", () => show(el.dataset.pane)));
+
+  /* ------------------------------------------------------- voice kit ---- */
+  const $k = (id) => parseFloat(document.getElementById(id).value) || 0;
+
+  function calcAll() {
+    // 1. true cost per minute
+    const mins = $k("c1-min"), plat = $k("c1-plat"), raw = $k("c1-raw"), infra = $k("c1-infra");
+    const platTotal = mins * (plat + raw), rawTotal = mins * raw + infra;
+    const be = plat > 0 ? Math.ceil(infra / plat) : 0;
+    document.getElementById("c1-out").innerHTML =
+      `Platform: <b>$${platTotal.toFixed(0)}</b>/mo &nbsp;·&nbsp; Raw: <b>$${rawTotal.toFixed(0)}</b>/mo<br>` +
+      (rawTotal < platTotal
+        ? `Raw saves <b>$${(platTotal - rawTotal).toFixed(0)}/mo</b> — breakeven at ~${be.toLocaleString()} min/mo.`
+        : `Below ~${be.toLocaleString()} min/mo the platform fee is cheaper than owning infra.`);
+
+    // 2. latency budget
+    const total = $k("c2-stt") + $k("c2-llm") + $k("c2-tts") + $k("c2-net");
+    const s2s = 300 + $k("c2-net");
+    document.getElementById("c2-out").innerHTML =
+      `Pipeline total: <b class="${total > 800 ? "bad" : ""}">${total} ms</b> ` +
+      `${total > 800 ? "— feels like a bot" : "— acceptable"}<br>` +
+      `Speech-to-speech (one model, no pipeline): <b>${s2s} ms</b>. That's why this site uses it.`;
+
+    // 3. agency pricing
+    const setup = $k("c3-setup"), ret = $k("c3-ret"), cm = $k("c3-min"),
+          cost = $k("c3-cost"), goal = $k("c3-goal");
+    const margin = ret - cm * cost;
+    const clients = margin > 0 ? Math.ceil(goal / margin) : Infinity;
+    document.getElementById("c3-out").innerHTML = margin > 0
+      ? `Margin per client: <b>$${margin.toFixed(0)}/mo</b> (+$${setup.toFixed(0)} setup)<br>` +
+        `Clients for $${goal.toLocaleString()}/mo: <b>${clients}</b>`
+      : `<span class="bad">Retainer doesn't cover minutes — raise price or cut cost/min.</span>`;
+  }
+  document.querySelectorAll(".kcalc input").forEach(i => i.addEventListener("input", calcAll));
+  calcAll();
 
   /* ------------------------------------------------------- dashboard ---- */
   const API = "https://desk.b4rruf3t.com";

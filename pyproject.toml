@@ -21,6 +21,8 @@ dependencies = [
 web = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "websocket-client>=1.7",
+    "openai>=1.60",
 ]
 postgres = [
     "psycopg[binary]>=3.1",

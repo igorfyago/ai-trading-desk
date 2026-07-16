@@ -21,7 +21,7 @@ sequenceDiagram
     O-->>S: ephemeral client secret
     S-->>B: client secret (single-session)
     B->>O: WebRTC SDP offer → answer (audio up/down + data channel)
-    Note over B,O: caller talks; model answers in speech,<br/>interruptible mid-sentence
+    Note over B,O: caller talks — model answers in speech,<br/>interruptible mid-sentence
     O-->>B: response.done → function_call: quote_option({...})
     B->>S: POST /tool/quoting {name, arguments}
     S->>S: Black-Scholes on the desk DB (server-side)

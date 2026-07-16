@@ -17,7 +17,8 @@ const sessionId = (() => {
 let catalog = null;
 let current = null;            // {kind: 'text'|'persona', id, name, desc, hint}
 let busy = false;
-let voice = { live: false, pc: null, dc: null, mic: null, agentLine: null, lastActivity: 0 };
+let voice = { live: false, pc: null, dc: null, mic: null, agentLine: null,
+              audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
 const VOICE_IDLE_MS = 3 * 60 * 1000;   // auto-hangup: an open mic left alone is
                                        // background-noise triggers + token burn
 setInterval(() => {
@@ -272,7 +273,11 @@ async function toggleVoice() {
 
     voice.mic = await navigator.mediaDevices.getUserMedia({ audio: true });
     voice.pc = new RTCPeerConnection();
-    voice.pc.ontrack = (e) => { const a = new Audio(); a.srcObject = e.streams[0]; a.play(); };
+    voice.pc.ontrack = (e) => {
+      voice.audioEl = new Audio();            // kept: the ghost guard mutes it
+      voice.audioEl.srcObject = e.streams[0];
+      voice.audioEl.play();
+    };
     voice.mic.getTracks().forEach((t) => voice.pc.addTrack(t, voice.mic));
     voice.dc = voice.pc.createDataChannel("oai-events");
     voice.dc.onmessage = (e) => handleVoiceEvent(JSON.parse(e.data));
@@ -303,8 +308,10 @@ async function toggleVoice() {
 function hangUp(silent) {
   voice.dc?.close(); voice.pc?.close();
   voice.mic?.getTracks().forEach((t) => t.stop());
+  voice.audioEl?.pause();
   const wasLive = voice.live;
-  voice = { live: false, pc: null, dc: null, mic: null, agentLine: null };
+  voice = { live: false, pc: null, dc: null, mic: null, agentLine: null,
+            audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
   $("mic").classList.remove("live");
   if (!silent) {
     $("voice-state").textContent = "";
@@ -313,13 +320,54 @@ function hangUp(silent) {
   }
 }
 
-async function handleVoiceEvent(ev) {
-  if (ev.type === "conversation.item.input_audio_transcription.completed" ||
-      ev.type === "response.output_audio_transcript.delta") {
-    voice.lastActivity = Date.now();   // real conversation keeps the line open
+/* Ghost-speech kill switch. Server VAD sometimes commits background noise as
+   a "turn" minutes into silence; the model then answers nobody and the noise
+   items pollute the context ("repeats whatever we were talking about").
+   Prompt rules can't stop it — the model never sees the VAD decision — so the
+   CLIENT arbitrates: a turn whose transcription has no real words gets its
+   response cancelled, its audio flushed, and both its items scrubbed from the
+   conversation. After long idle we additionally hold playback muted until the
+   transcript proves a human actually spoke. */
+
+const REAL_WORDS = /[\p{L}\p{N}]{2,}/u;
+const IDLE_GUARD_MS = 30_000;
+
+function killGhostTurn(userItemId) {
+  try {
+    voice.dc.send(JSON.stringify({ type: "response.cancel" }));
+    voice.dc.send(JSON.stringify({ type: "output_audio_buffer.clear" }));
+    if (userItemId) {
+      voice.dc.send(JSON.stringify({ type: "conversation.item.delete", item_id: userItemId }));
+    }
+  } catch { /* channel closing — nothing to kill */ }
+  voice.scrubNext = true;                     // response.done will delete its items
+  const ghost = voice.agentLine && voice.agentLine.closest(".bubble");
+  if (ghost) ghost.remove();                  // never happened, don't show it
+  voice.agentLine = null;
+  liftMuteGuard();
+}
+
+function liftMuteGuard() {
+  if (voice.muteGuard) {
+    voice.muteGuard = false;
+    if (voice.audioEl) voice.audioEl.muted = false;
   }
+}
+
+async function handleVoiceEvent(ev) {
   switch (ev.type) {
+    case "response.created": {
+      // reply starting after a long quiet spell: hold the speaker until the
+      // transcript proves it was a person, not the room (fail-open in 4s)
+      if (Date.now() - voice.lastActivity > IDLE_GUARD_MS && voice.audioEl) {
+        voice.audioEl.muted = true;
+        voice.muteGuard = true;
+        setTimeout(liftMuteGuard, 4000);
+      }
+      break;
+    }
     case "response.output_audio_transcript.delta": {
+      voice.lastActivity = Date.now();        // agent mid-speech keeps the line open
       if (!voice.agentLine) {
         const b = bubble(`${current.name} (voice)`, "agent");
         voice.agentLine = b.querySelector(".md");
@@ -328,9 +376,19 @@ async function handleVoiceEvent(ev) {
       scroll();
       break;
     }
+    case "conversation.item.input_audio_transcription.failed":
+      killGhostTurn(ev.item_id);
+      break;
     case "conversation.item.input_audio_transcription.completed": {
+      const words = (ev.transcript || "").trim();
+      if (!REAL_WORDS.test(words)) {          // noise, breath, mic bump: not speech
+        killGhostTurn(ev.item_id);
+        break;
+      }
+      voice.lastActivity = Date.now();        // ONLY real speech keeps the line open
+      liftMuteGuard();
       const b = bubble("You (voice)", "user");
-      b.querySelector(".md").textContent = (ev.transcript || "").trim() || "(audio)";
+      b.querySelector(".md").textContent = words;
       // transcription lands async — keep it ABOVE the agent's in-flight reply
       const agentBubble = voice.agentLine && voice.agentLine.closest(".bubble");
       if (agentBubble) $("log").insertBefore(b, agentBubble);
@@ -339,7 +397,19 @@ async function handleVoiceEvent(ev) {
     }
     case "response.done": {
       voice.agentLine = null;
-      for (const item of ev.response?.output || []) {
+      const items = ev.response?.output || [];
+      if (voice.scrubNext || ev.response?.status === "cancelled") {
+        voice.scrubNext = false;              // ghost reply: erase it from context
+        for (const item of items) {
+          if (item.id) {
+            try {
+              voice.dc.send(JSON.stringify({ type: "conversation.item.delete", item_id: item.id }));
+            } catch { /* channel closing */ }
+          }
+        }
+        break;                                // and never run its tool calls
+      }
+      for (const item of items) {
         if (item.type === "function_call") await runVoiceTool(item);
       }
       break;

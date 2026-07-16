@@ -106,6 +106,8 @@ def _spot_and_iv(ticker: str) -> tuple[float, float, str] | None:
 
 
 def desk_status(ticker: str) -> str:
+    from common import trades
+
     snap = market.latest_snapshot(ticker)
     if not snap:
         return json.dumps({"error": f"No data for {ticker}. We cover SPY, QQQ, IWM."})
@@ -116,6 +118,7 @@ def desk_status(ticker: str) -> str:
         out.update({"spot": gl["spot_live"], "spot_source": gl["spot_source"],
                     "regime_live": gl["regime_live"], "side": gl["side"],
                     "distance_to_flip": gl["distance_to_flip"]})
+    out["book"] = trades.book_line()
     return json.dumps(out)
 
 
@@ -127,6 +130,7 @@ def trade_recommendation(ticker: str, session: str = "voice") -> str:
         pinned = trades.log_quote(session, rec, source="marcus")
         if pinned:
             rec["trade_log"] = "pinned to the desk chart automatically"
+        rec["book"] = trades.book_line()
     return json.dumps(rec)
 
 
@@ -167,6 +171,7 @@ def confirm_entry(session: str = "voice", fill_price: float | None = None,
     return json.dumps({"status": "open", "contract": f"{t['contract_ticker']} "
                        f"{t['strike']:g}{t['kind'][0]}", "entry_px": t["entry_px"],
                        "contracts": t["contracts_open"],
+                       "book": trades.book_line(),
                        "say": f"Logged — in at {_say_px(t['entry_px'])}."})
 
 
@@ -496,6 +501,14 @@ PERSONAS = {
             "4) DETAIL — quote_option for individual legs, expected_move for "
             "context. After any quote, offer the expected move.\n"
             "5) CLOSE — 'anything else on the board?'\n\n"
+            "# The book — you always know the positions\n"
+            "Your tool results carry a 'book' line: every open position, entry, "
+            "live mark and net P&L. That line is the CURRENT TRUTH — the caller "
+            "also works the book from the chart's ADD / SELL / CLOSE buttons at "
+            "any moment, so trust the freshest 'book' line over anything said "
+            "earlier in the call, and call position_status before advising on "
+            "an existing position. Reference positions naturally ('you're "
+            "carrying the 753c at 3.10, up 90 bucks').\n\n"
             "# Trade log — the chart next to the chat\n"
             "Every trade_recommendation is pinned to the caller's chart "
             "automatically — you may mention it once, five words max ('it's on "

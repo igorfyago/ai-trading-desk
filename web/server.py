@@ -326,6 +326,22 @@ def trade_action(trade_id: int, body: TradeAction):
     return out
 
 
+@app.get("/api/chatlog")
+def chat_history(session: str, limit: int = 60):
+    """The shared transcript: one conversation across the dashboard panel and
+    the full desk (same browser = same session id)."""
+    from common.db import get_connection
+
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT created_at, agent, role, content FROM chat_log"
+        " WHERE session = ? ORDER BY id DESC LIMIT ?",
+        (session, min(max(limit, 1), 200))).fetchall()
+    conn.close()
+    return {"messages": [dict(zip(("created_at", "agent", "role", "content"), r))
+                         for r in reversed(rows)]}
+
+
 @app.get("/api/score")
 def game_score():
     """The scoreboard chip: realized + live unrealized P&L across the book."""
@@ -544,9 +560,20 @@ async def create_session(persona: str):
     p = personas_store.resolve(persona)
     if p is None:
         raise HTTPException(404, f"unknown persona '{persona}'")
+    instructions = p["instructions"]
+    if "position_status" in p.get("implementations", {}):
+        # trading personas start the call already knowing the book
+        from common import trades
+
+        book = trades.book_block() or "BOOK: flat, nothing on."
+        instructions += (
+            "\n\n# The book at call start\n" + book +
+            "\n(Snapshot from when the call connected — the caller can ADD/SELL/"
+            "CLOSE from the chart at any moment; the 'book' line on tool results "
+            "and position_status are the live truth.)")
     data = await _mint_secret({
         "type": "realtime", "model": REALTIME_MODEL,
-        "instructions": p["instructions"],
+        "instructions": instructions,
         "tools": p["tools"], "tool_choice": "auto",
         "audio": AUDIO_CONFIG(p["voice"]),
     })

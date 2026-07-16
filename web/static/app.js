@@ -1,10 +1,19 @@
 /* AI Trading Desk — one conversation, six agents, text + voice. */
 
 const $ = (id) => document.getElementById(id);
-// crypto.randomUUID only exists in secure contexts (https/localhost) — fall back
-const sessionId = crypto.randomUUID
-  ? crypto.randomUUID()
-  : "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+// ONE conversation per browser, across every surface: the dashboard's Marcus
+// panel and the full desk share this id (same origin = same localStorage),
+// so threads, the trade log and the transcript all continue seamlessly.
+const sessionId = (() => {
+  const mint = () => (crypto.randomUUID
+    ? crypto.randomUUID()   // secure contexts only (https/localhost)
+    : "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10));
+  try {
+    let s = localStorage.getItem("desk-session");
+    if (!s) { s = mint(); localStorage.setItem("desk-session", s); }
+    return s;
+  } catch { return mint(); }
+})();
 let catalog = null;
 let current = null;            // {kind: 'text'|'persona', id, name, desc, hint}
 let busy = false;
@@ -60,6 +69,7 @@ async function boot() {
   }
   $("custom-label").style.display = groups.custom.children.length ? "" : "none";
   renderBuilderOptions();
+  await loadHistory();
   if (!current) {
     const want = urlParams.get("agent");
     const persona = want && catalog.voice_personas.find((p) => p.id === want);
@@ -68,6 +78,28 @@ async function boot() {
     else if (textA) select({ kind: "text", ...textA });
     else select({ kind: "text", ...catalog.text_agents[0] });
   }
+}
+
+let historyLoaded = false;
+
+async function loadHistory() {
+  // Replay the shared transcript: whatever was said on ANY surface with this
+  // browser shows up here — one conversation, one desk.
+  if (historyLoaded) return;
+  historyLoaded = true;
+  try {
+    const h = await fetch(`/api/chatlog?session=${sessionId}&limit=40`).then((r) => r.json());
+    if (!(h.messages || []).length) return;
+    const names = {};
+    for (const a of catalog.text_agents) names[a.id] = a.name;
+    for (const m of h.messages) {
+      const who = m.role === "user" ? "You" : (names[m.agent] || m.agent);
+      const b = bubble(who, m.role === "user" ? "user" : "agent");
+      if (m.role === "user") b.querySelector(".md").textContent = m.content;
+      else b.querySelector(".md").innerHTML = md(m.content);
+    }
+    divider("live — same conversation on every screen");
+  } catch { /* fresh start is fine */ }
 }
 
 function agentButton(sel, badge) {

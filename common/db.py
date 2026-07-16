@@ -96,6 +96,15 @@ CREATE TABLE IF NOT EXISTS quotes (
     high_usd REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS chat_log (
+    id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    session TEXT NOT NULL,              -- one conversation across every surface
+    agent TEXT NOT NULL,
+    role TEXT NOT NULL,                 -- 'user' | 'assistant'
+    content TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS trades (
     id INTEGER PRIMARY KEY,
     created_at TEXT NOT NULL,

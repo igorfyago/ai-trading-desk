@@ -67,6 +67,13 @@ def _live_context(text: str) -> str:
     block = news.headlines_block(tickers[0])
     if block:
         parts.append(block)
+    from common import trades
+
+    book = trades.book_block()
+    if book:
+        parts.append(book + "\n(The book can change at any moment from the "
+                     "chart's ADD/SELL/CLOSE buttons — this snapshot is current "
+                     "as of this message.)")
     return "\n".join(parts)
 
 _lock = threading.Lock()
@@ -132,8 +139,38 @@ def _tool_events(update: dict):
                 yield {"type": "tool", "name": tc["name"], "args": args}
 
 
+def _log_chat(session: str, agent: str, role: str, content: str) -> None:
+    """One conversation, every surface: the transcript is server-side so the
+    dashboard's Marcus panel and the full desk replay the SAME chat."""
+    if not content:
+        return
+    try:
+        from datetime import datetime, timezone
+
+        from common.db import get_connection
+
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO chat_log (created_at, session, agent, role, content)"
+            " VALUES (?,?,?,?,?)",
+            (datetime.now(timezone.utc).isoformat(), session, agent, role,
+             content[:8000]))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # the transcript is a convenience, never a failure
+
+
 def stream_chat(agent_id: str, text: str, session: str):
-    """Yield UI events for one user message."""
+    """Yield UI events for one user message (tee'd into the shared transcript)."""
+    _log_chat(session, agent_id, "user", text)
+    for ev in _stream_chat_inner(agent_id, text, session):
+        if ev.get("type") == "final":
+            _log_chat(session, agent_id, "assistant", ev.get("text", ""))
+        yield ev
+
+
+def _stream_chat_inner(agent_id: str, text: str, session: str):
     try:
         rt = runtime()
     except Exception as exc:

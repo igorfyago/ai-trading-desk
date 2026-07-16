@@ -229,6 +229,47 @@ def recent_trades(limit: int = 12) -> list[dict]:
     return _fetch(limit=limit)
 
 
+def book_line() -> str:
+    """The book in one line — appended to trading tool results so the agent's
+    picture refreshes on EVERY tool touch (positions move from the chart's
+    ADD/SELL/CLOSE buttons at any moment, not just from the conversation)."""
+    rows = positions_snapshot()
+    s = score()
+    if not rows:
+        return f"flat; net P&L {s['score']:+.0f} USD"
+    pos = "; ".join(
+        f"{r['contract_ticker']} {r['strike']:g}{r['kind'][0]} x{r['contracts_open']}"
+        f" @ {r['entry_px']}"
+        + (f" ({r['unreal_usd']:+.0f} USD)" if r["unreal_usd"] is not None else "")
+        + (" TP-ZONE" if r["tp_hit"] else "")
+        for r in rows)
+    return f"{pos} | net P&L {s['score']:+.0f} USD"
+
+
+def book_block() -> str:
+    """Multi-line book context for prompts (agent context injection, voice
+    session mint). Empty string when there is nothing worth saying."""
+    rows = positions_snapshot()
+    s = score()
+    if not rows and not s["closed_trades"]:
+        return ""
+    if not rows:
+        return (f"BOOK: flat. Realized P&L {s['realized_usd']:+.0f} USD across "
+                f"{s['closed_trades']} closed trades.")
+    lines = []
+    for r in rows:
+        mark = f"mark {r['mark']:.2f}" if r["mark"] is not None else "mark n/a"
+        pnl = (f", {r['unreal_usd']:+.0f} USD ({r['unreal_pct']:+.1f}%)"
+               if r["unreal_usd"] is not None else "")
+        lines.append(
+            f"- {r['contract_ticker']} {r['strike']:g}{r['kind'][0]} x{r['contracts_open']}"
+            f" @ {r['entry_px']} ({r['status']}), {mark}{pnl}"
+            + (" — TP ZONE (+50% trim level hit)" if r["tp_hit"] else ""))
+    return (f"OPEN BOOK ({len(rows)} position{'s' if len(rows) != 1 else ''}, "
+            f"net P&L {s['score']:+.0f} USD, realized {s['realized_usd']:+.0f}):\n"
+            + "\n".join(lines))
+
+
 # ------------------------------------------------------------- the game ----
 
 def adjust(trade_id: int, action: str, qty: int | None = None,

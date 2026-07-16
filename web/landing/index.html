@@ -7,7 +7,7 @@
 <title>b4rruf3t — AI Trading Desk</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<script src="https://desk.b4rruf3t.com/static/themes.js" defer></script>
+<script src="https://desk.b4rruf3t.com/static/themes.js?v=3" defer></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -222,7 +222,7 @@
     <button class="tab active" data-pane="dash"><span class="ic">📈</span>
       <span>Trade<small>chart · agent · live P&amp;L</small></span></button>
     <button class="tab" data-pane="positions"><span class="ic">💼</span>
-      <span>Positions<small>holdings · score · history</small></span></button>
+      <span>Positions<small>holdings · P&amp;L · history</small></span></button>
     <button class="tab" data-pane="desk"><span class="ic">💬</span>
       <span>Desk agents<small>all six · chat &amp; voice</small></span></button>
     <button class="tab" data-pane="gex"><span class="ic">📊</span>
@@ -251,11 +251,11 @@
       Built by <a href="https://github.com/igorfyago" target="_blank">Igor Yago</a> —
       AI engineer.<br>
       LangChain · LangGraph · OpenAI Realtime · AWS<br><br>
-      Paper desk — every call is logged &amp; scored.
+      Paper desk — every position marked to the live tape.
     </footer>
   </nav>
 
-  <div id="g-score" onclick="show('positions')" title="the scoreboard — click for positions">P&amp;L —</div>
+  <div id="g-score" onclick="show('positions')" title="net P&amp;L — realized + open · positions">P&amp;L —</div>
 
   <main>
     <section class="pane" id="overview">
@@ -337,10 +337,10 @@
 
     <section class="pane" id="positions">
       <div style="flex:1;overflow-y:auto;padding:44px 6% 60px">
-        <h2 style="font-size:22px">Positions &amp; P&amp;L — the score</h2>
+        <h2 style="font-size:22px">Positions &amp; P&amp;L</h2>
         <p style="color:var(--dim);font-size:13px;margin:6px 0 22px">
-          Every trade the desk takes in conversation lands here. Marks are model estimates
-          against the live feed; sim only, not a brokerage.</p>
+          Every trade the desk takes in conversation is tracked here and marked to the
+          live feed. Paper execution.</p>
         <div class="tiles" id="p-score" style="max-width:720px;margin-bottom:30px"></div>
         <div class="plabel">Open book</div>
         <div class="ptable" id="p-open"><div class="dnote">loading…</div></div>
@@ -363,7 +363,7 @@
         <div style="font-size:13.5px;line-height:1.6">
           Task completion (29 mechanical checks: real bookings written to DB, contact collected
           before booking, silence on noise, empathy-then-action on emergencies, plain-English
-          trades with exit rules, SPY-analysis/XSP-fill convention with sizing, never breaking the game frame):
+          trades with exit rules, SPY-analysis/XSP-fill convention with sizing, never breaking character):
           <b style="color:var(--green)">Receptionist 100% · Quoting 100% · Options Desk 100%</b>
           &nbsp;·&nbsp; tone judge 87–100%. The harness is public —
           <a href="https://github.com/igorfyago/ai-trading-desk/blob/main/evals/voice_evals.py"
@@ -804,8 +804,8 @@
       s.src = src; s.onload = ok; s.onerror = no;
       document.head.appendChild(s);
     });
-    chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js`)
-      .then(() => load(`${API}/static/desk-chart.js`));
+    chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
+      .then(() => load(`${API}/static/desk-chart.js?v=3`));
     return chartLib;
   }
 
@@ -1055,7 +1055,7 @@
     const unreal = book.positions.reduce((sum, p) => sum + (p.unreal_usd || 0), 0);
     const total = (s.realized_usd || 0) + unreal;
     document.getElementById("p-score").innerHTML = `
-      <div class="tile"><b class="${total >= 0 ? "pos" : "neg"}">${usd(total)}</b><span>score</span></div>
+      <div class="tile"><b class="${total >= 0 ? "pos" : "neg"}">${usd(total)}</b><span>net p&l</span></div>
       <div class="tile"><b>${usd(s.realized_usd || 0)}</b><span>realized</span></div>
       <div class="tile"><b>${usd(unreal)}</b><span>open p&l</span></div>
       <div class="tile"><b>${book.positions.length}</b><span>open</span></div>

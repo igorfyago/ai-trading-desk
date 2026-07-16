@@ -174,3 +174,7 @@ body.dock-pip #dock-body { flex: 1; height: auto; }
 #score-chip.pos { color: var(--green); }
 #score-chip.neg { color: var(--red); }
 body.embed #score-chip { display: none; }
+
+/* embedded in the dashboard: the PARENT owns the chart — one chart per screen,
+   whatever a cached script thinks */
+body.embed #dock { display: none !important; }

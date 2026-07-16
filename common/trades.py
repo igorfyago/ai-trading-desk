@@ -51,7 +51,8 @@ def _emit(event: str, trade: dict) -> None:
 
 def _latest(session: str | None, statuses: tuple[str, ...]) -> dict | None:
     """Newest trade in the given statuses — this session first, then any
-    (voice sessions on the landing page reload per call; the desk keeps one book)."""
+    (voice sessions on the landing page reload per call; the desk runs one
+    shared book)."""
     marks = ",".join("?" * len(statuses))
     if session:
         hit = _fetch(f"session = ? AND status IN ({marks})", (session, *statuses), 1)

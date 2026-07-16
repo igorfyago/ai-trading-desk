@@ -4,8 +4,8 @@
    dashboard chart and the desk trade dock, so every surface reads the same
    candles the agents read.
 
-   The desk's study stack, all computed here (the free TV embed couldn't do the bands):
-   VWAP with 1σ/2σ bands, EMA21, SMA100, SMA200, Donchian-96, volume.
+   The desk's study stack, all computed here (the free TV embed couldn't do
+   the bands): VWAP with 1σ/2σ bands, EMA21, SMA100, SMA200, DC96, volume.
 
    Theme: every color comes from the live CSS vars and repaints on the
    themes.js "themechange" event. The library's TradingView attribution logo

@@ -1,0 +1,84 @@
+# The full desk in production: the REAL options-flow-analytics pipeline
+# (Rust collector -> Postgres -> Node API/dashboard) running 24/7, and the
+# AI agents (ai-trading-desk web) reading the SAME live Postgres.
+#
+# Layout on the host (EC2): both repos cloned side by side —
+#   ~/apps/options-flow-analytics
+#   ~/apps/ai-trading-desk        <- run compose from this repo's deploy/
+#
+#   cd ~/apps/ai-trading-desk/deploy
+#   cp .env.example .env          # fill OPENAI_API_KEY etc. (or pull from SSM)
+#   docker compose -f docker-compose.aws.yml up -d --build
+
+name: trading-desk
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: options
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: options
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../options-flow-analytics/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U options"]
+      interval: 10s
+      retries: 5
+
+  collector:
+    build: ../../options-flow-analytics/collector
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
+      TICKERS: ${TICKERS:-SPY,QQQ}
+      INTERVAL_SECS: ${INTERVAL_SECS:-30}
+      PROVIDER: ${PROVIDER:-cboe}          # real delayed market data, no key needed
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+
+  gex-api:
+    build: ../../options-flow-analytics/api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
+    ports:
+      - "127.0.0.1:3000:3000"              # GEX dashboard (proxied by caddy)
+
+  desk:
+    build: ..
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set in .env}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-ai-trading-desk-prod}
+      # the agents query the LIVE dealer-positioning DB, not the demo SQLite:
+      DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
+    ports:
+      - "127.0.0.1:8000:8000"              # agents app (proxied by caddy)
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [desk, gex-api]
+
+volumes:
+  pgdata:
+  caddy_data:

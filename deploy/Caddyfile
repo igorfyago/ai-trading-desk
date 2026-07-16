@@ -1,0 +1,10 @@
+# Automatic HTTPS (Let's Encrypt) for both apps. Point two DNS A-records at
+# the EC2 elastic IP and set the domains here. WebRTC mic access REQUIRES https.
+
+desk.{$BASE_DOMAIN} {
+    reverse_proxy desk:8000
+}
+
+gex.{$BASE_DOMAIN} {
+    reverse_proxy gex-api:3000
+}

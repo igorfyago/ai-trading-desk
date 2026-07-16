@@ -104,7 +104,39 @@ def recommend_trade(ticker: str) -> dict:
         "structure": name, "bias": bias, "legs": legs,
         "one_sigma_move": em, "expected_move_band": [round(spot - em, 2), round(spot + em, 2)],
         "rationale": rationale,
+        "plain_english": _plain_english(snap["ticker"], name, legs, spot, flip,
+                                        put_wall, call_wall, snap["regime"]),
         "invalidation": f"Exit if {invalidation}.",
         "sizing": "Risk no more than 1% of account on the structure's max loss.",
         "disclaimer": DISCLAIMER,
     }
+
+
+def _plain_english(ticker: str, structure: str, legs: list, spot: float, flip: float,
+                   put_wall: float, call_wall: float, regime: str) -> str:
+    """The no-jargon version, authored by the engine so it's always faithful.
+
+    Rules: cause-and-effect words, at most one number per sentence, four
+    sentences total. This is the default narration; jargon is opt-in.
+    """
+    def leg_words(leg):
+        return f"{'buy' if leg['side'] == 'buy' else 'sell'} the {leg['strike']:g} {leg['kind']}s"
+
+    trade = ", ".join(leg_words(l) for l in legs) + f" expiring {legs[0]['expiry']}"
+
+    if regime == "negative_gamma":
+        if spot < flip:
+            why = (f"{ticker} is in a fragile spot: as it falls, big market players are "
+                   f"forced to sell even more, so drops tend to snowball.")
+            wrong = (f"If it climbs back above {flip:g}, that snowball effect switches "
+                     f"off — get out.")
+        else:
+            why = (f"{ticker} is in breakout mode: as it rises, big market players are "
+                   f"forced to buy even more, so rallies tend to feed themselves.")
+            wrong = f"If it slips back under {flip:g}, that fuel is gone — get out."
+    else:
+        why = (f"{ticker} is in a calm stretch: big market players make money keeping it "
+               f"inside roughly {put_wall:g} to {call_wall:g}, so it tends to stay there.")
+        wrong = "If it closes outside that range, the calm is over — get out."
+
+    return f"{why} The trade: {trade}. {wrong} Risk about one percent of your account, no more."

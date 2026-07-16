@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: desk
+  namespace: ai-trading-desk
+  labels: { app: desk }
+spec:
+  replicas: 2                     # stateless web tier — scales horizontally
+  selector:
+    matchLabels: { app: desk }
+  template:
+    metadata:
+      labels: { app: desk }
+    spec:
+      containers:
+        - name: desk
+          image: ghcr.io/igorfyago/ai-trading-desk:latest   # or ECR URI
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef: { name: desk-secrets }
+          env:
+            - name: LANGSMITH_TRACING
+              value: "true"
+            - name: LANGSMITH_PROJECT
+              value: ai-trading-desk-prod
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          readinessProbe:
+            httpGet: { path: /agents, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /agents, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 30

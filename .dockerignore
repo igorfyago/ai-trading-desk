@@ -1,0 +1,13 @@
+.venv/
+.git/
+.github/
+__pycache__/
+*.pyc
+data/
+.env
+tests/
+docs/
+*.md
+.idea/
+.claude/
+agents/05_desk_analyst/memos/

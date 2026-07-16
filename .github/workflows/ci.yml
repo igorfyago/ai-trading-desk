@@ -18,3 +18,25 @@ jobs:
         run: pip install -e ".[web,dev]"
       - name: Unit + integration tests (no API keys needed)
         run: pytest -v --tb=short
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t ai-trading-desk:ci .
+      - name: Smoke test container
+        run: |
+          docker run -d --name desk -p 8000:8000 -e OPENAI_API_KEY=ci-dummy ai-trading-desk:ci
+          sleep 8
+          curl -sf http://localhost:8000/agents | grep -q '"brief"'
+          docker logs desk --tail 5
+
+  k8s-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kubeconform
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -summary -strict k8s/*.yaml

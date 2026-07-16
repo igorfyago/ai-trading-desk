@@ -118,12 +118,25 @@ Dealer positioning — who is long/short gamma, where the walls are, where hedgi
 - **Runs for anyone.** Deterministic synthetic seed data mirrors the production schema; `DATABASE_URL` swaps in the real feed without code changes.
 - **Provider-agnostic where it's free.** All text agents go through `init_chat_model` — change `DESK_MODEL` in `.env` to swap OpenAI for Anthropic/Google/local.
 
+## Deployment
+
+The desk runs 24/7 on AWS alongside the real [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) pipeline — the agents query the **live** dealer-positioning Postgres in production, the bundled SQLite only in dev. Three staged paths, each fully documented in [docs/DEPLOY_AWS.md](docs/DEPLOY_AWS.md):
+
+1. **EC2 + Docker Compose** ([deploy/](deploy/)) — full stack (Postgres, Rust collector, dashboard, agents, Caddy TLS) on one instance; secrets from SSM, logs to CloudWatch, backups to S3.
+2. **Kubernetes** ([k8s/](k8s/), kubeconform-validated, built in CI) — k3s on the same box or any cluster: 2-replica stateless web tier with probes and resource limits, Secrets, Ingress + cert-manager.
+3. **Managed** — ECR + ECS Fargate + ALB/ACM (or EKS with the same manifests), RDS, GitHub Actions CD via OIDC.
+
+CI builds and smoke-tests the Docker image and validates the manifests on every push.
+
 ## Repo layout
 
 ```
-common/          shared model factory, demo DB (schema + seed), market math
+common/          shared model factory, demo DB (schema + seed), market math, signal engine
 agents/01..06    the ladder — each folder: main.py + README with diagram
-web/             FastAPI token server + WebRTC voice demo page
+web/             FastAPI backend + the one-conversation chat/voice UI
+evals/           graded LangSmith experiments per agent
+tests/           unit + integration + opt-in live tests (CI-gated)
+deploy/ k8s/     Docker Compose production stack · Kubernetes manifests
 ```
 
 ---

@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from typing_extensions import TypedDict
 
-from common import market
+from common import db, market
 from common.db import get_connection
 from common.llm import get_model
 
@@ -68,21 +68,21 @@ def wall_map(ticker: str) -> str:
 @tool
 def sql_query(sql: str) -> str:
     """Run a read-only SELECT against the positioning DB for anything the
-    other tools don't cover. Tables: snapshots (captured_at, ticker, expiry,
-    spot, regime, net_gex_total, abs_gex_total, gamma_flip, net_dex_total,
-    atm_iv, vix, signal_score, traffic_light), strike_levels (snapshot_id,
-    strike, gex, dex, call_oi, put_oi), walls (snapshot_id, kind, strike,
-    strength)."""
+    other tools don't cover. Demo DB tables: snapshots (captured_at, ticker,
+    expiry, spot, regime, net_gex_total, abs_gex_total, gamma_flip,
+    net_dex_total, atm_iv, vix, signal_score, traffic_light), strike_levels,
+    walls. In production the DB is instead one wide table: gex_dex_snapshots
+    (timestamp, ticker, expiry, spot, regime, net_gex_total, abs_gex_total,
+    gamma_flip, atm_iv, vix_current, signal_score, traffic_light, ... plus
+    JSONB columns call_walls, put_walls, gex_per_strike). If a table doesn't
+    exist, you're on the other schema — adapt and retry."""
     if not sql.strip().lower().startswith(("select", "with")):
         return "REJECTED: SELECT only."
-    conn = get_connection()
     try:
-        rows = conn.execute(sql).fetchall()[:40]
+        rows = db.run_readonly(sql)[:40]
         return "\n".join(str(r) for r in rows) or "0 rows"
     except Exception as exc:
         return f"SQL ERROR: {exc}"
-    finally:
-        conn.close()
 
 
 @tool

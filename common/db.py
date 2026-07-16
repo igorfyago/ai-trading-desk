@@ -185,8 +185,41 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def using_live_db() -> bool:
+    """True when DATABASE_URL points at a live options-flow-analytics Postgres."""
+    return bool(os.getenv("DATABASE_URL"))
+
+
+def pg_connection():
+    import psycopg
+
+    return psycopg.connect(os.getenv("DATABASE_URL"))
+
+
+def run_readonly(sql: str, params: tuple = ()) -> list[tuple]:
+    """One read-only query against whichever DB is active (live PG or demo SQLite)."""
+    if using_live_db():
+        with pg_connection() as conn:
+            return conn.execute(sql, params).fetchall()
+    conn = get_connection()
+    try:
+        return conn.execute(sql.replace("%s", "?"), params).fetchall()
+    finally:
+        conn.close()
+
+
 def describe_schema() -> str:
     """Human/LLM-readable schema description used by the SQL agents."""
+    if using_live_db():
+        rows = run_readonly(
+            "SELECT table_name, column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema='public' ORDER BY table_name, ordinal_position"
+        )
+        tables: dict[str, list[str]] = {}
+        for table, col, dtype in rows:
+            tables.setdefault(table, []).append(f"{col} {dtype}")
+        return "\n\n".join(f"TABLE {t} (\n  " + ",\n  ".join(cols) + "\n)"
+                           for t, cols in tables.items())
     conn = get_connection()
     rows = conn.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"

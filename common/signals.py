@@ -15,7 +15,9 @@ Rules (v1, intentionally simple and inspectable):
       neutral score        → IRON CONDOR with shorts at both walls
 """
 
-from common import market
+import json
+
+from common import db, market
 from common.db import get_connection
 
 DISCLAIMER = ("Demo data + rule-based engine. Educational example only — "
@@ -23,6 +25,18 @@ DISCLAIMER = ("Demo data + rule-based engine. Educational example only — "
 
 
 def _latest_walls(ticker: str) -> dict:
+    if db.using_live_db():
+        rows = db.run_readonly(
+            "SELECT call_walls, put_walls FROM gex_dex_snapshots WHERE ticker = %s"
+            " ORDER BY timestamp DESC LIMIT 1", (ticker.upper(),))
+        if not rows:
+            return {}
+        walls = {}
+        for kind, raw in zip(("call", "put"), rows[0]):
+            arr = raw if isinstance(raw, list) else json.loads(raw or "[]")
+            if arr:  # collector orders strongest first
+                walls[kind] = {"strike": arr[0]["strike"], "strength": abs(arr[0].get("gex", 0))}
+        return walls
     conn = get_connection()
     rows = conn.execute(
         """

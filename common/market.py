@@ -5,14 +5,52 @@ the functions are the seam where a live feed (the options-flow-analytics
 API, a broker API) would plug in.
 """
 
+import json
 import math
 from datetime import date, datetime, timezone
 
+from common import db
 from common.db import get_connection
+
+# Production (options-flow-analytics) and demo scales differ; normalize both ways.
+_LIGHTS = {"amber": "yellow"}
+
+
+def _norm_score(score: float | None) -> float | None:
+    """Production emits -1..1; the demo uses -100..100. Normalize to -100..100."""
+    if score is None:
+        return None
+    return round(score * 100, 1) if abs(score) <= 1.5 else round(score, 1)
+
+
+def _pg_latest_snapshot(ticker: str) -> dict | None:
+    rows = db.run_readonly(
+        "SELECT timestamp, ticker, expiry, spot, regime, net_gex_total, abs_gex_total,"
+        " gamma_flip, net_delta_exposure, atm_iv, vix_current, signal_score, traffic_light"
+        " FROM gex_dex_snapshots WHERE ticker = %s ORDER BY timestamp DESC LIMIT 1",
+        (ticker.upper(),),
+    )
+    if not rows:
+        return None
+    (ts, tick, expiry, spot, regime, net_gex, abs_gex, flip, net_dex,
+     atm_iv, vix, score, light) = rows[0]
+    return {
+        "captured_at": ts.isoformat(), "ticker": tick, "expiry": str(expiry),
+        "spot": spot, "regime": regime, "net_gex_total": net_gex,
+        "abs_gex_total": abs_gex, "gamma_flip": flip, "net_dex_total": net_dex,
+        "atm_iv": atm_iv, "vix": vix, "signal_score": _norm_score(score),
+        "traffic_light": _LIGHTS.get(light, light),
+    }
 
 
 def latest_snapshot(ticker: str) -> dict | None:
-    """Most recent dealer-positioning snapshot for a ticker."""
+    """Most recent dealer-positioning snapshot for a ticker.
+
+    Live options-flow-analytics Postgres when DATABASE_URL is set (production),
+    the seeded demo SQLite otherwise (dev) — same dict shape either way.
+    """
+    if db.using_live_db():
+        return _pg_latest_snapshot(ticker)
     conn = get_connection()
     row = conn.execute(
         "SELECT * FROM snapshots WHERE ticker = ? ORDER BY captured_at DESC LIMIT 1",
@@ -28,6 +66,19 @@ def latest_snapshot(ticker: str) -> dict | None:
 
 def gex_profile(ticker: str) -> list[dict]:
     """Per-strike GEX/DEX profile of the latest snapshot."""
+    if db.using_live_db():
+        rows = db.run_readonly(
+            "SELECT gex_per_strike FROM gex_dex_snapshots WHERE ticker = %s"
+            " ORDER BY timestamp DESC LIMIT 1", (ticker.upper(),))
+        if not rows:
+            return []
+        raw = rows[0][0]
+        strikes = raw if isinstance(raw, list) else json.loads(raw)
+        return sorted(
+            ({"strike": s.get("strike"), "gex": s.get("net_gex"), "dex": s.get("net_dex"),
+              "call_oi": 0, "put_oi": 0} for s in strikes),
+            key=lambda s: s["strike"] or 0,
+        )
     conn = get_connection()
     rows = conn.execute(
         """

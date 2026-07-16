@@ -143,6 +143,21 @@ def x_pulse(ticker: str) -> str:
                        "x_chatter": block or "unavailable on this line"})
 
 
+def ta_signals(ticker: str) -> str:
+    """The desk's TradingView alerts (MSB-OB, VWAP bands, DC breaks) that fired recently."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT created_at, signal, price, interval FROM ta_signals"
+        " WHERE ticker = ? ORDER BY id DESC LIMIT 5", (ticker.upper(),)).fetchall()
+    conn.close()
+    if not rows:
+        return json.dumps({"ticker": ticker.upper(), "signals": [],
+                           "note": "no TA alerts fired recently"})
+    return json.dumps({"ticker": ticker.upper(), "signals": [
+        {"at": r[0][11:16] + " UTC", "signal": r[1], "price": r[2], "interval": r[3]}
+        for r in rows]})
+
+
 # --------------------------------------------------------------- personas ----
 
 def _fn(name, description, props, required):
@@ -384,10 +399,13 @@ PERSONAS = {
             _fn("x_pulse", "What traders on X are saying about a ticker in the last "
                 "24h (sentiment, catalysts, rumors) via live X search.",
                 {"ticker": {"type": "string"}}, ["ticker"]),
+            _fn("ta_signals", "The desk's TradingView alerts that fired recently "
+                "for a ticker (market-structure breaks, VWAP bands, channel breaks).",
+                {"ticker": {"type": "string"}}, ["ticker"]),
         ],
         "implementations": {"desk_status": desk_status, "trade_recommendation": trade_recommendation,
                             "quote_option": quote_option, "expected_move": expected_move,
-                            "desk_news": desk_news, "x_pulse": x_pulse},
+                            "desk_news": desk_news, "x_pulse": x_pulse, "ta_signals": ta_signals},
     },
 }
 

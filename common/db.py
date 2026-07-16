@@ -76,6 +76,16 @@ CREATE TABLE IF NOT EXISTS appointments (
     slot TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ta_signals (
+    id INTEGER PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    signal TEXT NOT NULL,
+    price REAL,
+    interval TEXT,
+    payload TEXT
+);
+
 CREATE TABLE IF NOT EXISTS quotes (
     id INTEGER PRIMARY KEY,
     created_at TEXT NOT NULL,

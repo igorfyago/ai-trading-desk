@@ -79,6 +79,19 @@ def x_pulse(ticker: str) -> str:
 
 
 @tool
+def ta_signals(ticker: str) -> str:
+    """The desk's TradingView alerts that fired recently for a ticker
+    (market-structure breaks, VWAP σ-band touches, Donchian breaks)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT created_at, signal, price, interval FROM ta_signals"
+        " WHERE ticker = ? ORDER BY id DESC LIMIT 5", (ticker.upper(),)).fetchall()
+    conn.close()
+    return "\n".join(f"{r[0][:16]} [{r[3]}] {r[1]} @ {r[2]}" for r in rows) \
+        or f"No TA alerts fired recently for {ticker}."
+
+
+@tool
 def sql_query(sql: str) -> str:
     """Run a read-only SELECT against the positioning DB for anything the
     other tools don't cover. Demo DB tables: snapshots (captured_at, ticker,
@@ -110,7 +123,7 @@ def calculator(expression: str) -> str:
         return f"MATH ERROR: {exc}"
 
 
-TOOLS = [positioning_snapshot, wall_map, market_news, x_pulse, sql_query, calculator]
+TOOLS = [positioning_snapshot, wall_map, market_news, x_pulse, ta_signals, sql_query, calculator]
 
 # ---------------------------------------------------------------- state ----
 

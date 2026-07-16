@@ -154,6 +154,9 @@
           <div class="dcard"><h4>The trade (rules engine)</h4>
             <div id="d-trade" class="dnote">loading…</div>
           </div>
+          <div class="dcard" id="d-ta-card" style="display:none"><h4>Your TA signals · tradingview alerts</h4>
+            <div id="d-ta"></div>
+          </div>
           <div class="dcard" id="d-xpulse-card" style="display:none"><h4>X pulse · grok x_search</h4>
             <div id="d-xpulse" class="dnote">asking Grok…</div>
           </div>
@@ -334,9 +337,20 @@
         `<b>${d.trade.structure}</b> — ${d.trade.bias}<br><br>${d.trade.plain_english}`;
       renderNews(d.headlines);
       renderBuzz(d.buzz, d.trending);
+      renderTA(d.ta_signals);
     } catch {
       tiles.innerHTML = `<div class="dnote">desk API unreachable</div>`;
     }
+  }
+
+  function renderTA(sigs) {
+    const card = document.getElementById("d-ta-card");
+    if (!(sigs || []).length) { card.style.display = "none"; return; }
+    card.style.display = "";
+    document.getElementById("d-ta").innerHTML = sigs.map(s =>
+      `<div class="nitem"><b>${s.signal.replace(/</g, "&lt;")}</b>
+       <small>${s.interval || ""} ${s.price ? "@ " + s.price : ""} · ${s.created_at.slice(11, 16)} UTC</small></div>`
+    ).join("");
   }
 
   async function loadFeedsFallback(t) {

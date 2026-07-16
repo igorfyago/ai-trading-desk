@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agents" / "06_voic
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -89,7 +89,49 @@ def ticker_summary(ticker: str):
         "headlines": news.fetch_news(ticker),
         "buzz": social.fetch_buzz(ticker),
         "trending": social.fetch_trending(),
+        "ta_signals": latest_ta_signals(ticker),
     }
+
+
+@app.post("/webhook/tradingview")
+async def tradingview_webhook(request: Request, token: str = ""):
+    """Receives TradingView alert webhooks :
+    custom indicators fire -> the desk knows within seconds. Token-gated."""
+    expected = os.getenv("TV_WEBHOOK_TOKEN")
+    if not expected or token != expected:
+        raise HTTPException(403, "bad token")
+    raw = (await request.body()).decode("utf-8", errors="ignore")[:2000]
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = {"signal": raw}
+    from datetime import datetime, timezone
+
+    from common.db import get_connection
+
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO ta_signals (created_at, ticker, signal, price, interval, payload)"
+        " VALUES (?,?,?,?,?,?)",
+        (datetime.now(timezone.utc).isoformat(),
+         str(data.get("ticker", "?")).upper()[:12],
+         str(data.get("signal", raw))[:200],
+         data.get("price"), str(data.get("interval", ""))[:12], raw),
+    )
+    conn.commit()
+    conn.close()
+    return {"stored": True}
+
+
+def latest_ta_signals(ticker: str, limit: int = 5) -> list[dict]:
+    from common.db import get_connection
+
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT created_at, signal, price, interval FROM ta_signals"
+        " WHERE ticker = ? ORDER BY id DESC LIMIT ?", (ticker.upper(), limit)).fetchall()
+    conn.close()
+    return [{"created_at": r[0], "signal": r[1], "price": r[2], "interval": r[3]} for r in rows]
 
 
 @app.get("/api/xpulse/{ticker}")

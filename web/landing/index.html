@@ -317,6 +317,8 @@
     <div class="navlabel">Under the hood</div>
     <button class="tab" data-pane="atlas"><span class="ic">🗺</span>
       <span>Agent Atlas<small>live runtime graphs of every agent</small></span></button>
+    <button class="tab" data-pane="observatory"><span class="ic">🔭</span>
+      <span>Observatory<small>watch a multi-agent pipeline think</small></span></button>
     <a class="tab" href="https://github.com/igorfyago/ai-trading-desk" target="_blank"><span class="ic">⚙️</span>
       <span>The Code<small>github · agents ladder</small></span></a>
     <a class="tab" href="https://github.com/igorfyago/options-flow-analytics" target="_blank"><span class="ic">🦀</span>
@@ -620,6 +622,10 @@
 
     <section class="pane" id="gex">
       <iframe data-src="https://gex.b4rruf3t.com" title="GEX Dashboard"></iframe>
+    </section>
+
+    <section class="pane" id="observatory">
+      <iframe data-src="https://obs.b4rruf3t.com" title="Agent Observatory"></iframe>
     </section>
   </main>
 
@@ -1358,7 +1364,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=11`));
+      .then(() => load(`${API}/static/desk-chart.js?v=12`));
     return chartLib;
   }
 
@@ -1377,7 +1383,7 @@
     if (!deskChart) return;
     const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
     const lv = [];
-    if (gexLevels && GEX_COVERED.includes(focus)) {
+    if (gexLevels && gexLevels.sym === focus && GEX_COVERED.includes(focus)) {
       if (gexLevels.call) lv.push({ price: gexLevels.call, color: cssv("--green"), style: 2, title: "call wall" });
       if (gexLevels.put) lv.push({ price: gexLevels.put, color: cssv("--red"), style: 2, title: "put wall" });
       if (gexLevels.flip) lv.push({ price: gexLevels.flip, color: cssv("--accent"), style: 3, title: "flip" });
@@ -1404,7 +1410,7 @@
         if (tile) tile.textContent = d.price;
         if (deskChart) {
           const ts = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : Math.floor(Date.now() / 1000);
-          deskChart.applyTick(d.price, ts);
+          deskChart.applyTick(d.price, ts, d.ticker);
         }
       }
     };
@@ -1460,6 +1466,7 @@
       const regime = (gl && gl.regime_live) || s.regime, pos = regime === "positive_gamma";
       const spotNow = (d.live_spot && d.live_spot.price) ?? s.spot;
       gexLevels = {
+        sym: t,   // stale walls must not paint on the next ticker's chart
         call: d.walls && d.walls.call && d.walls.call.strike,
         put: d.walls && d.walls.put && d.walls.put.strike,
         flip: (gl && gl.gamma_flip) || s.gamma_flip,

@@ -84,6 +84,18 @@ services:
     ports:
       - "127.0.0.1:8000:8000"              # agents app (proxied by caddy)
 
+  observatory:
+    build: ../../agent-observatory        # clone side-by-side like options-flow
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set in .env}
+      OPENAI_MODEL: ${OBSERVATORY_MODEL:-gpt-4o-mini}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGCHAIN_TRACING_V2: "true"
+      LANGCHAIN_PROJECT: agent-observatory
+    ports:
+      - "127.0.0.1:8321:8321"             # live agent-DAG demo (proxied by caddy)
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -96,7 +108,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../web/landing:/srv/landing:ro
       - caddy_data:/data
-    depends_on: [desk, gex-api]
+    depends_on: [desk, gex-api, observatory]
 
 volumes:
   pgdata:

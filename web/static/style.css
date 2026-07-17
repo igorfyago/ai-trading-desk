@@ -240,3 +240,10 @@ body.embed #dock { display: none !important; }
 @keyframes micinvite {
   0%, 100% { box-shadow: 0 0 7px rgba(62,207,142,.20); }
   50% { box-shadow: 0 0 18px rgba(62,207,142,.45); } }
+
+/* narrow screens: the composer stays one tight row, Send always on-screen */
+@media (max-width: 480px) {
+  #composer { gap: 7px; padding: 10px 3% 12px; }
+  #input { min-width: 0; padding: 10px 12px; }
+  #send, #mic { padding: 0 13px; flex: none; }
+}

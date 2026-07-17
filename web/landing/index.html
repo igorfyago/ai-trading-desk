@@ -1364,7 +1364,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=12`))
+      .then(() => load(`${API}/static/desk-chart.js?v=13`))
       .catch((err) => { chartLib = null; throw err; });  // one failed load must not poison every future mount
     return chartLib;
   }
@@ -1481,9 +1481,18 @@
       document.getElementById("d-asof").textContent =
         "· structure " + s.captured_at.slice(11, 16) + " UTC" +
         (d.live_spot && !d.live_spot.delayed ? " · spot live" : "");
+      // the money direction leads — "SHORT γ" is dealer context, not the trade,
+      // and reading it as "go short" on a calls day cost users the point
+      const xk = (d.trade.execution || {}).kind, bl = (d.trade.bias || "").toLowerCase();
+      const act = xk === "call" || (!xk && bl.startsWith("bull")) ? ["BUY CALLS", "pos"]
+        : xk === "put" || (!xk && bl.startsWith("bear")) ? ["BUY PUTS", "neg"]
+        : ["RANGE", ""];
+      const why = bl.includes("reversal") ? "reversal" : bl.includes("momentum") ? "momentum"
+        : bl.includes("pin") || bl.includes("mean") ? "pinned tape" : "the trade";
       tiles.innerHTML = `
+        <div class="tile"><b class="${act[1]}">${act[0]}</b><span>${why}</span></div>
         <div class="tile"><b id="tile-spot">${spotNow}</b><span>spot${d.live_spot && !d.live_spot.delayed ? " · live" : ""}</span></div>
-        <div class="tile"><b class="${pos ? "pos" : "neg"}">${pos ? "LONG γ" : "SHORT γ"}</b><span>regime</span></div>
+        <div class="tile"><b class="${pos ? "pos" : "neg"}">${pos ? "LONG γ" : "SHORT γ"}</b><span>dealer regime</span></div>
         <div class="tile"><b>${gexLevels.flip ? Number(gexLevels.flip).toFixed(0) : "—"}</b><span>flip</span></div>
         <div class="tile"><b>${s.signal_score ?? "—"}</b><span>signal</span></div>
         <div class="tile"><b>${(s.atm_iv * 100).toFixed(1)}%</b><span>atm iv</span></div>

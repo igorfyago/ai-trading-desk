@@ -109,16 +109,20 @@
   }
 
   function vwapBands(bars) {
-    // TV's "VWAP Auto Anchored" — the house setup: anchor at the most recent
-    // pivot high/low (14 bars each side, the script's Length), then cumulative
-    // hlc3 VWAP + volume-weighted σ bands from the anchor forward. Nothing is
-    // drawn before the anchor — no stale flat lines dragging across sessions,
-    // and it works identically for 24h futures and equities.
+    // TV's "VWAP Auto Anchored", constrained to TODAY: cumulative hlc3 VWAP +
+    // volume-weighted σ bands from the anchor forward. The anchor is the most
+    // recent pivot high/low (14 bars each side) WITHIN today's session, else
+    // today's first bar — intraday VWAP always starts fresh with the day,
+    // never dragging yesterday's tape into today's read.
     const L = 14, n = bars.length;
     const v = [], u1 = [], d1 = [], u2 = [], d2 = [];
     if (!n) return { v, u1, d1, u2, d2 };
-    let anchor = 0;
-    for (let i = n - 1 - L; i >= L; i--) {
+    const nyDay = (t) => Math.floor((t - 4 * 3600) / 86400);   // same NY trading day as the server
+    const today = nyDay(bars[n - 1].t);
+    let sess = n - 1;
+    while (sess > 0 && nyDay(bars[sess - 1].t) === today) sess--;
+    let anchor = sess;
+    for (let i = n - 1 - L; i >= Math.max(L, sess); i--) {
       let hi = true, lo = true;
       for (let j = i - L; j <= i + L && (hi || lo); j++) {
         if (j === i) continue;

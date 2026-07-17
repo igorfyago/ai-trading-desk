@@ -266,11 +266,18 @@ def desk_news(ticker: str) -> str:
 
 
 def x_pulse(ticker: str) -> str:
+    """CACHED-ONLY read of the desk list's last-hour chatter. Never blocks,
+    never bills: the hourly background fetch fills the cache; if it hasn't
+    landed yet the desk simply has no fresh read — say so and move on."""
     from common import xpulse
 
-    block = xpulse.pulse_block(ticker)
-    return json.dumps({"ticker": ticker.upper(),
-                       "x_chatter": block or "unavailable on this line"})
+    p = xpulse.pulse(ticker)
+    if not p:
+        return json.dumps({"ticker": ticker.upper(),
+                           "x_chatter": "no fresh read from the desk list yet - "
+                                        "the hourly fetch hasn't landed; don't wait on it"})
+    return json.dumps({"ticker": ticker.upper(), "as_of": p.get("as_of"),
+                       "x_chatter": p["summary"]})
 
 
 def ta_signals(ticker: str) -> str:
@@ -608,6 +615,11 @@ PERSONAS = {
             "the house read ('your wick-capture is the arm; my trigger is the "
             "fifteen-minute close - I'll watch both'). You still size and "
             "call trades by the desk rules, silently.\n"
+            "   o. TOOLS NEVER STALL THE CONVERSATION: every tool answers "
+            "from the desk's own cache or engine. If one comes back empty, "
+            "slow, or 'no fresh read', say so in half a sentence and keep "
+            "going with what you have - dead air after a tool call is a "
+            "failure. Never wait for data to 'arrive' mid-call.\n"
             "   n. THE MECHANICAL NOW-STATE IS THE ONLY SOURCE OF LEVELS: "
             "tape.action carries do_now plus the nearest actionable line "
             "above (action.up) and below (action.down), already bounded to "
@@ -695,8 +707,9 @@ PERSONAS = {
                 ["ticker"]),
             _fn("desk_news", "Latest headlines for a ticker — catalysts and context.",
                 {"ticker": {"type": "string"}}, ["ticker"]),
-            _fn("x_pulse", "What traders on X are saying about a ticker in the last "
-                "24h (sentiment, catalysts, rumors) via live X search.",
+            _fn("x_pulse", "What the desk's X list said about a ticker in the last "
+                "hour (cached hourly read - instant, never waits on the network). "
+                "If it returns 'no fresh read', say so in half a sentence and move on.",
                 {"ticker": {"type": "string"}}, ["ticker"]),
             _fn("ta_signals", "The desk's TradingView alerts that fired recently "
                 "for a ticker (market-structure breaks, VWAP bands, channel breaks).",

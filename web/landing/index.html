@@ -254,33 +254,49 @@
   .dnote { color:var(--dim); font-size:12.5px; }
   @media (max-width:980px){ .dgrid{grid-template-columns:1fr;} #tv-wrap{flex-basis:auto;height:340px;} #agent-dock{height:400px;} .pdiv{display:none;} }
 
+  #iv-select { display:none; }   /* the interval combo exists for phones only */
+
   /* ---- phone: the cockpit becomes one scrolling column, chart first.
           Every rule lives in this block — desktop is untouched. ---- */
   @media (max-width:700px){
     nav { width:44px; padding:20px 6px; }
     main { margin-left:44px; }
     #dash { overflow-y:auto; overflow-x:hidden; padding:10px 10px 46px; }
-    /* the control strip: ONE swipeable row, the P&L chip seated at its right
-       edge like part of the strip — nothing wraps, nothing overlaps */
-    #g-score { top:12px; right:10px; padding:5px 12px; font-size:11.5px; }
-    .dtop { flex:none; flex-wrap:nowrap; overflow-x:auto; gap:6px; margin-right:90px;
-            padding:2px 8px 2px 0; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    /* the control strip: interval COMBO + feed + TV link + the P&L chip
+       seated IN the row (it scrolls away with the page, blocks nothing) */
+    .dtop { flex:none; flex-wrap:nowrap; overflow-x:auto; gap:6px; align-items:center;
+            padding:2px 2px 2px 0; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
     .dtop::-webkit-scrollbar { display:none; }
     .dtop .watch { flex-wrap:nowrap; flex:none; gap:6px; margin-left:0 !important; }
     .dtop .wchip { padding:5px 12px; font-size:12px; white-space:nowrap; }
+    #intervals { display:none; }
+    #iv-select { display:block; flex:none; appearance:none; -webkit-appearance:none;
+      background:var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6'%3E%3Cpath d='M0 0l4 6 4-6z' fill='%239ba3b2'/%3E%3C/svg%3E") no-repeat right 10px center;
+      border:1px solid var(--line); color:var(--text); font:12.5px var(--mono);
+      border-radius:999px; padding:5px 26px 5px 13px; }
+    /* feed = a status LIGHT (tap for detail), TradingView = an icon —
+       the whole strip fits without swiping */
+    #feed-chip { width:14px; height:14px; padding:0 !important; flex:none;
+                 border-radius:50%; font-size:0; background:currentColor;
+                 pointer-events:auto !important; box-shadow:0 0 8px currentColor; }
+    #tv-full { font-size:0; flex:none; width:32px; height:28px; padding:0;
+               display:flex; align-items:center; justify-content:center; }
+    #tv-full::after { content:"↗"; font-size:15px; color:var(--dim); }
+    .dtop #g-score { position:static; flex:none; margin-left:auto;
+                     padding:4px 11px; font-size:11px; }
     /* the Marcus bar: title truncates, the link never wraps */
     .dockbar { padding:8px 12px; font-size:10px; letter-spacing:.08em; gap:8px; }
     .dockbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .dockbar a { flex:none; white-space:nowrap; }
     .dgrid { display:flex; flex-direction:column; gap:10px; flex:none; min-height:0; }
     .pdiv { display:none; }
-    .dleft { order:-1; flex:none; }              /* the chart leads on a phone */
+    .dleft { order:-2; flex:none; }              /* the chart leads on a phone */
     #tv-wrap { flex:none; height:56vh; min-height:300px; }
     .dright { flex:none; }
     #agent-dock { flex:none; height:380px; }
     #side-card { flex:none; }
     #side-body { overflow:visible; }             /* the PAGE scrolls, not the card */
-    #watch-rail { display:flex; flex:none; height:340px; }  /* rail comes back, capped */
+    #watch-rail { display:flex; flex:none; height:340px; order:-1; }  /* tickers ride just under the chart */
     .tiles { display:flex; overflow-x:auto; gap:14px; padding-bottom:4px;
              scrollbar-width:none; }
     .tile { flex:0 0 auto; min-width:84px; }
@@ -397,6 +413,7 @@
 
     <section class="pane active" id="dash">
       <div class="dtop">
+        <select id="iv-select" title="chart interval"></select>
         <div class="watch" id="intervals"></div>
         <div class="watch" style="margin-left:auto">
           <span id="feed-chip" class="wchip" style="pointer-events:none;display:none"></span>
@@ -1390,7 +1407,39 @@
       b.onclick = () => { interval = val; localStorage.setItem("tv_interval", val); mountChart(focus); };
       el.appendChild(b);
     }
+    const sel = document.getElementById("iv-select");   // the phone combo, same state
+    sel.innerHTML = INTERVALS.map(([label, val]) =>
+      `<option value="${val}"${val === interval ? " selected" : ""}>${label}</option>`).join("");
+    sel.onchange = () => { interval = sel.value;
+      localStorage.setItem("tv_interval", interval); mountChart(focus); };
   }
+
+  // on a phone the P&L chip sits IN the control strip (it scrolled over
+  // content as a fixed overlay); back to its fixed corner on desktop
+  const _mqPhone = matchMedia("(max-width:700px)");
+  function seatScore() {
+    const g = document.getElementById("g-score");
+    if (_mqPhone.matches) document.querySelector(".dtop").appendChild(g);
+    else document.body.appendChild(g);
+  }
+  _mqPhone.addEventListener("change", seatScore);
+  seatScore();
+
+  // phone: the feed light is tap-for-detail (a tiny popup with the full feed line)
+  document.querySelector(".dtop").addEventListener("click", (e) => {
+    const chip = e.target.closest("#feed-chip");
+    if (!chip || !_mqPhone.matches) return;
+    const old = document.getElementById("dtop-pop");
+    if (old) { old.remove(); return; }
+    const pop = document.createElement("div");
+    pop.id = "dtop-pop";
+    pop.textContent = `${focus} · ${chip.textContent.replace("●", "").trim()}`;
+    pop.style.cssText = "position:fixed;top:" + (chip.getBoundingClientRect().bottom + 8)
+      + "px;left:12px;z-index:99;background:var(--panel2);border:1px solid var(--line);"
+      + "border-radius:8px;padding:8px 13px;font:12px var(--mono);color:var(--text)";
+    document.body.appendChild(pop);
+    setTimeout(() => pop.remove(), 2600);
+  });
 
   let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null,
       tapeChecks = null, callerLevels = null;

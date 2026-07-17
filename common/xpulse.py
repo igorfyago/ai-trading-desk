@@ -10,18 +10,22 @@ never breaks anything, and repeated dashboard loads don't re-bill Grok.
 
 import os
 import re
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
 _CACHE: dict[str, tuple[float, dict | None]] = {}
-_TTL_SECONDS = 240
+_TTL_SECONDS = 3600     # the pulse is an HOURLY read — Grok bills per source
 
-# Public-endpoint billing guard: at most N uncached Grok calls per hour,
-# whole process. Cached reads are unlimited.
-_MAX_LIVE_CALLS_PER_HOUR = 30
+# Billing guard: Grok x_search reads real posts and bills per source, so the
+# whole process gets a hard cap. 2/hour ≈ the focus ticker plus one more;
+# everything else is served from cache, stale included.
+_MAX_LIVE_CALLS_PER_HOUR = 2
 _window: list[float] = []
+_refreshing: set[str] = set()
+_lock = threading.Lock()
 
 
 def _budget_ok() -> bool:
@@ -47,16 +51,38 @@ def list_handles() -> list[str]:
 
 
 def pulse(ticker: str) -> dict | None:
-    """{summary, citations:[urls]} for the last ~24h of X chatter, or None."""
+    """{summary, citations:[urls], as_of} from the desk list, or None.
+
+    NEVER blocks and NEVER bills on the request path: returns whatever is
+    cached (fresh, stale, or nothing) instantly, and — at most once per TTL,
+    inside the hourly budget — kicks ONE background refresh. Agents answer
+    from this immediately; the hourly fetch lands when it lands."""
     if not available():
         return None
     key = ticker.upper()
     now = time.time()
-    if key in _CACHE and now - _CACHE[key][0] < _TTL_SECONDS:
-        return _CACHE[key][1]
-    if not _budget_ok():
-        return _CACHE.get(key, (0, None))[1]
+    ts, val = _CACHE.get(key, (0.0, None))
+    with _lock:
+        wants = now - ts >= _TTL_SECONDS and key not in _refreshing
+        if wants and _budget_ok():
+            _refreshing.add(key)
+            threading.Thread(target=_refresh, args=(key,), daemon=True).start()
+    return val
 
+
+def _refresh(key: str) -> None:
+    try:
+        result = _fetch(key)
+        # keep the old read rather than overwrite it with a failed fetch
+        if result is not None or key not in _CACHE:
+            _CACHE[key] = (time.time(), result)
+        else:
+            _CACHE[key] = (time.time(), _CACHE[key][1])
+    finally:
+        _refreshing.discard(key)
+
+
+def _fetch(key: str) -> dict | None:
     since = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
     handles = list_handles()
     tool: dict = {"type": "x_search", "from_date": since}
@@ -79,7 +105,9 @@ def pulse(ticker: str) -> dict | None:
                 "input": [{
                     "role": "user",
                     "content": (
-                        f"What are {scope} saying about ${key} in the last 24 hours? "
+                        f"What have {scope} said about ${key} in the LAST HOUR "
+                        "(fall back to the last few hours only if the last hour "
+                        "is silent, and say so)? "
                         "Answer with 3-5 terse bullets: concrete catalysts, overall mood, "
                         "and any widely-repeated claims (mark rumors as rumors). "
                         "Quote levels and prices as plain digits. "
@@ -97,12 +125,12 @@ def pulse(ticker: str) -> dict | None:
         summary, inline_cites = _clean_inline_citations(_extract_text(data))
         summary, post_urls = _lift_posts_block(summary)
         citations = post_urls or _extract_citations(data) or inline_cites
-        result = {"summary": summary, "citations": citations}
+        result = {"summary": summary, "citations": citations,
+                  "as_of": datetime.now(timezone.utc).isoformat()}
         if not result["summary"]:
             result = None
     except Exception:
         result = None
-    _CACHE[key] = (now, result)
     return result
 
 

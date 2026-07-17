@@ -255,12 +255,29 @@
   @media (max-width:980px){ .dgrid{grid-template-columns:1fr;} #tv-wrap{flex-basis:auto;height:340px;} #agent-dock{height:400px;} .pdiv{display:none;} }
 
   #iv-select { display:none; }   /* the interval combo exists for phones only */
+  /* phone nav: a floating glass chip + the nav itself as a slide-in drawer */
+  #m-nav-btn { display:none; position:fixed; top:10px; left:10px; z-index:80;
+    width:36px; height:36px; align-items:center; justify-content:center;
+    border-radius:10px; background:rgba(19,21,27,.78); backdrop-filter:blur(8px);
+    border:1px solid var(--line); color:var(--text); font-size:15px; cursor:pointer; }
+  #m-nav-backdrop { display:none; position:fixed; inset:0; z-index:65;
+    background:rgba(0,0,0,.45); backdrop-filter:blur(2px); }
 
   /* ---- phone: the cockpit becomes one scrolling column, chart first.
           Every rule lives in this block — desktop is untouched. ---- */
   @media (max-width:700px){
-    nav { width:44px; padding:20px 6px; }
-    main { margin-left:44px; }
+    /* the rail dies on phones: full-width content, nav lives behind the chip */
+    nav { display:none; }
+    nav.m-open { display:flex; position:fixed; inset:0 auto 0 0;
+      width:min(300px,82vw); padding:26px 22px; z-index:70; overflow-y:auto;
+      box-shadow:24px 0 60px rgba(0,0,0,.6); animation:mnav-in .18s ease; }
+    nav.m-open h1, nav.m-open p.sub, nav.m-open .navlabel,
+    nav.m-open .tab > span:not(.ic), nav.m-open footer, nav.m-open #theme-dots
+      { opacity:1; }
+    main { margin-left:0; }
+    #m-nav-btn { display:flex; }
+    #m-nav-backdrop.on { display:block; }
+    .dtop { margin-left:46px; }        /* the strip clears the menu chip */
     #dash { overflow-y:auto; overflow-x:hidden; padding:10px 10px 46px; }
     /* the control strip: interval COMBO + feed + TV link + the P&L chip
        seated IN the row (it scrolls away with the page, blocks nothing) */
@@ -301,6 +318,7 @@
              scrollbar-width:none; }
     .tile { flex:0 0 auto; min-width:84px; }
   }
+  @keyframes mnav-in { from { transform:translateX(-100%); } }
 
   /* voice kit */
   #kit { flex-direction:column; overflow-y:auto; padding:110px 8% 120px; gap:26px; }
@@ -384,6 +402,8 @@
       Paper desk — every position marked to the live tape.
     </footer>
   </nav>
+  <button id="m-nav-btn" aria-label="menu" title="menu">☰</button>
+  <div id="m-nav-backdrop"></div>
 
   <div id="g-score" onclick="show('positions')" title="net P&amp;L — realized + open · positions">P&amp;L —</div>
 
@@ -1424,6 +1444,20 @@
   }
   _mqPhone.addEventListener("change", seatScore);
   seatScore();
+
+  // phone drawer: the chip opens the real nav as a slide-in; any tab tap closes it
+  const _mnav = document.querySelector("nav");
+  const _mback = document.getElementById("m-nav-backdrop");
+  function mnavSet(open) {
+    _mnav.classList.toggle("m-open", open);
+    _mback.classList.toggle("on", open);
+  }
+  document.getElementById("m-nav-btn").onclick = () =>
+    mnavSet(!_mnav.classList.contains("m-open"));
+  _mback.onclick = () => mnavSet(false);
+  _mnav.addEventListener("click", (e) => {
+    if (e.target.closest(".tab") && _mqPhone.matches) mnavSet(false);
+  });
 
   // phone: the feed light is tap-for-detail (a tiny popup with the full feed line)
   document.querySelector(".dtop").addEventListener("click", (e) => {

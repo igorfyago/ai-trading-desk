@@ -282,6 +282,36 @@ def get_spot(ticker: str) -> dict | None:
 
 # ------------------------------------------------------------------ bars ----
 
+def _scrub_bars(bars: list[dict]) -> list[dict]:
+    """Kill phantom wicks from off-exchange prints (dark-pool/late reports)
+    that ride yahoo's extended-hours tape: a wick wildly beyond the bar body
+    AND its neighbors' closes is a bad tick, not a trade you could have hit —
+    TradingView filters these by trade condition, so the desk does too. Real
+    spikes survive because the neighboring closes move with them."""
+    n = len(bars)
+    if n < 30:
+        return bars
+    trs = sorted(b["h"] - b["l"] for b in bars if b["h"] >= b["l"])
+    med = trs[len(trs) // 2] if trs else 0.0
+    if med <= 0:
+        return bars
+    lim = 6 * med
+    out = []
+    for i, b in enumerate(bars):
+        body_hi, body_lo = max(b["o"], b["c"]), min(b["o"], b["c"])
+        prev_c = bars[i - 1]["c"] if i else b["c"]
+        next_c = bars[i + 1]["c"] if i + 1 < n else b["c"]
+        anchor_hi = max(body_hi, prev_c, next_c)
+        anchor_lo = min(body_lo, prev_c, next_c)
+        h, l = b["h"], b["l"]
+        if h - anchor_hi > lim:
+            h = anchor_hi + med
+        if anchor_lo - l > lim:
+            l = anchor_lo - med
+        out.append({**b, "h": h, "l": l} if (h != b["h"] or l != b["l"]) else b)
+    return out
+
+
 def _resample(bars: list[dict], factor: int, step_s: int) -> list[dict]:
     """Aggregate consecutive bars into buckets of `factor` (yahoo lacks 3m/45m/4h)."""
     out: list[dict] = []
@@ -349,7 +379,7 @@ def _bars_alpaca(symbol: str, interval: str, limit: int) -> list[dict] | None:
             m["v"] += b["v"]
         else:
             merged.append(b)
-    return merged
+    return _scrub_bars(merged) if step < 86400 else merged
 
 
 def _bars_yahoo(symbol: str, interval: str, limit: int) -> list[dict] | None:
@@ -365,7 +395,9 @@ def _bars_yahoo(symbol: str, interval: str, limit: int) -> list[dict] | None:
              "l": q["low"][i], "c": q["close"][i], "v": q["volume"][i] or 0}
             for i, t in enumerate(ts)
             if q["open"][i] is not None and q["close"][i] is not None]
-    if factor:
+    if step < 86400:                       # bad ticks live in intraday tape;
+        bars = _scrub_bars(bars)           # scrub BEFORE resampling so 45m
+    if factor:                             # buckets can't inherit a phantom
         bars = _resample(bars, factor, step)
     return bars
 

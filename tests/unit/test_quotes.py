@@ -191,3 +191,20 @@ def test_watch_quotes_rescues_frozen_prints(monkeypatch):
     quotes._rescue_at.clear()
     rows = quotes.watch_quotes(["SPY"])
     assert rows[0]["price"] == 748.0 and calls["yahoo"] == 1
+
+
+def test_scrub_kills_phantom_wicks_keeps_real_spikes():
+    """An isolated 4%-away wick (off-exchange print) gets clamped; a spike
+    the neighboring closes confirm is a real move and survives."""
+    base = [{"t": i * 60, "o": 100.0, "h": 100.5, "l": 99.5, "c": 100.0, "v": 1}
+            for i in range(60)]
+    bad = dict(base[30], h=112.0)                 # phantom: neighbors at 100
+    bars = base[:30] + [bad] + base[31:]
+    out = quotes._scrub_bars(bars)
+    assert out[30]["h"] < 102.0                   # clamped near the body
+
+    real = [dict(b) for b in base]                # a real squeeze: closes move
+    for j, px in ((40, 104.0), (41, 108.0), (42, 111.0), (43, 109.0)):
+        real[j] = {"t": j * 60, "o": px - 1, "h": px + 1, "l": px - 2, "c": px, "v": 1}
+    out2 = quotes._scrub_bars(real)
+    assert out2[42]["h"] == 112.0                 # untouched: neighbors confirm

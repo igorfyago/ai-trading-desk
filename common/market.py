@@ -94,14 +94,23 @@ def latest_snapshot(ticker: str, as_of: str | None = None) -> dict | None:
     return snap
 
 
-def snapshot_moments(ticker: str, limit: int = 800) -> list[str]:
-    """Every snapshot timestamp available for replay, oldest first."""
+def snapshot_moments(ticker: str, limit: int = 800,
+                     min_gap_s: int = 300) -> list[str]:
+    """Snapshot timestamps available for replay, oldest first — thinned to
+    one per `min_gap_s` so a ~30s collector cadence reaches back DAYS, not
+    hours, within the same budget."""
     feed, _ = resolve_feed(ticker)
     if db.using_live_db():
         rows = db.run_readonly(
             "SELECT timestamp FROM gex_dex_snapshots WHERE ticker = %s"
-            " ORDER BY timestamp DESC LIMIT %s", (feed.upper(), limit))
-        return [r[0].isoformat() for r in rows][::-1]
+            " ORDER BY timestamp DESC LIMIT %s", (feed.upper(), limit * 12))
+        stamps = [r[0] for r in rows][::-1]
+        out, last = [], None
+        for ts in stamps:
+            if last is None or (ts - last).total_seconds() >= min_gap_s:
+                out.append(ts.isoformat())
+                last = ts
+        return out[-limit:]
     conn = get_connection()
     rows = conn.execute(
         "SELECT captured_at FROM snapshots WHERE ticker = ?"

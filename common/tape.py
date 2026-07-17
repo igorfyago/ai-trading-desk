@@ -231,7 +231,12 @@ def day_shape(bars: list[dict]) -> dict | None:
     vw = session_vwap(bars)
     spot = bars[-1]["c"]
     vols = [b["v"] for b in sess]
-    med_v = sorted(vols)[len(vols) // 2] or 1
+    # median over NONZERO volumes: prepost rows often print v=0, and a ~1
+    # median would make every bar look like capitulation
+    nz = sorted(v for v in vols if v > 0)
+    if len(nz) < 10:
+        return None
+    med_v = nz[len(nz) // 2]
 
     def swings(key, cmp):
         pts = []
@@ -257,7 +262,8 @@ def day_shape(bars: list[dict]) -> dict | None:
         if near_or_under and capit and spot > vw[-1]["vwap"] and spot > sess[i2]["c"]:
             return {"shape": "bullish_reversal_day",
                     "low1": round(lo1, 2), "low2": round(lo2, 2),
-                    "capitulation_x": round(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 1)}
+                    "capitulation_x": round(
+                        min(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 99.0), 1)}
 
     highs = swings("h", _ge)
     if len(highs) >= 2:
@@ -268,7 +274,8 @@ def day_shape(bars: list[dict]) -> dict | None:
         if near_or_over and capit and spot < vw[-1]["vwap"] and spot < sess[i2]["c"]:
             return {"shape": "bearish_reversal_day",
                     "high1": round(hi1, 2), "high2": round(hi2, 2),
-                    "capitulation_x": round(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 1)}
+                    "capitulation_x": round(
+                        min(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 99.0), 1)}
     return None
 
 

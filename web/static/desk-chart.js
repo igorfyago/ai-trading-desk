@@ -384,14 +384,15 @@
       const mk = (o, pane = 0) => chart.addSeries(LC().LineSeries,
         { lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
           crosshairMarkerVisible: false, ...o }, pane);
-      lines.vwap = mk({ color: FIXED.vwap, title: "vwap" });
+      // no axis chips for indicators — TV keeps the price scale clean
+      lines.vwap = mk({ color: FIXED.vwap });
       lines.u1 = mk({ color: FIXED.bandUp });
       lines.d1 = mk({ color: FIXED.bandDn });
       lines.u2 = mk({ color: FIXED.bandUp, lineStyle: 2 });
       lines.d2 = mk({ color: FIXED.bandDn, lineStyle: 2 });
-      lines.ema21 = mk({ color: FIXED.ema21, lineWidth: 2, title: "ema21" });
-      lines.sma100 = mk({ color: FIXED.sma100, lineWidth: 2, title: "sma100" });
-      lines.sma200 = mk({ color: FIXED.sma200, lineWidth: 2, title: "sma200" });
+      lines.ema21 = mk({ color: FIXED.ema21, lineWidth: 2 });
+      lines.sma100 = mk({ color: FIXED.sma100, lineWidth: 2 });
+      lines.sma200 = mk({ color: FIXED.sma200, lineWidth: 2 });
       lines.dcU = mk({ color: FIXED.dcU });
       lines.dcL = mk({ color: FIXED.dcL });
 
@@ -443,12 +444,11 @@
                       };
                       const dp = state.dcPts;
                       if (dp) poly(dp.up, dp.lo, FIXED.dcFill);
+                      // fills INSIDE ±1σ only — his TV leaves 1σ→2σ clear
                       const vp = state.vwapPts;
                       if (vp) {
-                        poly(vp.u2, vp.u1, FIXED.vwapFillU2);
                         poly(vp.u1, vp.v, FIXED.vwapFillU1);
                         poly(vp.v, vp.d1, FIXED.vwapFillD1);
-                        poly(vp.d1, vp.d2, FIXED.vwapFillD2);
                       }
                     });
                 },
@@ -460,7 +460,7 @@
 
       // RSI pane (index 1, ~24% height) — TV look: purple RSI, yellow MA,
       // dotted 30/70 guides with the translucent purple band between them
-      lines.rsi = mk({ color: FIXED.rsi, title: "rsi14" }, 1);
+      lines.rsi = mk({ color: FIXED.rsi }, 1);
       lines.rsiMa = mk({ color: FIXED.rsiMa, lineWidth: 1 }, 1);
       rsiGuides = [30, 70].map((price) => lines.rsi.createPriceLine({
         price, lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "",
@@ -552,8 +552,12 @@
                         const y = Math.min(yA, yB) * vpr;
                         const h = Math.max(1, Math.abs(yB - yA) * vpr - 1);
                         const bright = !!r.inVA;
-                        const upW = (r.up / prof.max) * maxW;
-                        const dnW = (r.dn / prof.max) * maxW;
+                        // gamma on the widths: thin rows collapse toward zero
+                        // so LOW-VOLUME GAPS read as clearly as on his TV
+                        const g = (v) => Math.pow(v / prof.max, 1.35) * maxW;
+                        const upW = g(r.up);
+                        const dnW = g(r.dn);
+                        if (upW + dnW < 0.75) continue;
                         ctx.fillStyle = bright ? FIXED.profUpVA : FIXED.profUp;
                         ctx.fillRect(right - upW, y, upW, h);
                         ctx.fillStyle = bright ? FIXED.profDnVA : FIXED.profDn;
@@ -789,24 +793,19 @@
       if (state.bars.length) repaintCandles();
     }
 
-    // TWO price lines after the bell, like TV: the frozen REGULAR CLOSE
-    // (dashed, dim) plus the live extended print, whose line takes the
-    // session's color: orange for pre/post, blue for the overnight tape.
-    let closeLine = null, lastSessKey = "";
+    // ONE live price line, TV-style: crisp dotted, colored by the session it
+    // prints in — orange for pre/post, blue for the overnight tape. No frozen
+    // close line: the real-time print is the price.
+    let lastSessKey = "";
     function setSessionInfo(info) {
-      const key = info ? `${info.session}|${info.close}` : "";
-      if (key === lastSessKey) return;
-      lastSessKey = key;
       const sess = info && info.session;
+      if (sess === lastSessKey) return;
+      lastSessKey = sess;
       const col = sess === "overnight" ? "#4fc3f7"
         : (sess === "pre" || sess === "post") ? "#ffb154" : "";
-      try { candles.applyOptions({ priceLineColor: col }); } catch { /* older lib */ }
-      if (closeLine) { candles.removePriceLine(closeLine); closeLine = null; }
-      if (info && info.close && sess && sess !== "rth") {
-        closeLine = candles.createPriceLine({
-          price: info.close, color: "rgba(255,255,255,.45)", lineWidth: 1,
-          lineStyle: 1, axisLabelVisible: true, title: "close" });
-      }
+      try {
+        candles.applyOptions({ priceLineColor: col, priceLineStyle: 1 });
+      } catch { /* older lib */ }
     }
 
     function setLevels(levels) {

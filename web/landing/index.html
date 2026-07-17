@@ -200,10 +200,14 @@
   .wlrow.dragover { box-shadow:inset 0 2px 0 var(--accent); }
   .wlflag { width:6px; height:6px; border-radius:50%; background:transparent; }
   .wlsym { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .wlpx, .wlchg, .wlext { font-family:var(--mono); font-size:11.5px; text-align:right;
-                          font-variant-numeric:tabular-nums; }
-  .wlchg.pos, .wlext.pos { color:var(--green); }
-  .wlchg.neg, .wlext.neg { color:var(--red); }
+  /* TV-crisp numerals: bigger, weighted, and the exact TV dark-list colors —
+     up/down reads at a glance, positives carry NO plus sign */
+  .wlpx, .wlchg, .wlext { font-family:var(--mono); font-size:12.5px; text-align:right;
+                          font-weight:500; font-variant-numeric:tabular-nums;
+                          letter-spacing:-.01em; }
+  .wlpx { color:var(--text); }
+  .wlchg.pos, .wlext.pos { color:#22ab94; }
+  .wlchg.neg, .wlext.neg { color:#f7525f; }
   .wlext { color:var(--dim); }
   .wlrow .wlx { position:absolute; right:6px; top:4px; display:none; width:18px; height:18px;
                 background:var(--bg); border:1px solid var(--line); border-radius:5px;
@@ -999,11 +1003,11 @@
     px.textContent = q.price != null ? wlFmt(q.price, q.price >= 1000 ? 0 : 2) : "–";
     const chg = document.createElement("span");
     chg.className = "wlchg " + (q.chg_pct > 0 ? "pos" : q.chg_pct < 0 ? "neg" : "");
-    chg.textContent = q.chg_pct != null ? (q.chg_pct > 0 ? "+" : "") + wlFmt(q.chg_pct) + "%" : "";
-    chg.title = q.chg != null ? `day change ${q.chg > 0 ? "+" : ""}${wlFmt(q.chg)}` : "";
+    chg.textContent = q.chg_pct != null ? wlFmt(q.chg_pct) + "%" : "";
+    chg.title = q.chg != null ? `day change ${wlFmt(q.chg)}` : "";
     const ext = document.createElement("span");
     ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
-    ext.textContent = q.ext_pct != null ? (q.ext_pct > 0 ? "+" : "") + wlFmt(q.ext_pct) + "%" : "";
+    ext.textContent = q.ext_pct != null ? wlFmt(q.ext_pct) + "%" : "";
     ext.title = q.ext_pct != null ? `${q.session || "ext"} session move` : "";
     const x = document.createElement("button");
     x.className = "wlx";
@@ -1058,10 +1062,10 @@
       const prev = wlLastPx[row.dataset.sym];
       row.querySelector(".wlpx").textContent = wlFmt(q.price, q.price >= 1000 ? 0 : 2);
       const chg = row.querySelector(".wlchg");
-      chg.textContent = q.chg_pct != null ? (q.chg_pct > 0 ? "+" : "") + wlFmt(q.chg_pct) + "%" : "";
+      chg.textContent = q.chg_pct != null ? wlFmt(q.chg_pct) + "%" : "";
       chg.className = "wlchg " + (q.chg_pct > 0 ? "pos" : q.chg_pct < 0 ? "neg" : "");
       const ext = row.querySelector(".wlext");
-      ext.textContent = q.ext_pct != null ? (q.ext_pct > 0 ? "+" : "") + wlFmt(q.ext_pct) + "%" : "";
+      ext.textContent = q.ext_pct != null ? wlFmt(q.ext_pct) + "%" : "";
       ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
       const dot = row.querySelector(".wldot");
       if (dot) dot.className = "wldot " + (q.session || "");
@@ -1561,7 +1565,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=15`))
+      .then(() => load(`${API}/static/desk-chart.js?v=16`))
       .catch((err) => { chartLib = null; throw err; });  // one failed load must not poison every future mount
     return chartLib;
   }

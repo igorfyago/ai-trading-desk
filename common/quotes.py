@@ -464,6 +464,7 @@ _closes_cache: dict[str, tuple[float, float | None, float | None]] = {}
 _CLOSES_TTL = 2 * 3600.0     # prev-close changes once a session
 _watch_cache: tuple[float, tuple, list] | None = None   # (t, key, rows)
 _rescue_at: dict[str, float] = {}    # sym -> last stale-rescue (monotonic)
+_last_watch_row: dict[str, dict] = {}   # sym -> last COMPLETE row (blank-proofing)
 
 
 def _closes(symbol: str) -> tuple[float | None, float | None]:
@@ -551,6 +552,18 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
             if (reg and q.get("session") in ("pre", "post", "overnight")
                     and abs(q["price"] - reg) > 1e-9):
                 row["ext_pct"] = round((q["price"] / reg - 1) * 100, 2)
+            # a provider hiccup must not blank fields we knew last round:
+            # carry chg/ext forward while the session hasn't changed
+            held = _last_watch_row.get(s)
+            if held and held.get("session") == row.get("session"):
+                for k in ("chg", "chg_pct", "ext_pct"):
+                    if k not in row and k in held:
+                        row[k] = held[k]
+            _last_watch_row[s] = row
+        elif s in _last_watch_row:
+            # nothing came back at all this round: the last known print STANDS
+            # (marked held) — the tape never goes blank once it has spoken
+            row = {**_last_watch_row[s], "held": True}
         rows.append(row)
     _watch_cache = (now, key, rows)
     return rows

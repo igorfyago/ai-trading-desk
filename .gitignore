@@ -11,3 +11,4 @@ data/chroma/
 dist/
 scripts/out/
 scripts/out_oos/
+web/static/logo-cache/

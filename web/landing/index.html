@@ -170,8 +170,17 @@
                      border-radius:6px; padding:6px 10px; color:var(--text);
                      font:12.5px var(--mono); outline:none; text-transform:uppercase; }
   #wl-addrow input:focus { border-color:var(--accent); }
-  #wl-cols, .wlrow { display:grid; grid-template-columns:10px minmax(0,1fr) 62px 52px 44px;
+  #wl-cols, .wlrow { display:grid; grid-template-columns:10px 20px minmax(0,1fr) 62px 52px 44px;
                      gap:6px; align-items:center; padding:0 10px 0 8px; }
+  .wlogo { width:18px; height:18px; border-radius:50%; object-fit:cover;
+           background:var(--panel2); display:block; }
+  /* TradingView session lights: green tape, orange extended, blue overnight */
+  .wldot { display:inline-block; width:7px; height:7px; border-radius:50%;
+           margin-left:6px; vertical-align:1px; background:rgba(255,255,255,.16); }
+  .wldot.rth { background:var(--green); }
+  .wldot.pre, .wldot.post { background:#ffb154; box-shadow:0 0 5px rgba(255,177,84,.55); }
+  .wldot.overnight { background:#4fc3f7; box-shadow:0 0 5px rgba(79,195,247,.55); }
+  .wlrow.held .wlpx { opacity:.78; }
   #wl-cols { font-family:var(--mono); font-size:10px; text-transform:uppercase;
              letter-spacing:.08em; color:var(--dim); padding-top:7px; padding-bottom:7px;
              border-bottom:1px solid var(--line); }
@@ -496,7 +505,7 @@
                    autocomplete="off" spellcheck="false">
           </div>
           <div id="wl-cols">
-            <span></span><span>Symbol</span>
+            <span></span><span></span><span>Symbol</span>
             <span class="wlc" data-sort="price">Last</span>
             <span class="wlc" data-sort="chg_pct">Chg%</span>
             <span class="wlc" data-sort="ext_pct">Ext</span>
@@ -945,9 +954,22 @@
     const flag = document.createElement("span");
     flag.className = "wlflag";
     if (item.flag) flag.style.background = item.flag;
+    const logo = document.createElement("img");
+    logo.className = "wlogo";
+    logo.loading = "lazy";
+    logo.alt = "";
+    logo.src = `${API}/api/logo/${encodeURIComponent(item.s)}`;
     const sym = document.createElement("span");
     sym.className = "wlsym";
     sym.textContent = item.s;
+    const dot = document.createElement("span");
+    dot.className = "wldot " + (q.session || "");
+    dot.title = q.session
+      ? (q.session === "overnight" ? "overnight session · 24h tape" : `${q.session} session`)
+        + (q.held ? " · last known print" : "")
+      : "";
+    sym.appendChild(dot);
+    if (q.held) row.classList.add("held");
     const px = document.createElement("span");
     px.className = "wlpx";
     px.textContent = q.price != null ? wlFmt(q.price, q.price >= 1000 ? 0 : 2) : "—";
@@ -964,7 +986,7 @@
     x.textContent = "×";
     x.title = "Remove";
     x.onclick = (e) => { e.stopPropagation(); wlRemove(sec, item.s); };
-    row.append(flag, sym, px, chg, ext, x);
+    row.append(flag, logo, sym, px, chg, ext, x);
     row.onclick = () => setFocus(item.s);
     row.oncontextmenu = (e) => { e.preventDefault(); wlMenu(e, sec, item); };
     row.ondragstart = (e) => { wlDrag = { sec: sec.name, sym: item.s }; e.dataTransfer.effectAllowed = "move"; };
@@ -1017,6 +1039,9 @@
       const ext = row.querySelector(".wlext");
       ext.textContent = q.ext_pct != null ? (q.ext_pct > 0 ? "+" : "") + wlFmt(q.ext_pct) + "%" : "";
       ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
+      const dot = row.querySelector(".wldot");
+      if (dot) dot.className = "wldot " + (q.session || "");
+      row.classList.toggle("held", !!q.held);
       if (prev != null && q.price !== prev) {
         row.classList.remove("up", "dn");
         void row.offsetWidth;           // restart the animation
@@ -1033,7 +1058,11 @@
     try {
       const d = await fetch(`${API}/api/watch?symbols=${encodeURIComponent(syms.join(","))}`)
         .then(r => r.json());
-      for (const r of d.rows || []) wlQuotes[r.sym] = r;
+      for (const r of d.rows || []) {
+        // belt to the server's retention: a row without a price NEVER
+        // overwrites a row that had one
+        wlQuotes[r.sym] = r.price != null ? r : { ...wlQuotes[r.sym], ...r };
+      }
       if (WL.sort) wlRender(); else wlPatch();
     } catch { /* provider hiccup — next tick */ }
   }

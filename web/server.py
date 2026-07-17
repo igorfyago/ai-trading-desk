@@ -274,6 +274,59 @@ def watch(symbols: str = ""):
             "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
+# ------------------------------------------------------------ ticker logos --
+# TradingView-style company icons: fetched once per symbol from keyless logo
+# CDNs, cached on DISK forever, served with long-lived cache headers. A miss
+# falls back to a generated monogram SVG so every row always has an icon.
+
+_LOGO_DIR = STATIC / "logo-cache"
+_LOGO_DIR.mkdir(exist_ok=True)
+_LOGO_SOURCES = [
+    "https://assets.parqet.com/logos/symbol/{sym}?format=png",
+    "https://financialmodelingprep.com/image-stock/{sym}.png",
+]
+_LOGO_MISS: dict[str, float] = {}       # sym -> monotonic time of last miss
+
+
+def _monogram_svg(sym: str) -> bytes:
+    hue = sum(ord(c) * 37 for c in sym) % 360
+    letter = sym[0] if sym else "?"
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">'
+            f'<circle cx="20" cy="20" r="20" fill="hsl({hue},42%,32%)"/>'
+            f'<text x="20" y="26" text-anchor="middle" font-family="Arial,sans-serif" '
+            f'font-size="19" font-weight="600" fill="#fff">{letter}</text></svg>').encode()
+
+
+@app.get("/api/logo/{sym}")
+def ticker_logo(sym: str):
+    import re as _re
+    import time as _time
+
+    from fastapi.responses import Response
+
+    s = _re.sub(r"[^A-Z0-9.]", "", sym.upper())[:10]
+    if not s:
+        raise HTTPException(400, "bad symbol")
+    headers = {"Cache-Control": "public, max-age=604800, immutable"}
+    png = _LOGO_DIR / f"{s}.png"
+    if png.exists():
+        return Response(png.read_bytes(), media_type="image/png", headers=headers)
+    # real fetch at most once per day per symbol; monogram in between
+    if _time.monotonic() - _LOGO_MISS.get(s, -1e9) > 86400 and "!" not in sym:
+        import httpx
+        for url in _LOGO_SOURCES:
+            try:
+                r = httpx.get(url.format(sym=s), timeout=6, follow_redirects=True)
+                if r.status_code == 200 and r.content[:4] != b"<svg" and len(r.content) > 200:
+                    png.write_bytes(r.content)
+                    return Response(r.content, media_type="image/png", headers=headers)
+            except Exception:
+                continue
+        _LOGO_MISS[s] = _time.monotonic()
+    return Response(_monogram_svg(s), media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/api/bars/{ticker}")
 def bars(ticker: str, interval: str = "5m", limit: int = 600):
     """Candles for the site's own chart (lightweight-charts): live feed data,

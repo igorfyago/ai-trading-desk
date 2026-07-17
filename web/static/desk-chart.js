@@ -47,16 +47,23 @@
   const FIXED = {
     bg: "#131722", text: "#b2b5be", grid: "#1e222d",
     scaleBorder: "#2a2e39", crosshair: "#758696",
-    up: "#26a69a", down: "#ef5350",
-    volUp: "rgba(38,166,154,0.5)", volDown: "rgba(239,83,80,0.5)",
-    volMa: "rgba(255,255,255,0.8)",
-    vwap: "#ff9800", band1: "#4caf50", band2: "#2196f3",
-    dcU: "rgba(76,175,80,0.75)", dcL: "rgba(255,152,0,0.75)",
+    // the boss's TV: current TradingView default market palette
+    up: "#089981", down: "#f23645",
+    volUp: "rgba(8,153,129,0.5)", volDown: "rgba(242,54,69,0.5)",
+    volMa: "rgba(255,255,255,0.85)",
+    // VWAP reads as a light neutral line; the σ bands are felt as a blue
+    // wash (fills) more than seen as lines
+    vwap: "#d1d4dc",
+    band1: "rgba(178,181,190,0.45)", band2: "rgba(41,98,255,0.45)",
+    bandFill1: "rgba(41,98,255,0.07)", bandFill2: "rgba(41,98,255,0.04)",
+    // Donchian: pale grey ceiling, salmon floor (solid hairlines)
+    dcU: "#9598a1", dcL: "#f7525f",
     ema21: "#ff9800", sma100: "#e91e63", sma200: "#2962ff",
-    rsi: "#b39ddb", rsiMa: "#f0c000", rsiGuide: "#787b86",
+    rsi: "#7e57c2", rsiMa: "#f2c55c", rsiGuide: "#787b86",
     rsiFill: "rgba(126,87,194,0.10)",
-    profUp: "rgba(38,166,154,0.50)", profDn: "rgba(233,30,99,0.42)",
-    profUpPoc: "rgba(38,166,154,0.85)", profDnPoc: "rgba(233,30,99,0.80)",
+    // VRVP: cyan up-volume hugging the right edge, magenta down stacked left
+    profUp: "rgba(38,198,218,0.55)", profDn: "rgba(233,30,99,0.50)",
+    profUpPoc: "rgba(38,198,218,0.92)", profDnPoc: "rgba(233,30,99,0.88)",
   };
 
   /* ------------------------------------------------------------ studies ---- */
@@ -291,13 +298,58 @@
           crosshairMarkerVisible: false, ...o }, pane);
       lines.vwap = mk({ color: FIXED.vwap, lineWidth: 2, title: "vwap" });
       lines.u1 = mk({ color: FIXED.band1 }); lines.d1 = mk({ color: FIXED.band1 });
-      lines.u2 = mk({ color: alpha(FIXED.band2, 0.85) });
-      lines.d2 = mk({ color: alpha(FIXED.band2, 0.85) });
-      lines.ema21 = mk({ color: FIXED.ema21, lineWidth: 1.5, title: "ema21" });
-      lines.sma100 = mk({ color: FIXED.sma100, lineWidth: 1.5, title: "sma100" });
-      lines.sma200 = mk({ color: FIXED.sma200, lineWidth: 1.5, title: "sma200" });
-      lines.dcU = mk({ color: FIXED.dcU, lineStyle: 2 });
-      lines.dcL = mk({ color: FIXED.dcL, lineStyle: 2 });
+      lines.u2 = mk({ color: FIXED.band2 });
+      lines.d2 = mk({ color: FIXED.band2 });
+      lines.ema21 = mk({ color: FIXED.ema21, lineWidth: 2, title: "ema21" });
+      lines.sma100 = mk({ color: FIXED.sma100, lineWidth: 2, title: "sma100" });
+      lines.sma200 = mk({ color: FIXED.sma200, lineWidth: 2, title: "sma200" });
+      lines.dcU = mk({ color: FIXED.dcU });
+      lines.dcL = mk({ color: FIXED.dcL });
+
+      // σ-band wash between the VWAP bands (the blue tint TV shows)
+      candles.attachPrimitive({
+        updateAllViews() {},
+        paneViews() {
+          return [{
+            zOrder() { return "bottom"; },
+            renderer() {
+              return {
+                draw(target) {
+                  const bp = state.bandPts;
+                  if (!bp || !bp.u1.length) return;
+                  target.useBitmapCoordinateSpace(
+                    ({ context: ctx, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
+                      const ts = chart.timeScale();
+                      const poly = (up, dn, fill) => {
+                        ctx.beginPath();
+                        let started = false;
+                        for (const pt of up) {
+                          const x = ts.timeToCoordinate(pt.time);
+                          const y = candles.priceToCoordinate(pt.value);
+                          if (x === null || y === null) continue;
+                          if (!started) { ctx.moveTo(x * hpr, y * vpr); started = true; }
+                          else ctx.lineTo(x * hpr, y * vpr);
+                        }
+                        for (let i = dn.length - 1; i >= 0; i--) {
+                          const x = ts.timeToCoordinate(dn[i].time);
+                          const y = candles.priceToCoordinate(dn[i].value);
+                          if (x === null || y === null) continue;
+                          ctx.lineTo(x * hpr, y * vpr);
+                        }
+                        if (!started) return;
+                        ctx.closePath();
+                        ctx.fillStyle = fill;
+                        ctx.fill();
+                      };
+                      poly(bp.u2, bp.d2, FIXED.bandFill2);
+                      poly(bp.u1, bp.d1, FIXED.bandFill1);
+                    });
+                },
+              };
+            },
+          }];
+        },
+      });
 
       // RSI pane (index 1, ~24% height) — TV look: purple RSI, yellow MA,
       // dotted 30/70 guides with the translucent purple band between them
@@ -452,17 +504,27 @@
     function paintStudies() {
       if (!full || !state.bars.length) return;
       const intraday = !state.daily && state.intervalSec < 86400;
+      // house rule: the moving averages live on the 1D chart ONLY — intraday
+      // gets VWAP+σ bands instead, and weekly gets neither
+      const dailyExactly = state.intervalSec === 86400;
       if (intraday) {
         const vw = vwapBands(state.bars);
         lines.vwap.setData(shiftPts(vw.v));
         lines.u1.setData(shiftPts(vw.u1)); lines.d1.setData(shiftPts(vw.d1));
         lines.u2.setData(shiftPts(vw.u2)); lines.d2.setData(shiftPts(vw.d2));
+        state.bandPts = { u1: shiftPts(vw.u1), d1: shiftPts(vw.d1),
+                          u2: shiftPts(vw.u2), d2: shiftPts(vw.d2) };
         for (const k of ["ema21", "sma100", "sma200"]) lines[k].setData([]);
       } else {
         for (const k of ["vwap", "u1", "d1", "u2", "d2"]) lines[k].setData([]);
-        lines.ema21.setData(shiftPts(ema(state.bars, 21)));
-        lines.sma100.setData(shiftPts(sma(state.bars, 100)));
-        lines.sma200.setData(shiftPts(sma(state.bars, 200)));
+        state.bandPts = null;
+        if (dailyExactly) {
+          lines.ema21.setData(shiftPts(ema(state.bars, 21)));
+          lines.sma100.setData(shiftPts(sma(state.bars, 100)));
+          lines.sma200.setData(shiftPts(sma(state.bars, 200)));
+        } else {
+          for (const k of ["ema21", "sma100", "sma200"]) lines[k].setData([]);
+        }
       }
       const dc = donchian(state.bars, 96);
       lines.dcU.setData(shiftPts(dc.up)); lines.dcL.setData(shiftPts(dc.lo));

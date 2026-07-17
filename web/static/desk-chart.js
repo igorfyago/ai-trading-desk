@@ -53,8 +53,11 @@
     up: "#089981", down: "#f23645",
     volUp: "#26a69a", volDown: "rgba(242,54,69,0.5)",   // yes: solid up, 50% down
     volMa: "#ffffff",
-    // VWAP AA: azure core; green above / deep-orange below; 2σ dashed; NO fills
+    // VWAP AA: azure core; green above / deep-orange below; 2σ dashed; the
+    // script's DEFAULT inner shades: green wash above the core, orange below
     vwap: "#0496ff", bandUp: "#4caf50", bandDn: "#e65100",
+    vwapFillU1: "rgba(76,175,80,0.10)", vwapFillU2: "rgba(76,175,80,0.05)",
+    vwapFillD1: "rgba(230,81,0,0.08)", vwapFillD2: "rgba(230,81,0,0.05)",
     // Donchian 96: white 50% ceiling, red 25% floor, blue 5% channel fill —
     // that fill is the navy wash you see across the whole chart
     dcU: "rgba(255,255,255,0.50)", dcL: "rgba(242,54,69,0.25)",
@@ -117,8 +120,10 @@
       let hi = true, lo = true;
       for (let j = i - L; j <= i + L && (hi || lo); j++) {
         if (j === i) continue;
-        if (bars[j].h >= bars[i].h) hi = false;
-        if (bars[j].l <= bars[i].l) lo = false;
+        // ties on the LEFT don't disqualify — the most RECENT swing of a
+        // flat cluster anchors, matching how the TV script picks its pivot
+        if (j < i ? bars[j].h > bars[i].h : bars[j].h >= bars[i].h) hi = false;
+        if (j < i ? bars[j].l < bars[i].l : bars[j].l <= bars[i].l) lo = false;
       }
       if (hi || lo) { anchor = i; break; }
     }
@@ -384,27 +389,37 @@
                         ctx.fillStyle = state.ethColor || FIXED.eth;
                         ctx.fillRect(a, 0, Math.max(1, b - a), bitmapSize.height);
                       }
+                      const poly = (top, bot, fill) => {
+                        if (!top || !bot || !top.length) return;
+                        ctx.beginPath();
+                        let started = false;
+                        for (const pt of top) {
+                          const x = ts.timeToCoordinate(pt.time);
+                          const y = candles.priceToCoordinate(pt.value);
+                          if (x === null || y === null) continue;
+                          if (!started) { ctx.moveTo(x * hpr, y * vpr); started = true; }
+                          else ctx.lineTo(x * hpr, y * vpr);
+                        }
+                        for (let i = bot.length - 1; i >= 0; i--) {
+                          const x = ts.timeToCoordinate(bot[i].time);
+                          const y = candles.priceToCoordinate(bot[i].value);
+                          if (x === null || y === null) continue;
+                          ctx.lineTo(x * hpr, y * vpr);
+                        }
+                        if (!started) return;
+                        ctx.closePath();
+                        ctx.fillStyle = fill;
+                        ctx.fill();
+                      };
                       const dp = state.dcPts;
-                      if (!dp || !dp.up.length) return;
-                      ctx.beginPath();
-                      let started = false;
-                      for (const pt of dp.up) {
-                        const x = ts.timeToCoordinate(pt.time);
-                        const y = candles.priceToCoordinate(pt.value);
-                        if (x === null || y === null) continue;
-                        if (!started) { ctx.moveTo(x * hpr, y * vpr); started = true; }
-                        else ctx.lineTo(x * hpr, y * vpr);
+                      if (dp) poly(dp.up, dp.lo, FIXED.dcFill);
+                      const vp = state.vwapPts;
+                      if (vp) {
+                        poly(vp.u2, vp.u1, FIXED.vwapFillU2);
+                        poly(vp.u1, vp.v, FIXED.vwapFillU1);
+                        poly(vp.v, vp.d1, FIXED.vwapFillD1);
+                        poly(vp.d1, vp.d2, FIXED.vwapFillD2);
                       }
-                      for (let i = dp.lo.length - 1; i >= 0; i--) {
-                        const x = ts.timeToCoordinate(dp.lo[i].time);
-                        const y = candles.priceToCoordinate(dp.lo[i].value);
-                        if (x === null || y === null) continue;
-                        ctx.lineTo(x * hpr, y * vpr);
-                      }
-                      if (!started) return;
-                      ctx.closePath();
-                      ctx.fillStyle = FIXED.dcFill;
-                      ctx.fill();
                     });
                 },
               };
@@ -604,9 +619,13 @@
         lines.vwap.setData(shiftPts(vw.v));
         lines.u1.setData(shiftPts(vw.u1)); lines.d1.setData(shiftPts(vw.d1));
         lines.u2.setData(shiftPts(vw.u2)); lines.d2.setData(shiftPts(vw.d2));
+        state.vwapPts = { v: shiftPts(vw.v),
+                          u1: shiftPts(vw.u1), d1: shiftPts(vw.d1),
+                          u2: shiftPts(vw.u2), d2: shiftPts(vw.d2) };
         for (const k of ["ema21", "sma100", "sma200"]) lines[k].setData([]);
       } else {
         for (const k of ["vwap", "u1", "d1", "u2", "d2"]) lines[k].setData([]);
+        state.vwapPts = null;
         if (dailyExactly) {
           lines.ema21.setData(shiftPts(ema(state.bars, 21)));
           lines.sma100.setData(shiftPts(sma(state.bars, 100)));
@@ -656,7 +675,10 @@
       repaintCandles();
       repaintVolume();
       paintStudies();
-      if (full) state.profile = computeProfile(state.bars, 75);
+      if (full) state.profile = computeProfile(state.bars,
+        // the house VRVP runs 300 thin rows — scale to the pane so each row
+        // still paints at least ~2px
+        Math.min(300, Math.max(60, Math.floor((container.clientHeight || 420) / 2))));
       applyMarkers();
       paintLegend(null);
       if (symChanged) {

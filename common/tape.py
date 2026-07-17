@@ -210,6 +210,68 @@ def _fmt(x) -> str:
     return f"{x:.2f}" if x is not None else "none"
 
 
+def day_shape(bars: list[dict]) -> dict | None:
+    """The day-level read: capitulation + a double bottom (or top) that
+    reclaimed (or lost) the session VWAP = a REVERSAL DAY. This outranks the
+    structure lean for the rest of the session — after capitulation you stop
+    leaning with the old trend.
+
+      bullish_reversal_day: two swing lows within ~0.35% (or an undercut),
+        climax volume (>=3x median) at the second, and spot back above VWAP
+      bearish_reversal_day: the mirror off two swing highs
+    """
+    if len(bars) < 30:
+        return None
+    day = (bars[-1]["t"] - 4 * 3600) // 86400
+    off = next(i for i, b in enumerate(bars)
+               if (b["t"] - 4 * 3600) // 86400 == day)
+    sess = bars[off:]
+    if len(sess) < 20:
+        return None
+    vw = session_vwap(bars)
+    spot = bars[-1]["c"]
+    vols = [b["v"] for b in sess]
+    med_v = sorted(vols)[len(vols) // 2] or 1
+
+    def swings(key, cmp):
+        pts = []
+        for i in range(3, len(sess) - 2):
+            win = sess[max(0, i - 3):i + 3]
+            if cmp(sess[i][key], (min if cmp is _le else max)(b[key] for b in win)):
+                if not pts or i - pts[-1] >= 5:
+                    pts.append(i)
+        return pts
+
+    def _le(a, b):
+        return a <= b
+
+    def _ge(a, b):
+        return a >= b
+
+    lows = swings("l", _le)
+    if len(lows) >= 2:
+        i1, i2 = lows[0], lows[-1]
+        lo1, lo2 = sess[i1]["l"], sess[i2]["l"]
+        near_or_under = lo2 <= lo1 * 1.0035
+        capit = max(vols[max(0, i2 - 1):i2 + 2]) >= 3 * med_v
+        if near_or_under and capit and spot > vw[-1]["vwap"] and spot > sess[i2]["c"]:
+            return {"shape": "bullish_reversal_day",
+                    "low1": round(lo1, 2), "low2": round(lo2, 2),
+                    "capitulation_x": round(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 1)}
+
+    highs = swings("h", _ge)
+    if len(highs) >= 2:
+        i1, i2 = highs[0], highs[-1]
+        hi1, hi2 = sess[i1]["h"], sess[i2]["h"]
+        near_or_over = hi2 >= hi1 * 0.9965
+        capit = max(vols[max(0, i2 - 1):i2 + 2]) >= 3 * med_v
+        if near_or_over and capit and spot < vw[-1]["vwap"] and spot < sess[i2]["c"]:
+            return {"shape": "bearish_reversal_day",
+                    "high1": round(hi1, 2), "high2": round(hi2, 2),
+                    "capitulation_x": round(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 1)}
+    return None
+
+
 def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
     """The full house read on a bar series. Pure: no I/O, deterministic."""
     if not bars:
@@ -320,9 +382,19 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         tail = (f"{bias.capitalize()} triggered through the {_fmt(crossed)} wall; the low-volume "
                 f"gap should travel fast toward {_fmt(target)}, VWAP {band['vwap']:.2f} stays the magnet.")
 
+    ds = day_shape(bars)
+    if ds:
+        side = "bullish" if ds["shape"].startswith("bull") else "bearish"
+        lvl = ds.get("low2", ds.get("high2"))
+        tail += (f" DAY SHAPE: {side} reversal day - capitulation "
+                 f"({ds['capitulation_x']}x volume) at the double "
+                 f"{'bottom' if side == 'bullish' else 'top'} near {lvl}, "
+                 f"VWAP {'reclaimed' if side == 'bullish' else 'lost'}.")
+
     return {
         "spot": round(spot, 4),
         "vwap": round(band["vwap"], 4),
+        "day_shape": ds,
         "band_position": pos,
         "rsi": {"value": None if rsi_s[-1] is None else round(rsi_s[-1], 2),
                 "ma": None if ma_s[-1] is None else round(ma_s[-1], 2),

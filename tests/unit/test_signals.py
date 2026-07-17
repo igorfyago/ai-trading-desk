@@ -227,3 +227,60 @@ def test_far_wall_demotes_to_local_line(monkeypatch):
     assert x["context_level"] is not None       # the far wall got demoted
     assert x["thesis_label"] != "the call wall"
     assert "beyond" in x["thesis_note"]
+
+
+def _double_bottom_day():
+    """Today's shape, scripted: selloff to a morning low, bounce, second leg
+    to a matching low on CAPITULATION volume, then a reclaim through VWAP."""
+    def bar(t, o, h, l, c, v):
+        return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v}
+
+    bars, t, px = [], 20_000 * 86400 + 4 * 3600 + 34_200, 101.0
+    for i in range(12):                      # leg one down
+        o = px
+        c = px - 0.28
+        bars.append(bar(t, o, o + 0.1, c - 0.15, c, 1200)); t += 900; px = c
+    lo1 = px
+    for i in range(10):                      # bounce
+        o = px
+        c = px + 0.22
+        bars.append(bar(t, o, c + 0.1, o - 0.1, c, 900)); t += 900; px = c
+    for i in range(10):                      # leg two down toward the low
+        o = px
+        c = px - 0.24
+        bars.append(bar(t, o, o + 0.1, c - 0.1, c, 1000)); t += 900; px = c
+    bars.append(bar(t, px, px + 0.2, lo1 - 0.1, px + 0.1, 6000))   # capitulation
+    t += 900; px += 0.1
+    for i in range(9):                       # the reclaim through VWAP
+        o = px
+        c = px + 0.5
+        bars.append(bar(t, o, c + 0.15, o - 0.05, c, 2400)); t += 900; px = c
+    return bars
+
+
+def test_reversal_day_flips_the_engine(monkeypatch):
+    """Capitulation + double bottom + VWAP reclaim = bullish reversal day —
+    the engine stops leaning short even when the structure says sellers."""
+    from common import tape as tape_mod
+
+    bars = _double_bottom_day()
+    ds = tape_mod.day_shape(bars)
+    assert ds and ds["shape"] == "bullish_reversal_day", ds
+    assert ds["capitulation_x"] >= 3
+
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    r = signals.recommend_trade("SPY", tape_bars=bars)
+    if "reversal - tape triggered" not in r["bias"]:   # trigger outranks; else day
+        assert "reversal day" in r["bias"]
+        assert r["execution"]["kind"] == "call"
+        assert r["execution"]["thesis_label"] == "the session VWAP"
+        assert "reversal day" in r["plain_english"]

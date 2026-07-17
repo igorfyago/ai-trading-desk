@@ -285,6 +285,30 @@
     };
     const full = state.mode === "full";
 
+    // VRVP is a VISIBLE-RANGE profile (like TV): it recomputes over the bars
+    // on screen, not the whole loaded history — pan to premarket and it shows
+    // premarket; sit on today and it shows TODAY.
+    let profileReq = null;      // the primitive's requestUpdate, set on attach
+    let profileTimer = null;
+
+    function visibleBars() {
+      try {
+        const lr = chart.timeScale().getVisibleLogicalRange();
+        if (!lr) return state.bars;
+        const a = Math.max(0, Math.floor(lr.from));
+        const b = Math.min(state.bars.length, Math.ceil(lr.to) + 1);
+        const s = state.bars.slice(a, b);
+        return s.length >= 10 ? s : state.bars;
+      } catch { return state.bars; }
+    }
+
+    function recomputeProfile() {
+      if (!full) return;
+      state.profile = computeProfile(visibleBars(),
+        Math.min(300, Math.max(60, Math.floor((container.clientHeight || 420) / 2))));
+      if (profileReq) profileReq();
+    }
+
     // lightweight-charts renders epochs as UTC — display-shift every time we
     // hand it by the Dublin UTC-offset at that timestamp (DST-safe, cached
     // per 6h bucket). Internal state stays RAW UTC.
@@ -498,8 +522,10 @@
 
       // VRVP — drawn right-edge-anchored by a series primitive (TV style):
       // up volume from the right edge leftward, down volume stacked to its
-      // left, POC row brighter.
+      // left, Value-Area rows bright. VISIBLE-RANGE: recomputed on pan/zoom.
       candles.attachPrimitive({
+        attached(p) { profileReq = p.requestUpdate; },
+        detached() { profileReq = null; },
         updateAllViews() {},
         paneViews() {
           return [{
@@ -535,6 +561,12 @@
             },
           }];
         },
+      });
+
+      // pan/zoom re-anchors the profile to what's on screen (debounced)
+      chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        clearTimeout(profileTimer);
+        profileTimer = setTimeout(recomputeProfile, 160);
       });
     }
 
@@ -677,10 +709,7 @@
       repaintCandles();
       repaintVolume();
       paintStudies();
-      if (full) state.profile = computeProfile(state.bars,
-        // the house VRVP runs 300 thin rows — scale to the pane so each row
-        // still paints at least ~2px
-        Math.min(300, Math.max(60, Math.floor((container.clientHeight || 420) / 2))));
+      recomputeProfile();
       applyMarkers();
       paintLegend(null);
       if (symChanged) {
@@ -717,7 +746,7 @@
       }
       candles.update(displayBar(state.bars.length - 1));
       state.tickCount++;
-      if (full && state.tickCount % 50 === 0) state.profile = computeProfile(state.bars, 75);
+      if (full && state.tickCount % 50 === 0) recomputeProfile();
       const now = Date.now();
       if (now - state.lastStudyPaint > 3000) {   // studies + RSI follow, gently
         state.lastStudyPaint = now;

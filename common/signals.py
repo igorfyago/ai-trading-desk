@@ -172,8 +172,10 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                      f"hedging pins price between the walls ({put_wall} / {call_wall}). "
                      f"Sell premium at the walls dealers defend. Signal score {score:+.0f}.")
 
-    # A TRIGGERED tape reversal takes the trade over any structure lean —
-    # the desk trades the next 2-3 hours, and a fired checklist IS the tape.
+    # Precedence: a TRIGGERED tape reversal takes the trade; else a REVERSAL
+    # DAY (capitulation + double bottom/top through VWAP) flips the lean;
+    # else the structure trade stands. The desk trades the next 2-3 hours.
+    ds = (tape or {}).get("day_shape")
     if tape and tape.get("stage") == "triggered" and tape.get("bias"):
         t_kind = "call" if tape["bias"] == "long" else "put"
         name = f"long {t_kind} (tape reversal triggered)"
@@ -183,6 +185,18 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = ("The house tape read fired: " + tape["plain"] +
                      " A triggered reversal takes the trade over the structure lean.")
+    elif ds:
+        d_kind = "call" if ds["shape"].startswith("bull") else "put"
+        name = f"long {d_kind} (reversal day)"
+        bias = (f"{'bullish' if d_kind == 'call' else 'bearish'} - reversal day "
+                f"(capitulation + double {'bottom' if d_kind == 'call' else 'top'})")
+        legs = [_leg(snap, atm, d_kind, "buy", dte)]
+        invalidation = (f"a 15m close back {'below' if d_kind == 'call' else 'above'} "
+                        f"the session VWAP at {tape['vwap']:.2f}")
+        rationale = (f"Reversal day: capitulation ({ds['capitulation_x']}x volume) at the "
+                     f"double {'bottom' if d_kind == 'call' else 'top'} and VWAP "
+                     f"{'reclaimed' if d_kind == 'call' else 'lost'} - after capitulation "
+                     "the desk stops leaning with the old trend.")
 
     execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score,
                                 dte, atm, step, em, tape=tape)
@@ -209,6 +223,8 @@ def recommend_trade(ticker: str, as_of: str | None = None,
             "stage": tape.get("stage"), "bias": tape.get("bias"),
             "target": tape.get("target"), "vwap": tape.get("vwap"),
             "rsi": (tape.get("rsi") or {}).get("state"),
+            "day_shape": (tape.get("day_shape") or {}).get("shape"),
+            "capitulation_x": (tape.get("day_shape") or {}).get("capitulation_x"),
             "plain": tape.get("plain"),
         },
         "invalidation": f"Exit if {invalidation}.",
@@ -250,12 +266,19 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     flip_ok = flip is not None
     trig = tape if (tape and tape.get("stage") == "triggered"
                     and tape.get("bias")) else None
+    dshape = (tape or {}).get("day_shape") if tape else None
     if trig:
         bullish = trig["bias"] == "long"
         headline = f"TAPE says {'long' if bullish else 'short'} reversal - triggered"
         why = ("the checklist fired: the 2-sigma band held on wicks, climax "
                "volume marked the turn, and a thick candle crossed the "
                "1-sigma band - price runs the low-volume gap")
+    elif dshape:
+        bullish = dshape["shape"].startswith("bull")
+        headline = f"TAPE says {'bullish' if bullish else 'bearish'} reversal day"
+        why = (f"capitulation ({dshape['capitulation_x']}x volume) at the double "
+               f"{'bottom' if bullish else 'top'} and VWAP "
+               f"{'reclaimed' if bullish else 'lost'} - the old trend is done for today")
     elif regime == "negative_gamma":
         bullish = (spot >= flip) if flip_ok else (score >= 0)
         headline = f"GEX says {'bullish' if bullish else 'bearish'} momentum holds today"
@@ -273,8 +296,8 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
                "lean " + ("long from the low end" if bullish else "short from the high end"))
     # the thesis line: the flip when it is a real level, else the wall the
     # trade leans on — always a DISTINCT price, never a mirror of spot
-    if trig:
-        thesis_level, thesis_label = trig["vwap"], "the session VWAP"
+    if trig or dshape:
+        thesis_level, thesis_label = tape["vwap"], "the session VWAP"
     elif flip_ok:
         thesis_level, thesis_label = flip, "the tipping point"
     elif bullish:
@@ -287,7 +310,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     # CONTEXT, not the working line — the local level takes over.
     context_level = context_label = None
     reach = market.expected_move(spot, snap["atm_iv"], min(dte, 1.0)) * 1.2
-    if not trig and abs(thesis_level - spot) > reach:
+    if not trig and not dshape and abs(thesis_level - spot) > reach:
         context_level, context_label = thesis_level, thesis_label
         if tape and tape.get("vwap"):
             thesis_level, thesis_label = tape["vwap"], "the session VWAP"
@@ -295,8 +318,15 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
             near = min((atm, put_wall, call_wall), key=lambda v: abs(v - spot))
             thesis_level, thesis_label = near, "the nearest level"
 
-    # the achievable TARGET: on a triggered reversal, the tape's gap/wall
-    target = trig.get("target") if trig else None
+    # the achievable TARGET: the tape's gap/wall on a triggered reversal; the
+    # next profile wall in the trade direction on a reversal day
+    if trig:
+        target = trig.get("target")
+    elif dshape:
+        prof = tape.get("profile") or {}
+        target = prof.get("wall_above") if bullish else prof.get("wall_below")
+    else:
+        target = None
 
     kind = "call" if bullish else "put"
     entry_px = market.black_scholes(spot, atm, dte, snap["atm_iv"], kind)["price"]

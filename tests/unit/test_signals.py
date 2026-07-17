@@ -266,7 +266,7 @@ def test_reversal_day_flips_the_engine(monkeypatch):
     bars = _double_bottom_day()
     ds = tape_mod.day_shape(bars)
     assert ds and ds["shape"] == "bullish_reversal_day", ds
-    assert ds["capitulation_x"] >= 3
+    assert ds["capitulation_x"] >= 2.5
 
     real = market.latest_snapshot
 

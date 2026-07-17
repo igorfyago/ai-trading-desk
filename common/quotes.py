@@ -310,24 +310,53 @@ def _bars_alpaca(symbol: str, interval: str, limit: int) -> list[dict] | None:
     asym = _alpaca_sym(symbol)
     if asym is None:                          # crypto/futures: yahoo has them
         return None
-    r = _client.get(f"{_ALPACA_DATA}/bars",
-                    params={"symbols": asym, "timeframe": tf, "start": start,
-                            "limit": min(limit, 1000), "adjustment": "split",
-                            "feed": "iex", "sort": "desc"},
-                    headers={"APCA-API-KEY-ID": keys[0], "APCA-API-SECRET-KEY": keys[1]})
-    r.raise_for_status()
-    raw = (r.json().get("bars") or {}).get(asym) or []
-    bars = [{"t": int(datetime.fromisoformat(b["t"].replace("Z", "+00:00")).timestamp()),
-             "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)}
-            for b in raw]
-    bars.reverse()  # requested desc for recency; charts want ascending
-    return bars
+
+    def fetch(feed: str) -> list[dict]:
+        r = _client.get(f"{_ALPACA_DATA}/bars",
+                        params={"symbols": asym, "timeframe": tf, "start": start,
+                                "limit": min(limit, 1000), "adjustment": "split",
+                                "feed": feed, "sort": "desc"},
+                        headers={"APCA-API-KEY-ID": keys[0],
+                                 "APCA-API-SECRET-KEY": keys[1]})
+        if r.status_code != 200:              # a tape the plan doesn't carry
+            return []
+        raw = (r.json().get("bars") or {}).get(asym) or []
+        return [{"t": int(datetime.fromisoformat(b["t"].replace("Z", "+00:00")).timestamp()),
+                 "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)}
+                for b in raw]
+
+    bars = fetch("iex")
+    if not bars:
+        return None
+    # 24h chart: merge the Blue Ocean overnight candles (feed name 'boats' on
+    # the bars endpoint, 'overnight' on trades). Sessions never overlap the
+    # IEX buckets, so concat + sort is a clean merge.
+    if step < 86400:
+        try:
+            bars += fetch("boats")
+        except Exception:
+            pass                              # overnight candles are a bonus
+    bars.sort(key=lambda b: b["t"])
+    # sessions can share a boundary bucket in winter (EST shifts the tape past
+    # midnight UTC) — collapse equal-t buckets or the chart rejects the data
+    merged: list[dict] = []
+    for b in bars:
+        if merged and merged[-1]["t"] == b["t"]:
+            m = merged[-1]
+            m["h"] = max(m["h"], b["h"])
+            m["l"] = min(m["l"], b["l"])
+            m["c"] = b["c"]
+            m["v"] += b["v"]
+        else:
+            merged.append(b)
+    return merged
 
 
 def _bars_yahoo(symbol: str, interval: str, limit: int) -> list[dict] | None:
     _, yiv, yrange, factor, step = INTERVALS[interval]
     r = _client.get(f"{_YAHOO}/{_yahoo_sym(symbol)}",
-                    params={"interval": yiv, "range": yrange, "includePrePost": "false"})
+                    params={"interval": yiv, "range": yrange,
+                            "includePrePost": "true"})   # 24h chart, keyless too
     r.raise_for_status()
     res = r.json()["chart"]["result"][0]
     ts = res.get("timestamp") or []

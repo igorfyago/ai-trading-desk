@@ -796,7 +796,11 @@
     }
 
     function applyMarkers() {
-      const shifted = state.markers.map((m) => ({ ...m, time: dispOf(m.time) }));
+      // markers only render on bars the chart actually loaded — a checklist
+      // time outside the visible history must not invent a phantom position
+      const shifted = state.markers
+        .map((m) => ({ ...m, time: state.dispByRaw.get(m.time) }))
+        .filter((m) => m.time !== undefined);
       if (!state.markersApi) {
         if (!shifted.length) return;
         state.markersApi = LC().createSeriesMarkers(candles, shifted);

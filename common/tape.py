@@ -262,6 +262,7 @@ def day_shape(bars: list[dict]) -> dict | None:
         if near_or_under and capit and spot > vw[-1]["vwap"] and spot > sess[i2]["c"]:
             return {"shape": "bullish_reversal_day",
                     "low1": round(lo1, 2), "low2": round(lo2, 2),
+                    "capitulation_t": sess[i2]["t"],
                     "capitulation_x": round(
                         min(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 99.0), 1)}
 
@@ -274,6 +275,7 @@ def day_shape(bars: list[dict]) -> dict | None:
         if near_or_over and capit and spot < vw[-1]["vwap"] and spot < sess[i2]["c"]:
             return {"shape": "bearish_reversal_day",
                     "high1": round(hi1, 2), "high2": round(hi2, 2),
+                    "capitulation_t": sess[i2]["t"],
                     "capitulation_x": round(
                         min(max(vols[max(0, i2 - 1):i2 + 2]) / med_v, 99.0), 1)}
     return None
@@ -398,6 +400,57 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
                  f"{'bottom' if side == 'bullish' else 'top'} near {lvl}, "
                  f"VWAP {'reclaimed' if side == 'bullish' else 'lost'}.")
 
+    # ---- the four-check reversal list (his indicators, numbered) ---------
+    # Each check reports the LATEST bar it fired on, so the chart can circle
+    # exactly one spot per indicator and agents can walk the list by number.
+    cl_side = bias or ("long" if spot < band["vwap"] else "short")
+    lb0 = max(0, n - ARM_LOOKBACK)
+
+    def _latest(pred):
+        for i in range(n - 1, lb0 - 1, -1):
+            if pred(i):
+                return i
+        return None
+
+    if cl_side == "long":
+        rsi_i = _latest(lambda i: _rsi_state(rsi_s, ma_s, i) in ("red", "red_curling"))
+        tag_i = _latest(lambda i: vw[i]["sigma"] > spot * 1e-4
+                        and bars[i]["l"] <= vw[i]["d2"])
+        held = tag_i is not None and bars[tag_i]["c"] > vw[tag_i]["d2"]
+        tag_px = None if tag_i is None else bars[tag_i]["l"]
+    else:
+        rsi_i = _latest(lambda i: _rsi_state(rsi_s, ma_s, i) in ("green", "green_fading"))
+        tag_i = _latest(lambda i: vw[i]["sigma"] > spot * 1e-4
+                        and bars[i]["h"] >= vw[i]["u2"])
+        held = tag_i is not None and bars[tag_i]["c"] < vw[tag_i]["u2"]
+        tag_px = None if tag_i is None else bars[tag_i]["h"]
+    vol_i = _latest(lambda i: _vol_spike(bars, i))
+    cap_t = (ds or {}).get("capitulation_t")
+    conf_ok = conf_i is not None and bias == cl_side
+    b2, b1 = ("-2σ", "-1σ") if cl_side == "long" else ("+2σ", "+1σ")
+
+    def _chk(num, key, label, i, px, t_override=None):
+        t = t_override if t_override is not None else (None if i is None else bars[i]["t"])
+        return {"n": num, "key": key, "label": label, "ok": t is not None,
+                "t": t, "px": None if px is None else round(px, 2)}
+
+    checks = [
+        _chk(1, "rsi", "RSI red under its MA" if cl_side == "long"
+             else "RSI green over its MA", rsi_i,
+             None if rsi_i is None else bars[rsi_i]["l" if cl_side == "long" else "h"]),
+        _chk(2, "band2", f"{b2} tagged, {'wick held' if held else 'tag'}",
+             tag_i, tag_px),
+        _chk(3, "climax", "climax volume (trend exhaustion)"
+             + (f" {ds['capitulation_x']}x" if cap_t else ""),
+             vol_i, None if vol_i is None else bars[vol_i]["l" if cl_side == "long" else "h"],
+             t_override=cap_t),
+        _chk(4, "thick1", f"thick candle back through {b1}",
+             conf_i if conf_ok else None,
+             None if not conf_ok else (vw[conf_i]["d1"] if cl_side == "long" else vw[conf_i]["u1"])),
+    ]
+    checklist = {"side": cl_side, "done": sum(1 for c in checks if c["ok"]),
+                 "checks": checks, "stage": stage}
+
     return {
         "spot": round(spot, 4),
         "vwap": round(band["vwap"], 4),
@@ -414,6 +467,7 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
                     "gap_ahead": gap_ahead},
         "stage": stage,
         "bias": bias,
+        "checklist": checklist,
         "target": None if target is None else round(target, 2),
         "plain": f"{head} {tail}",
     }

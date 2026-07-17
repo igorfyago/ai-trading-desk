@@ -1353,7 +1353,20 @@
     }
   }
 
-  let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null;
+  let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null,
+      tapeChecks = null;
+
+  function applyTapeMarkers() {
+    // circle the LATEST bar each reversal check fired on — max one per check
+    if (!deskChart || (deskChart.symbol && deskChart.symbol() !== focus)) return;
+    if (!tapeChecks || tapeChecks.sym !== focus) { deskChart.setMarkers([]); return; }
+    const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const long = tapeChecks.side === "long";
+    deskChart.setMarkers(tapeChecks.checks.filter(c => c.ok && c.t).map(c => ({
+      time: c.t, position: long ? "belowBar" : "aboveBar", shape: "circle",
+      color: cssv(long ? "--green" : "--red"), text: String(c.n),
+    })));
+  }
 
   function ensureChartLib() {
     if (window.DeskChart) return Promise.resolve();
@@ -1364,7 +1377,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=13`))
+      .then(() => load(`${API}/static/desk-chart.js?v=14`))
       .catch((err) => { chartLib = null; throw err; });  // one failed load must not poison every future mount
     return chartLib;
   }
@@ -1443,6 +1456,7 @@
       });
       setFeedChip(data);
       applyGexLevels();
+      applyTapeMarkers();
     } catch {
       if (seq !== chartSeq) return;
       if (deskChart) { deskChart.destroy(); deskChart = null; }
@@ -1498,8 +1512,19 @@
         <div class="tile"><b>${(s.atm_iv * 100).toFixed(1)}%</b><span>atm iv</span></div>
         <div class="tile"><b>${s.vix ?? "—"}</b><span>vix</span></div>`;
       tiles.dataset.sym = t;
+      const cl = (d.trade.tape || {}).checklist;
+      tapeChecks = cl ? { sym: t, ...cl } : null;
+      const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("en-US",
+        { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" });
+      const clHtml = !cl ? "" : `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <span class="dnote">THE SETUP · ${cl.side} reversal · ${cl.done}/4${cl.stage && cl.stage !== "none" ? " · " + cl.stage : ""}</span>
+        ${cl.checks.map(c => `<div style="margin-top:4px">
+          <span class="${c.ok ? "pos" : ""}"${c.ok ? "" : ' style="color:var(--dim)"'}>${c.ok ? "✓" : "○"}</span>
+          ${c.n}. ${c.label}${c.t ? ` <span style="color:var(--dim)">· ${hhmm(c.t)} ET</span>` : ""}</div>`).join("")}
+      </div>`;
       document.getElementById("d-trade").innerHTML =
-        `<b>${d.trade.structure}</b> — ${d.trade.bias}<br><br>${d.trade.plain_english}`;
+        `<b>${d.trade.structure}</b> — ${d.trade.bias}<br><br>${d.trade.plain_english}` + clHtml;
+      applyTapeMarkers();
       renderNews(d.headlines);
       renderBuzz(d.buzz, d.trending);
       renderTA(d.ta_signals);

@@ -114,6 +114,26 @@ def test_read_tape_long_setup_end_to_end():
     assert flat["stage"] == "none" and flat["bias"] is None
 
 
+def test_checklist_reports_the_four_checks_with_bar_times():
+    """His four reversal indicators, numbered, each pinned to the LATEST bar
+    it fired on — the UI circles those bars, the agents walk the count."""
+    bars = _scripted_long_setup()
+    cl = tape.read_tape(bars, ticker="SPY")["checklist"]
+    assert cl["side"] == "long"
+    assert [c["n"] for c in cl["checks"]] == [1, 2, 3, 4]
+    assert cl["done"] == 4                       # a fired setup has all four in
+    times = {b["t"] for b in bars}
+    for c in cl["checks"]:
+        assert c["ok"] and c["t"] in times       # every circle lands on a real bar
+    # the -2σ tag and the thick cross are distinct moments of the story
+    keyed = {c["key"]: c for c in cl["checks"]}
+    assert keyed["band2"]["t"] <= keyed["thick1"]["t"]
+    # a quiet tape still shows the list, mostly unchecked
+    quiet = [_bar(_T0 + i * 900, 100.0, 100.2, 99.8, 100.1, 1000) for i in range(40)]
+    qcl = tape.read_tape(quiet)["checklist"]
+    assert qcl["done"] <= 2 and not qcl["checks"][3]["ok"]
+
+
 def test_get_tape_read_none_when_feed_off(monkeypatch):
     monkeypatch.setenv("QUOTES_PROVIDER", "off")   # conftest default, made explicit
     assert tape.get_tape_read("SPY") is None

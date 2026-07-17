@@ -197,6 +197,36 @@ def latest_ta_signals(ticker: str, limit: int = 5) -> list[dict]:
     return [{"created_at": r[0], "signal": r[1], "price": r[2], "interval": r[3]} for r in rows]
 
 
+@app.get("/api/replay/moments")
+def replay_moments(ticker: str = "SPY"):
+    """Snapshot timestamps available for replay, oldest first."""
+    from common import replay
+
+    ms = replay.moments(ticker)
+    return {"ticker": ticker.upper(), "n": len(ms), "moments": ms}
+
+
+@app.get("/api/replay/run")
+def replay_run(ticker: str = "SPY", at: str = ""):
+    """One blindfolded decision at a past moment, graded forward by the tape."""
+    from common import replay
+
+    if not at:
+        raise HTTPException(400, "at=ISO timestamp required")
+    return replay.run(ticker, at)
+
+
+@app.get("/api/replay/sweep")
+def replay_sweep(ticker: str = "SPY", start: str = "", end: str = "",
+                 step: int = 60):
+    """A decision every `step` minutes across the range, aggregated."""
+    from common import replay
+
+    if not start or not end:
+        raise HTTPException(400, "start & end ISO timestamps required")
+    return replay.sweep(ticker, start, end, step_minutes=max(15, step))
+
+
 @app.get("/api/xfeed/{ticker}")
 def xfeed(ticker: str):
     """The X card's real posts: the pulse's citations as oEmbed HTML."""

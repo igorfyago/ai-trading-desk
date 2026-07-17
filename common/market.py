@@ -37,13 +37,15 @@ def _norm_score(score: float | None) -> float | None:
     return round(score * 100, 1) if abs(score) <= 1.5 else round(score, 1)
 
 
-def _pg_latest_snapshot(ticker: str) -> dict | None:
-    rows = db.run_readonly(
-        "SELECT timestamp, ticker, expiry, spot, regime, net_gex_total, abs_gex_total,"
-        " gamma_flip, net_delta_exposure, atm_iv, vix_current, signal_score, traffic_light"
-        " FROM gex_dex_snapshots WHERE ticker = %s ORDER BY timestamp DESC LIMIT 1",
-        (ticker.upper(),),
-    )
+def _pg_latest_snapshot(ticker: str, as_of: str | None = None) -> dict | None:
+    q = ("SELECT timestamp, ticker, expiry, spot, regime, net_gex_total, abs_gex_total,"
+         " gamma_flip, net_delta_exposure, atm_iv, vix_current, signal_score, traffic_light"
+         " FROM gex_dex_snapshots WHERE ticker = %s")
+    args: tuple = (ticker.upper(),)
+    if as_of:                       # replay blindfold: nothing after this moment
+        q += " AND timestamp <= %s"
+        args += (as_of,)
+    rows = db.run_readonly(q + " ORDER BY timestamp DESC LIMIT 1", args)
     if not rows:
         return None
     (ts, tick, expiry, spot, regime, net_gex, abs_gex, flip, net_dex,
@@ -57,19 +59,21 @@ def _pg_latest_snapshot(ticker: str) -> dict | None:
     }
 
 
-def _native_latest(ticker: str) -> dict | None:
+def _native_latest(ticker: str, as_of: str | None = None) -> dict | None:
     """Most recent dealer-positioning snapshot for a ticker.
 
     Live options-flow-analytics Postgres when DATABASE_URL is set (production),
     the seeded demo SQLite otherwise (dev) — same dict shape either way.
     """
     if db.using_live_db():
-        return _pg_latest_snapshot(ticker)
+        return _pg_latest_snapshot(ticker, as_of)
     conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM snapshots WHERE ticker = ? ORDER BY captured_at DESC LIMIT 1",
-        (ticker.upper(),),
-    ).fetchone()
+    q = "SELECT * FROM snapshots WHERE ticker = ?"
+    args: tuple = (ticker.upper(),)
+    if as_of:
+        q += " AND captured_at <= ?"
+        args += (as_of,)
+    row = conn.execute(q + " ORDER BY captured_at DESC LIMIT 1", args).fetchone()
     if row is None:
         conn.close()
         return None
@@ -78,15 +82,32 @@ def _native_latest(ticker: str) -> dict | None:
     return dict(zip(cols, row))
 
 
-def latest_snapshot(ticker: str) -> dict | None:
+def latest_snapshot(ticker: str, as_of: str | None = None) -> dict | None:
     """Most recent dealer-positioning snapshot; XSP falls back to the SPY feed
-    (flagged via 'levels_note') until the collector carries it natively."""
+    (flagged via 'levels_note') until the collector carries it natively.
+    With as_of: the latest snapshot AT OR BEFORE that moment (replay)."""
     feed, note = resolve_feed(ticker)
-    snap = _native_latest(feed)
+    snap = _native_latest(feed, as_of)
     if snap and note:
         snap["ticker"] = ticker.upper()
         snap["levels_note"] = note
     return snap
+
+
+def snapshot_moments(ticker: str, limit: int = 800) -> list[str]:
+    """Every snapshot timestamp available for replay, oldest first."""
+    feed, _ = resolve_feed(ticker)
+    if db.using_live_db():
+        rows = db.run_readonly(
+            "SELECT timestamp FROM gex_dex_snapshots WHERE ticker = %s"
+            " ORDER BY timestamp DESC LIMIT %s", (feed.upper(), limit))
+        return [r[0].isoformat() for r in rows][::-1]
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT captured_at FROM snapshots WHERE ticker = ?"
+        " ORDER BY captured_at DESC LIMIT ?", (feed.upper(), limit)).fetchall()
+    conn.close()
+    return [r[0] for r in rows][::-1]
 
 
 def gex_profile(ticker: str) -> list[dict]:

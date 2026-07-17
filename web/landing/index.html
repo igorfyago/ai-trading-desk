@@ -297,6 +297,8 @@
       <span>Trade<small>chart · agent · live P&amp;L</small></span></button>
     <button class="tab" data-pane="positions"><span class="ic">💼</span>
       <span>Positions<small>holdings · P&amp;L · history</small></span></button>
+    <button class="tab" data-pane="replay"><span class="ic">⏪</span>
+      <span>Replay<small>backtest the desk · no lookahead</small></span></button>
     <button class="tab" data-pane="desk"><span class="ic">💬</span>
       <span>Desk agents<small>all six · chat &amp; voice</small></span></button>
     <button class="tab" data-pane="gex"><span class="ic">📊</span>
@@ -439,6 +441,40 @@
         <div class="ptable" id="p-open"><div class="dnote">loading…</div></div>
         <div class="plabel" style="margin-top:34px">History</div>
         <div class="ptable" id="p-hist"></div>
+      </div>
+    </section>
+
+    <section class="pane" id="replay">
+      <div style="flex:1;overflow-y:auto;padding:34px 5% 60px">
+        <h2 style="font-size:22px">Replay &amp; backtest</h2>
+        <p style="color:var(--dim);font-size:13px;margin:6px 0 18px;max-width:62em">
+          Pick a past moment. The desk re-decides with ONLY what existed then — no live
+          feed, no future bars — and the tape grades the call by the house rules: half
+          off at +50%, no stop, runner to expiry. Marks are model estimates at frozen
+          IV; history begins when the collector began.</p>
+        <div class="watch" style="margin-bottom:14px">
+          <select id="rp-ticker" class="wchip">
+            <option>SPY</option><option>QQQ</option><option>IWM</option>
+          </select>
+          <input id="rp-slider" type="range" min="0" max="0" value="0"
+                 style="flex:1;max-width:430px;accent-color:var(--accent)">
+          <span id="rp-when" style="font-family:var(--mono);font-size:12.5px;color:var(--dim)">—</span>
+          <button id="rp-run" class="wchip">Run this moment</button>
+          <button id="rp-ff" class="wchip" disabled>Fast-forward ⏩</button>
+          <button id="rp-sweep" class="wchip add">Sweep all</button>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr);gap:12px;align-items:start">
+          <div id="rp-chart" style="min-height:440px;background:var(--panel);
+               border:1px solid var(--line);border-radius:var(--radius,8px);overflow:hidden"></div>
+          <div>
+            <div class="dcard"><h4>The desk said <span id="rp-said-when" style="text-transform:none"></span></h4>
+              <div id="rp-said" class="dnote">pick a moment on the slider, then run</div></div>
+            <div class="dcard" style="margin-top:12px"><h4>How it fared</h4>
+              <div id="rp-verdict" class="dnote">—</div></div>
+            <div class="dcard" style="margin-top:12px"><h4>Sweep · every snapshot in range</h4>
+              <div id="rp-sweepout" class="dnote">—</div></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -597,6 +633,7 @@
     if (frame && !frame.src) frame.src = frame.dataset.src;   // lazy-load
                                                               // (dock-frame: initDash, origin-aware)
     if (name === "dash") initDash();
+    if (name === "replay") initReplay();
     if (name === "positions") { openEventStream(); refreshBook(); refreshScore(); }
     if (name === "atlas") initAtlas();
   }
@@ -1098,6 +1135,134 @@
     });
   }
 
+  /* ---------------------------------------------- replay & backtest ---- */
+  const rp = { moments: [], chart: null, run: null, bars: null };
+  const rpEpoch = (iso) => Math.floor(Date.parse(
+    /[+Z]/.test(iso.slice(10)) ? iso : iso + "Z") / 1000);
+  const rpUsd = (v) => (v >= 0 ? "+" : "") + v.toFixed(0) + "$";
+
+  async function initReplay() {
+    if (initReplay.done) return;
+    initReplay.done = true;
+    document.getElementById("rp-ticker").onchange = rpLoadMoments;
+    const s = document.getElementById("rp-slider");
+    s.oninput = () => {
+      document.getElementById("rp-when").textContent =
+        (rp.moments[s.value] || "—").replace("T", " ").slice(0, 16) + " UTC";
+    };
+    document.getElementById("rp-run").onclick = rpDoRun;
+    document.getElementById("rp-ff").onclick = rpFastForward;
+    document.getElementById("rp-sweep").onclick = rpDoSweep;
+    await rpLoadMoments();
+  }
+
+  async function rpLoadMoments() {
+    const t = document.getElementById("rp-ticker").value;
+    try {
+      const d = await fetch(`${API}/api/replay/moments?ticker=${t}`).then(r => r.json());
+      rp.moments = d.moments || [];
+    } catch { rp.moments = []; }
+    const s = document.getElementById("rp-slider");
+    s.max = Math.max(0, rp.moments.length - 1);
+    s.value = Math.max(0, rp.moments.length - 10);
+    s.oninput();
+  }
+
+  async function rpDoRun() {
+    const t = document.getElementById("rp-ticker").value;
+    const at = rp.moments[document.getElementById("rp-slider").value];
+    if (!at) return;
+    const said = document.getElementById("rp-said");
+    said.innerHTML = `<span class="dnote">deciding with only what existed then…</span>`;
+    document.getElementById("rp-verdict").innerHTML =
+      `<span class="dnote">sealed — fast-forward to grade it</span>`;
+    try {
+      const d = await fetch(`${API}/api/replay/run?ticker=${t}&at=${encodeURIComponent(at)}`)
+        .then(r => r.json());
+      if (d.error) { said.textContent = d.error; return; }
+      rp.run = d;
+      document.getElementById("rp-said-when").textContent =
+        "· snapshot " + (d.decided_from || "").replace("T", " ").slice(5, 16);
+      const cp = (d.execution || {}).contract_plan || {};
+      said.innerHTML = `<b>${d.bias}</b><br><br>${d.plain_english}` +
+        (cp.contract ? `<br><br><span style="font-family:var(--mono)">` +
+          `${cp.contract_ticker || ""} ${cp.contract} · ${cp.plan} · ` +
+          `${cp.contracts_now} contracts</span>` : "");
+      const bars = await fetch(`${API}/api/bars/${t}?interval=15m`).then(r => r.json());
+      rp.bars = (bars && bars.bars) || [];
+      const t0 = rpEpoch(at);
+      if (!rp.chart && window.DeskChart) {
+        rp.chart = DeskChart.create(document.getElementById("rp-chart"),
+          { mode: "mini", intervalSec: 900, symbol: t, heikin: false });
+      }
+      if (rp.chart) {
+        rp.chart.setMarkers([]);
+        rp.chart.setData(rp.bars.filter(b => b.t <= t0), 900, { symbol: t });
+      }
+      document.getElementById("rp-ff").disabled = false;
+    } catch (e) { said.textContent = "replay failed: " + e.message; }
+  }
+
+  function rpFastForward() {
+    if (!rp.run || !rp.chart) return;
+    const t = document.getElementById("rp-ticker").value;
+    const v = rp.run.verdict || {};
+    rp.chart.setData(rp.bars, 900, { symbol: t });
+    const out = document.getElementById("rp-verdict");
+    if (!v.gradable) {
+      out.innerHTML = `<span class="dnote">${v.note || "not gradable"}</span>`;
+      return;
+    }
+    const x = rp.run.execution || {};
+    const ms = [];
+    if (v.entry) ms.push({ time: Math.round(v.entry.t), position: "belowBar",
+      shape: "arrowUp", color: "#3ecf8e",
+      text: "in " + x.strike + (x.kind === "put" ? "p" : "c") });
+    if (v.trim) ms.push({ time: v.trim.t, position: "aboveBar",
+      shape: "circle", color: "#7c8aff", text: "½ off" });
+    if (v.final) ms.push({ time: v.final.t, position: "aboveBar",
+      shape: "arrowDown", color: v.pnl_usd >= 0 ? "#3ecf8e" : "#f4657f",
+      text: rpUsd(v.pnl_usd) });
+    rp.chart.setMarkers(ms);
+    const c = v.pnl_usd >= 0 ? "var(--green)" : "var(--red)";
+    out.innerHTML =
+      `entry ${v.entry.px.toFixed(2)} · ${v.contracts} contracts · ` +
+      `${v.invested_usd.toFixed(0)}$ at risk<br>` +
+      `trim: ${v.trim ? "hit at " + v.trim.px.toFixed(2) : "never hit"}<br>` +
+      `${v.expired ? "expired" : "marked"} at ${v.final.px.toFixed(2)}<br><br>` +
+      `<b style="color:${c};font-size:17px">${rpUsd(v.pnl_usd)} ` +
+      `(${v.pnl_pct >= 0 ? "+" : ""}${v.pnl_pct}%)</b>`;
+  }
+
+  async function rpDoSweep() {
+    const t = document.getElementById("rp-ticker").value;
+    if (rp.moments.length < 2) return;
+    const out = document.getElementById("rp-sweepout");
+    out.innerHTML = `<span class="dnote">re-deciding every snapshot in the range…</span>`;
+    try {
+      const start = rp.moments[0], end = rp.moments[rp.moments.length - 1];
+      const d = await fetch(`${API}/api/replay/sweep?ticker=${t}` +
+        `&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&step=60`)
+        .then(r => r.json());
+      if (!d.n) { out.innerHTML = `<span class="dnote">nothing gradable in range yet</span>`; return; }
+      const rows = d.results.slice(-14).map(r =>
+        `<div class="nitem" style="display:flex;gap:10px;font-family:var(--mono);font-size:11.5px">` +
+        `<span style="color:var(--dim)">${r.decided_from.replace("T", " ").slice(5, 16)}</span>` +
+        `<span>${r.kind === "put" ? "p" : "c"}${r.strike}</span>` +
+        `<span>${r.trimmed ? "½✓" : "—"}</span>` +
+        `<span style="margin-left:auto;color:${r.pnl_usd >= 0 ? "var(--green)" : "var(--red)"}">` +
+        `${rpUsd(r.pnl_usd)}</span></div>`).join("");
+      const tc = d.total_pnl_usd >= 0 ? "var(--green)" : "var(--red)";
+      out.innerHTML =
+        `<div class="tiles" style="margin-bottom:10px">` +
+        `<div class="tile"><b>${d.n}</b><span>decisions</span></div>` +
+        `<div class="tile"><b>${d.win_rate ?? "—"}%</b><span>won</span></div>` +
+        `<div class="tile"><b>${d.trim_rate ?? "—"}%</b><span>trimmed</span></div>` +
+        `<div class="tile"><b style="color:${tc}">${rpUsd(d.total_pnl_usd)}</b><span>total</span></div>` +
+        `</div>` + rows;
+    } catch (e) { out.textContent = "sweep failed: " + e.message; }
+  }
+
   /* real X posts under the pulse — the actual tweets, media and all */
   let twttrLoading = null;
   function ensureTwitterWidgets() {
@@ -1193,7 +1358,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=9`));
+      .then(() => load(`${API}/static/desk-chart.js?v=10`));
     return chartLib;
   }
 

@@ -26,11 +26,12 @@ XSP_OFFSET = 2.0
 DEFAULT_BUDGET_USD = 2000
 
 
-def _latest_walls(ticker: str) -> dict:
+def _latest_walls(ticker: str, as_of: str | None = None) -> dict:
     if db.using_live_db():
-        rows = db.run_readonly(
-            "SELECT call_walls, put_walls FROM gex_dex_snapshots WHERE ticker = %s"
-            " ORDER BY timestamp DESC LIMIT 1", (ticker.upper(),))
+        q = ("SELECT call_walls, put_walls FROM gex_dex_snapshots WHERE ticker = %s"
+             + (" AND timestamp <= %s" if as_of else ""))
+        args = (ticker.upper(), as_of) if as_of else (ticker.upper(),)
+        rows = db.run_readonly(q + " ORDER BY timestamp DESC LIMIT 1", args)
         if not rows:
             return {}
         walls = {}
@@ -40,14 +41,18 @@ def _latest_walls(ticker: str) -> dict:
                 walls[kind] = {"strike": arr[0]["strike"], "strength": abs(arr[0].get("gex", 0))}
         return walls
     conn = get_connection()
+    cap = " AND captured_at <= ?" if as_of else ""
+    args = ((ticker.upper(), ticker.upper(), as_of) if as_of
+            else (ticker.upper(), ticker.upper()))
     rows = conn.execute(
-        """
+        f"""
         SELECT w.kind, w.strike, w.strength FROM walls w
         JOIN snapshots s ON s.id = w.snapshot_id
         WHERE s.ticker = ?
-          AND s.captured_at = (SELECT MAX(captured_at) FROM snapshots WHERE ticker = ?)
+          AND s.captured_at = (SELECT MAX(captured_at) FROM snapshots
+                               WHERE ticker = ?{cap})
         """,
-        (ticker.upper(), ticker.upper()),
+        args,
     ).fetchall()
     conn.close()
     return {kind: {"strike": strike, "strength": strength} for kind, strike, strength in rows}
@@ -59,19 +64,22 @@ def _leg(snap: dict, strike: float, kind: str, side: str, dte: float) -> dict:
             "indicative_price": px["price"], "delta": px["delta"]}
 
 
-def recommend_trade(ticker: str) -> dict:
-    """Exact trade for the current regime, or an error dict."""
-    snap = market.latest_snapshot(ticker)
+def recommend_trade(ticker: str, as_of: str | None = None) -> dict:
+    """Exact trade for the current regime, or an error dict.
+    With as_of: the REPLAY blindfold — the engine decides from the snapshot at
+    or before that moment only; no live feed, no future, no exceptions."""
+    snap = market.latest_snapshot(ticker, as_of)
     if snap is None:
         return {"error": f"No data for {ticker}. Covered: SPY, QQQ, IWM, XSP."}
-    walls = _latest_walls(market.resolve_feed(ticker)[0])
+    walls = _latest_walls(market.resolve_feed(ticker)[0], as_of)
     if "call" not in walls or "put" not in walls:
         return {"error": f"No wall data for {ticker}."}
 
     # The house split: structure (walls/flip/IV) moves slowly and comes from
     # the chain snapshot; SPOT is fast and comes from the live feed when up —
     # but only when the two agree (blendable_spot's 2% coherence band).
-    live = market.blendable_spot(ticker, snap)
+    # Under the replay blindfold the live feed does not exist.
+    live = None if as_of else market.blendable_spot(ticker, snap)
     spot_source = "snapshot"
     if live:
         snap = {**snap, "spot": live["price"]}

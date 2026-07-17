@@ -12,7 +12,7 @@ from common import market, signals
 def _force(monkeypatch, regime, score, spot_vs_flip="below"):
     real = market.latest_snapshot
 
-    def fake(ticker):
+    def fake(ticker, as_of=None):
         snap = real(ticker)
         snap["regime"] = regime
         snap["signal_score"] = score
@@ -83,7 +83,7 @@ def test_degenerate_flip_never_mirrors_spot(monkeypatch):
     signal picks the side; a real wall carries the thesis."""
     real = market.latest_snapshot
 
-    def fake_none(ticker):
+    def fake_none(ticker, as_of=None):
         snap = real(ticker)
         snap["regime"] = "negative_gamma"
         snap["signal_score"] = -40
@@ -99,7 +99,7 @@ def test_degenerate_flip_never_mirrors_spot(monkeypatch):
     assert x["kind"] == "put"
     assert "wall" in r["plain_english"]
 
-    def fake_onprice(ticker):
+    def fake_onprice(ticker, as_of=None):
         snap = real(ticker)
         snap["regime"] = "negative_gamma"
         snap["signal_score"] = -40
@@ -110,3 +110,35 @@ def test_degenerate_flip_never_mirrors_spot(monkeypatch):
     r2 = signals.recommend_trade("SPY")
     assert r2["bias"] == "bearish momentum"
     assert r2["execution"]["thesis_kind"] == "wall"
+
+
+def test_replay_blindfold_and_grading(monkeypatch):
+    """as_of must pin the snapshot to the past (no live blend), and the
+    grader must apply the house rules: trim half at +50%, runner rides."""
+    from common import replay
+
+    ms = replay.moments("SPY")
+    assert len(ms) >= 5
+    mid = ms[len(ms) // 2]
+    rec = signals.recommend_trade("SPY", as_of=mid)
+    assert rec["as_of"] <= mid                    # never a future snapshot
+
+    # synthetic tape: entry ~2.30 put; price collapses -> trim then expiry
+    from datetime import datetime, timezone
+
+    x = rec["execution"]
+    t0 = 1780000000
+    rec["as_of"] = datetime.fromtimestamp(t0, tz=timezone.utc).isoformat()
+    s0 = x["entry_underlying"]
+    bars = [{"t": t0 + i * 900,
+             "c": s0 - (i * 0.8 if x["kind"] == "put" else -i * 0.8),
+             "o": s0, "h": s0, "l": s0, "v": 1} for i in range(1, 40)]
+    v = replay.score_path(rec, bars)
+    assert v["gradable"] and v["trim"] is not None
+    assert v["pnl_usd"] > 0                       # winner graded as a winner
+
+    flat = [{"t": t0 + i * 900, "c": s0, "o": s0, "h": s0, "l": s0, "v": 1}
+            for i in range(1, 40)]
+    v2 = replay.score_path(rec, flat)
+    assert v2["gradable"] and v2["trim"] is None  # theta bleeds, no trim
+    assert v2["pnl_usd"] < 0

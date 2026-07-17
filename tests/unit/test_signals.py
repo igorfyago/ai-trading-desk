@@ -123,12 +123,10 @@ def test_replay_blindfold_and_grading(monkeypatch):
     rec = signals.recommend_trade("SPY", as_of=mid)
     assert rec["as_of"] <= mid                    # never a future snapshot
 
-    # synthetic tape: entry ~2.30 put; price collapses -> trim then expiry
-    from datetime import datetime, timezone
-
+    # synthetic tape FROM the real decision moment (clock consistency matters:
+    # a fake earlier t0 would inflate remaining DTE and fake a trim)
     x = rec["execution"]
-    t0 = 1780000000
-    rec["as_of"] = datetime.fromtimestamp(t0, tz=timezone.utc).isoformat()
+    t0 = int(replay._parse(rec["as_of"]).timestamp())
     s0 = x["entry_underlying"]
     bars = [{"t": t0 + i * 900,
              "c": s0 - (i * 0.8 if x["kind"] == "put" else -i * 0.8),

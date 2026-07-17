@@ -47,23 +47,26 @@
   const FIXED = {
     bg: "#131722", text: "#b2b5be", grid: "#1e222d",
     scaleBorder: "#2a2e39", crosshair: "#758696",
-    // the boss's TV: current TradingView default market palette
+    // EXTRACTED from the house TradingView layout ("Stocks", 2026-07-17) —
+    // these are the boss's exact study styles, not TV defaults. Change only
+    // against a fresh extraction.
     up: "#089981", down: "#f23645",
-    volUp: "rgba(8,153,129,0.5)", volDown: "rgba(242,54,69,0.5)",
-    volMa: "rgba(255,255,255,0.85)",
-    // VWAP reads as a light neutral line; the σ bands are felt as a blue
-    // wash (fills) more than seen as lines
-    vwap: "#d1d4dc",
-    band1: "rgba(178,181,190,0.45)", band2: "rgba(41,98,255,0.45)",
-    bandFill1: "rgba(41,98,255,0.07)", bandFill2: "rgba(41,98,255,0.04)",
-    // Donchian: pale grey ceiling, salmon floor (solid hairlines)
-    dcU: "#9598a1", dcL: "#f7525f",
+    volUp: "#26a69a", volDown: "rgba(242,54,69,0.5)",   // yes: solid up, 50% down
+    volMa: "#ffffff",
+    // VWAP AA: azure core; green above / deep-orange below; 2σ dashed; NO fills
+    vwap: "#0496ff", bandUp: "#4caf50", bandDn: "#e65100",
+    // Donchian 96: white 50% ceiling, red 25% floor, blue 5% channel fill —
+    // that fill is the navy wash you see across the whole chart
+    dcU: "rgba(255,255,255,0.50)", dcL: "rgba(242,54,69,0.25)",
+    dcFill: "rgba(33,150,243,0.05)",
     ema21: "#ff9800", sma100: "#e91e63", sma200: "#2962ff",
-    rsi: "#7e57c2", rsiMa: "#f2c55c", rsiGuide: "#787b86",
+    rsi: "#7e57c2", rsiMa: "#fdd835", rsiGuide: "#787b86",
     rsiFill: "rgba(126,87,194,0.10)",
-    // VRVP: cyan up-volume hugging the right edge, magenta down stacked left
-    profUp: "rgba(38,198,218,0.55)", profDn: "rgba(233,30,99,0.50)",
-    profUpPoc: "rgba(38,198,218,0.92)", profDnPoc: "rgba(233,30,99,0.88)",
+    rsiHot: "76,175,80", rsiCold: "242,54,69",          // gradient bases >70 / <30
+    // VRVP: cyan up / pink down, Value-Area rows bright, the rest faint
+    profUp: "rgba(38,198,218,0.25)", profDn: "rgba(236,64,122,0.25)",
+    profUpVA: "rgba(38,198,218,0.70)", profDnVA: "rgba(236,64,122,0.70)",
+    eth: "rgba(251,140,0,0.045)",                        // pre/post backdrop tint
   };
 
   /* ------------------------------------------------------------ studies ---- */
@@ -154,6 +157,20 @@
     return { t: b.t, o, h: Math.max(b.h, o, c), l: Math.min(b.l, o, c), c };
   }
 
+  /* NY session clock for the extended-hours tint (RTH = 09:30–16:00 ET) */
+  const _etFmt = new Intl.DateTimeFormat("en-US",
+    { timeZone: "America/New_York", hour12: false, hourCycle: "h23",
+      weekday: "short", hour: "2-digit", minute: "2-digit" });
+
+  function isEth(tSec) {
+    const parts = _etFmt.formatToParts(new Date(tSec * 1000));
+    const get = (t) => (parts.find((p) => p.type === t) || {}).value;
+    const wd = get("weekday");
+    if (wd === "Sat" || wd === "Sun") return true;
+    const hm = parseInt(get("hour"), 10) * 60 + parseInt(get("minute"), 10);
+    return hm < 9 * 60 + 30 || hm >= 16 * 60;
+  }
+
   function computeHA(bars) {
     const out = [];
     for (const b of bars) out.push(haNext(out[out.length - 1] || null, b));
@@ -190,12 +207,24 @@
         if (up) rows[i].up += share; else rows[i].dn += share;
       }
     }
-    let max = 0, poc = 0;
+    let max = 0, poc = 0, total = 0;
     for (let i = 0; i < N; i++) {
       const t = rows[i].up + rows[i].dn;
+      total += t;
       if (t > max) { max = t; poc = i; }
     }
-    return max > 0 ? { rows, max, poc } : null;
+    if (max <= 0) return null;
+    // Value Area: expand from the POC until 70% of traded volume is inside —
+    // VA rows render bright, the rest faint (the house VRVP look)
+    let covered = rows[poc].up + rows[poc].dn, a = poc, b = poc;
+    while (covered < 0.7 * total && (a > 0 || b < N - 1)) {
+      const upNext = b < N - 1 ? rows[b + 1].up + rows[b + 1].dn : -1;
+      const dnNext = a > 0 ? rows[a - 1].up + rows[a - 1].dn : -1;
+      if (upNext >= dnNext) { b++; covered += upNext; }
+      else { a--; covered += dnNext; }
+    }
+    for (let i = a; i <= b; i++) rows[i].inVA = true;
+    return { rows, max, poc };
   }
 
   /* -------------------------------------------------------------- chart ---- */
@@ -296,17 +325,20 @@
       const mk = (o, pane = 0) => chart.addSeries(LC().LineSeries,
         { lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
           crosshairMarkerVisible: false, ...o }, pane);
-      lines.vwap = mk({ color: FIXED.vwap, lineWidth: 2, title: "vwap" });
-      lines.u1 = mk({ color: FIXED.band1 }); lines.d1 = mk({ color: FIXED.band1 });
-      lines.u2 = mk({ color: FIXED.band2 });
-      lines.d2 = mk({ color: FIXED.band2 });
+      lines.vwap = mk({ color: FIXED.vwap, title: "vwap" });
+      lines.u1 = mk({ color: FIXED.bandUp });
+      lines.d1 = mk({ color: FIXED.bandDn });
+      lines.u2 = mk({ color: FIXED.bandUp, lineStyle: 2 });
+      lines.d2 = mk({ color: FIXED.bandDn, lineStyle: 2 });
       lines.ema21 = mk({ color: FIXED.ema21, lineWidth: 2, title: "ema21" });
       lines.sma100 = mk({ color: FIXED.sma100, lineWidth: 2, title: "sma100" });
       lines.sma200 = mk({ color: FIXED.sma200, lineWidth: 2, title: "sma200" });
       lines.dcU = mk({ color: FIXED.dcU });
       lines.dcL = mk({ color: FIXED.dcL });
 
-      // σ-band wash between the VWAP bands (the blue tint TV shows)
+      // Two backdrop layers, both extracted from the house layout:
+      //  1. extended-hours session tint (pre/post bars get a warm wash)
+      //  2. the Donchian channel's blue 5% fill — the navy wash TV shows
       candles.attachPrimitive({
         updateAllViews() {},
         paneViews() {
@@ -315,34 +347,40 @@
             renderer() {
               return {
                 draw(target) {
-                  const bp = state.bandPts;
-                  if (!bp || !bp.u1.length) return;
                   target.useBitmapCoordinateSpace(
-                    ({ context: ctx, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
+                    ({ context: ctx, bitmapSize, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
                       const ts = chart.timeScale();
-                      const poly = (up, dn, fill) => {
-                        ctx.beginPath();
-                        let started = false;
-                        for (const pt of up) {
-                          const x = ts.timeToCoordinate(pt.time);
-                          const y = candles.priceToCoordinate(pt.value);
-                          if (x === null || y === null) continue;
-                          if (!started) { ctx.moveTo(x * hpr, y * vpr); started = true; }
-                          else ctx.lineTo(x * hpr, y * vpr);
-                        }
-                        for (let i = dn.length - 1; i >= 0; i--) {
-                          const x = ts.timeToCoordinate(dn[i].time);
-                          const y = candles.priceToCoordinate(dn[i].value);
-                          if (x === null || y === null) continue;
-                          ctx.lineTo(x * hpr, y * vpr);
-                        }
-                        if (!started) return;
-                        ctx.closePath();
-                        ctx.fillStyle = fill;
-                        ctx.fill();
-                      };
-                      poly(bp.u2, bp.d2, FIXED.bandFill2);
-                      poly(bp.u1, bp.d1, FIXED.bandFill1);
+                      for (const rg of state.ethRanges || []) {
+                        const x0 = ts.timeToCoordinate(rg.t0);
+                        const x1 = ts.timeToCoordinate(rg.t1);
+                        if (x0 === null && x1 === null) continue;
+                        const pad = rg.halfStepPx || 3;
+                        const a = ((x0 === null ? 0 : x0) - pad) * hpr;
+                        const b = ((x1 === null ? bitmapSize.width / hpr : x1) + pad) * hpr;
+                        ctx.fillStyle = FIXED.eth;
+                        ctx.fillRect(a, 0, Math.max(1, b - a), bitmapSize.height);
+                      }
+                      const dp = state.dcPts;
+                      if (!dp || !dp.up.length) return;
+                      ctx.beginPath();
+                      let started = false;
+                      for (const pt of dp.up) {
+                        const x = ts.timeToCoordinate(pt.time);
+                        const y = candles.priceToCoordinate(pt.value);
+                        if (x === null || y === null) continue;
+                        if (!started) { ctx.moveTo(x * hpr, y * vpr); started = true; }
+                        else ctx.lineTo(x * hpr, y * vpr);
+                      }
+                      for (let i = dp.lo.length - 1; i >= 0; i--) {
+                        const x = ts.timeToCoordinate(dp.lo[i].time);
+                        const y = candles.priceToCoordinate(dp.lo[i].value);
+                        if (x === null || y === null) continue;
+                        ctx.lineTo(x * hpr, y * vpr);
+                      }
+                      if (!started) return;
+                      ctx.closePath();
+                      ctx.fillStyle = FIXED.dcFill;
+                      ctx.fill();
                     });
                 },
               };
@@ -353,7 +391,7 @@
 
       // RSI pane (index 1, ~24% height) — TV look: purple RSI, yellow MA,
       // dotted 30/70 guides with the translucent purple band between them
-      lines.rsi = mk({ color: FIXED.rsi, lineWidth: 1.5, title: "rsi14" }, 1);
+      lines.rsi = mk({ color: FIXED.rsi, title: "rsi14" }, 1);
       lines.rsiMa = mk({ color: FIXED.rsiMa, lineWidth: 1 }, 1);
       rsiGuides = [30, 70].map((price) => lines.rsi.createPriceLine({
         price, lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "",
@@ -368,13 +406,43 @@
               return {
                 draw(target) {
                   target.useBitmapCoordinateSpace(
-                    ({ context: ctx, bitmapSize, verticalPixelRatio: vpr }) => {
+                    ({ context: ctx, bitmapSize, horizontalPixelRatio: hpr, verticalPixelRatio: vpr }) => {
                       const y70 = lines.rsi.priceToCoordinate(70);
                       const y30 = lines.rsi.priceToCoordinate(30);
                       if (y70 === null || y30 === null) return;
-                      const y = Math.min(y70, y30) * vpr;
                       ctx.fillStyle = FIXED.rsiFill;
-                      ctx.fillRect(0, y, bitmapSize.width, Math.abs(y30 - y70) * vpr);
+                      ctx.fillRect(0, Math.min(y70, y30) * vpr,
+                                   bitmapSize.width, Math.abs(y30 - y70) * vpr);
+                      // the house RSI: gradient heat above 70 / below 30
+                      const pts = state.rsiPts;
+                      if (!pts || !pts.length) return;
+                      const ts = chart.timeScale();
+                      const heat = (limitY, dir, rgb, yFar) => {
+                        ctx.beginPath();
+                        let firstX = null, lastX = null;
+                        for (const pt of pts) {
+                          const x = ts.timeToCoordinate(pt.time);
+                          const yy = lines.rsi.priceToCoordinate(pt.value);
+                          if (x === null || yy === null) continue;
+                          const yc = dir < 0 ? Math.min(yy, limitY) : Math.max(yy, limitY);
+                          if (firstX === null) { firstX = x; ctx.moveTo(x * hpr, yc * vpr); }
+                          else ctx.lineTo(x * hpr, yc * vpr);
+                          lastX = x;
+                        }
+                        if (firstX === null) return;
+                        ctx.lineTo(lastX * hpr, limitY * vpr);
+                        ctx.lineTo(firstX * hpr, limitY * vpr);
+                        ctx.closePath();
+                        const g = ctx.createLinearGradient(0, yFar * vpr, 0, limitY * vpr);
+                        g.addColorStop(0, `rgba(${rgb},0.9)`);
+                        g.addColorStop(1, `rgba(${rgb},0)`);
+                        ctx.fillStyle = g;
+                        ctx.fill();
+                      };
+                      const y100 = lines.rsi.priceToCoordinate(100) ?? 0;
+                      const y0 = lines.rsi.priceToCoordinate(0) ?? bitmapSize.height / vpr;
+                      heat(y70, -1, FIXED.rsiHot, y100);
+                      heat(y30, +1, FIXED.rsiCold, y0);
                     });
                 },
               };
@@ -403,7 +471,7 @@
                   target.useBitmapCoordinateSpace(
                     ({ context: ctx, bitmapSize, verticalPixelRatio: vpr }) => {
                       const right = bitmapSize.width;
-                      const maxW = right * 0.26;
+                      const maxW = right * 0.30;   // his VRVP: percentWidth 30
                       for (let i = 0; i < prof.rows.length; i++) {
                         const r = prof.rows[i];
                         if (r.up + r.dn <= 0) continue;
@@ -412,12 +480,12 @@
                         if (yA === null || yB === null) continue;
                         const y = Math.min(yA, yB) * vpr;
                         const h = Math.max(1, Math.abs(yB - yA) * vpr - 1);
-                        const poc = i === prof.poc;
+                        const bright = !!r.inVA;
                         const upW = (r.up / prof.max) * maxW;
                         const dnW = (r.dn / prof.max) * maxW;
-                        ctx.fillStyle = poc ? FIXED.profUpPoc : FIXED.profUp;
+                        ctx.fillStyle = bright ? FIXED.profUpVA : FIXED.profUp;
                         ctx.fillRect(right - upW, y, upW, h);
-                        ctx.fillStyle = poc ? FIXED.profDnPoc : FIXED.profDn;
+                        ctx.fillStyle = bright ? FIXED.profDnVA : FIXED.profDn;
                         ctx.fillRect(right - upW - dnW, y, dnW, h);
                       }
                     });
@@ -512,12 +580,9 @@
         lines.vwap.setData(shiftPts(vw.v));
         lines.u1.setData(shiftPts(vw.u1)); lines.d1.setData(shiftPts(vw.d1));
         lines.u2.setData(shiftPts(vw.u2)); lines.d2.setData(shiftPts(vw.d2));
-        state.bandPts = { u1: shiftPts(vw.u1), d1: shiftPts(vw.d1),
-                          u2: shiftPts(vw.u2), d2: shiftPts(vw.d2) };
         for (const k of ["ema21", "sma100", "sma200"]) lines[k].setData([]);
       } else {
         for (const k of ["vwap", "u1", "d1", "u2", "d2"]) lines[k].setData([]);
-        state.bandPts = null;
         if (dailyExactly) {
           lines.ema21.setData(shiftPts(ema(state.bars, 21)));
           lines.sma100.setData(shiftPts(sma(state.bars, 100)));
@@ -528,9 +593,27 @@
       }
       const dc = donchian(state.bars, 96);
       lines.dcU.setData(shiftPts(dc.up)); lines.dcL.setData(shiftPts(dc.lo));
+      state.dcPts = { up: shiftPts(dc.up), lo: shiftPts(dc.lo) };
       const r = rsiWilder(state.bars, 14);
       lines.rsi.setData(shiftPts(r));
       lines.rsiMa.setData(shiftPts(smaOfLine(r, 14)));
+      state.rsiPts = shiftPts(r);
+
+      // extended-hours ranges (intraday): consecutive pre/post bars, in
+      // display time, for the backdrop tint
+      state.ethRanges = null;
+      if (intraday) {
+        const rgs = [];
+        let cur = null;
+        for (let i = 0; i < state.bars.length; i++) {
+          if (!isEth(state.bars[i].t)) { cur = null; continue; }
+          if (cur) { cur.i1 = i; }
+          else { cur = { i0: i, i1: i }; rgs.push(cur); }
+        }
+        state.ethRanges = rgs.map((g) => ({
+          t0: state.dispTimes[g.i0], t1: state.dispTimes[g.i1],
+        }));
+      }
     }
 
     function setData(bars, intervalSec, extra) {

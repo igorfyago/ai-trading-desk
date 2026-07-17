@@ -382,7 +382,12 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
         hit = _bars_cache.get(key)
     if hit and now - hit[0] < max(20.0, INTERVALS[norm][4] / 4):
         return hit[1]
-    for prov in provider_order():
+    provs = provider_order()
+    if INTERVALS[norm][4] < 86400:
+        # intraday: yahoo first — its prepost candles cover the WHOLE session
+        # (4:00-20:00 ET); IEX prints extended hours only thinly
+        provs = sorted(provs, key=lambda p: p != "yahoo")
+    for prov in provs:
         try:
             if prov == "alpaca":
                 bars = _bars_alpaca(sym, norm, limit)

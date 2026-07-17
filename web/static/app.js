@@ -638,7 +638,8 @@ boot();
 
 const dock = { chart: null, symbol: null, chartSeq: 0, active: null, pip: null,
   quotesES: null, quotesSyms: "", eventsES: null };
-const DOCK_SECS = 300;   // 5m candles — the trade-management timeframe
+const DOCK_SECS = 900;   // 15m: the SAME tape the dashboard chart shows —
+                         // one chart identity everywhere, no spin-offs
 
 function fmtUsd(x) {
   if (x === null || x === undefined) return "";
@@ -730,7 +731,7 @@ async function dockChartBoot(underlying) {
       .then((r) => (r.ok ? r.json() : null));
     if (seq !== dock.chartSeq) return;                // a newer boot superseded this one
     if (!data || !(data.bars || []).length) return;   // text-only dock still works
-    if (!dock.chart) dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS, mode: "mini" });
+    if (!dock.chart) dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS });
     dock.chart.setData(data.bars, DOCK_SECS, { symbol: sym });
     dock.symbol = sym;
     dockQuotes();                                     // the stream follows the chart's symbol
@@ -776,7 +777,13 @@ function handleDeskEvent(d) {
       trimmed: `half off @ ${d.trade.trim_px} · runner rides`,
       closed: `flat · ${fmtUsd(d.trade.realized_usd)} on the trade`,
     };
-    if (lines[d.event]) divider(lines[d.event]);
+    // announce each trade lifecycle step ONCE: replays and reconnects
+    // re-emit events, and the same quote must not stack up in the log
+    const annKey = `${d.trade.id}:${d.event}`;
+    if (lines[d.event] && dock.lastAnn !== annKey) {
+      dock.lastAnn = annKey;
+      divider(lines[d.event]);
+    }
     return;
   }
   if (d.type === "pnl") dockPnl(d.positions);

@@ -161,7 +161,7 @@ body.embed #composer { padding: 10px 4% 14px; }
 .dock-btns button { background: none; border: 1px solid var(--line); border-radius: 6px;
   color: var(--dim); cursor: pointer; padding: 2px 8px; font-size: 11px; }
 .dock-btns button:hover { color: var(--text); border-color: rgba(255,255,255,.28); }
-#dock-body { height: 200px; padding: 0 10px 10px; }
+#dock-body { height: 340px; padding: 0 10px 10px; }   /* room for the full chart: RSI pane included */
 #dock-chart { height: 100%; }
 #dock.min #dock-body { display: none; }
 body.dock-pip { margin: 0; background: var(--bg); }

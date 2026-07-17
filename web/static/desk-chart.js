@@ -42,12 +42,21 @@
     };
   }
 
-  // Identity colors — deliberately NOT themed (they match the house TV layout).
+  // TradingView-clone palette. The CHART is a fixed instrument — it looks like
+  // the house TV layout on every site theme (product spec: clone TV exactly).
   const FIXED = {
+    bg: "#131722", text: "#b2b5be", grid: "#1e222d",
+    scaleBorder: "#2a2e39", crosshair: "#758696",
+    up: "#26a69a", down: "#ef5350",
+    volUp: "rgba(38,166,154,0.5)", volDown: "rgba(239,83,80,0.5)",
+    volMa: "rgba(255,255,255,0.8)",
+    vwap: "#ff9800", band1: "#4caf50", band2: "#2196f3",
+    dcU: "rgba(76,175,80,0.75)", dcL: "rgba(255,152,0,0.75)",
     ema21: "#ff9800", sma100: "#e91e63", sma200: "#2962ff",
-    rsi: "#b39ddb", rsiMa: "#f0c000",
-    profUp: "rgba(38,166,154,.55)", profDn: "rgba(239,83,80,.50)",
-    profUpPoc: "rgba(38,166,154,.85)", profDnPoc: "rgba(239,83,80,.85)",
+    rsi: "#b39ddb", rsiMa: "#f0c000", rsiGuide: "#787b86",
+    rsiFill: "rgba(126,87,194,0.10)",
+    profUp: "rgba(38,166,154,0.50)", profDn: "rgba(233,30,99,0.42)",
+    profUpPoc: "rgba(38,166,154,0.85)", profDnPoc: "rgba(233,30,99,0.80)",
   };
 
   /* ------------------------------------------------------------ studies ---- */
@@ -204,6 +213,8 @@
       tickCount: 0,
       lastStudyPaint: 0,
       tzCache: new Map(),
+      symbol: opts.symbol || "",
+      ivLabel: opts.label || "",
     };
     const full = state.mode === "full";
 
@@ -244,21 +255,33 @@
     const p = palette();
     const chart = LC().createChart(container, {
       autoSize: true,
-      layout: { background: { color: "transparent" }, textColor: p.dim,
-                fontFamily: p.mono, fontSize: 11 },
-      grid: { vertLines: { color: alpha("#888888", 0.06) },
-              horzLines: { color: alpha("#888888", 0.06) } },
-      rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false, timeVisible: state.intervalSec < 86400,
+      layout: { background: { type: "solid", color: FIXED.bg },
+                textColor: FIXED.text, fontFamily: p.mono, fontSize: 11 },
+      grid: { vertLines: { color: FIXED.grid }, horzLines: { color: FIXED.grid } },
+      rightPriceScale: { borderVisible: true, borderColor: FIXED.scaleBorder },
+      timeScale: { borderVisible: true, borderColor: FIXED.scaleBorder,
+                   timeVisible: state.intervalSec < 86400,
                    secondsVisible: false, rightOffset: 5 },
-      crosshair: { mode: 0 },
+      crosshair: {
+        mode: 0,
+        vertLine: { color: FIXED.crosshair, style: 3, labelBackgroundColor: FIXED.scaleBorder },
+        horzLine: { color: FIXED.crosshair, style: 3, labelBackgroundColor: FIXED.scaleBorder },
+      },
     });
 
-    const candles = chart.addSeries(LC().CandlestickSeries, {}, 0);
+    const candles = chart.addSeries(LC().CandlestickSeries, {
+      upColor: FIXED.up, downColor: FIXED.down,
+      borderVisible: true, borderUpColor: FIXED.up, borderDownColor: FIXED.down,
+      wickUpColor: FIXED.up, wickDownColor: FIXED.down,
+    }, 0);
     const volume = chart.addSeries(LC().HistogramSeries,
       { priceScaleId: "", priceFormat: { type: "volume" },
         lastValueVisible: false, priceLineVisible: false }, 0);
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    const volMa = chart.addSeries(LC().LineSeries,
+      { priceScaleId: "", color: FIXED.volMa, lineWidth: 1,
+        priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false }, 0);
 
     const lines = {};
     let rsiGuides = [];
@@ -266,21 +289,47 @@
       const mk = (o, pane = 0) => chart.addSeries(LC().LineSeries,
         { lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
           crosshairMarkerVisible: false, ...o }, pane);
-      lines.vwap = mk({ lineWidth: 2, title: "vwap" });
-      lines.u1 = mk({ lineStyle: 2 }); lines.d1 = mk({ lineStyle: 2 });
-      lines.u2 = mk({ lineStyle: 2 }); lines.d2 = mk({ lineStyle: 2 });
+      lines.vwap = mk({ color: FIXED.vwap, lineWidth: 2, title: "vwap" });
+      lines.u1 = mk({ color: FIXED.band1 }); lines.d1 = mk({ color: FIXED.band1 });
+      lines.u2 = mk({ color: alpha(FIXED.band2, 0.85) });
+      lines.d2 = mk({ color: alpha(FIXED.band2, 0.85) });
       lines.ema21 = mk({ color: FIXED.ema21, lineWidth: 1.5, title: "ema21" });
       lines.sma100 = mk({ color: FIXED.sma100, lineWidth: 1.5, title: "sma100" });
       lines.sma200 = mk({ color: FIXED.sma200, lineWidth: 1.5, title: "sma200" });
-      lines.dcU = mk({ lineStyle: 1 }); lines.dcL = mk({ lineStyle: 1 });
+      lines.dcU = mk({ color: FIXED.dcU, lineStyle: 2 });
+      lines.dcL = mk({ color: FIXED.dcL, lineStyle: 2 });
 
-      // RSI pane (index 1, ~24% height)
+      // RSI pane (index 1, ~24% height) — TV look: purple RSI, yellow MA,
+      // dotted 30/70 guides with the translucent purple band between them
       lines.rsi = mk({ color: FIXED.rsi, lineWidth: 1.5, title: "rsi14" }, 1);
       lines.rsiMa = mk({ color: FIXED.rsiMa, lineWidth: 1 }, 1);
       rsiGuides = [30, 70].map((price) => lines.rsi.createPriceLine({
         price, lineWidth: 1, lineStyle: 1, axisLabelVisible: false, title: "",
-        color: alpha(palette().dim, 0.6),
+        color: FIXED.rsiGuide,
       }));
+      lines.rsi.attachPrimitive({
+        updateAllViews() {},
+        paneViews() {
+          return [{
+            zOrder() { return "bottom"; },
+            renderer() {
+              return {
+                draw(target) {
+                  target.useBitmapCoordinateSpace(
+                    ({ context: ctx, bitmapSize, verticalPixelRatio: vpr }) => {
+                      const y70 = lines.rsi.priceToCoordinate(70);
+                      const y30 = lines.rsi.priceToCoordinate(30);
+                      if (y70 === null || y30 === null) return;
+                      const y = Math.min(y70, y30) * vpr;
+                      ctx.fillStyle = FIXED.rsiFill;
+                      ctx.fillRect(0, y, bitmapSize.width, Math.abs(y30 - y70) * vpr);
+                    });
+                },
+              };
+            },
+          }];
+        },
+      });
       try {
         chart.panes()[1].setHeight(
           Math.max(70, Math.round((container.clientHeight || 420) * 0.24)));
@@ -328,23 +377,49 @@
       });
     }
 
-    function paintTheme() {
-      const c = palette();
-      chart.applyOptions({ layout: { textColor: c.dim, fontFamily: c.mono } });
-      candles.applyOptions({
-        upColor: c.green, downColor: c.red, borderVisible: false,
-        wickUpColor: alpha(c.green, 0.7), wickDownColor: alpha(c.red, 0.7),
+    // The chart is DE-THEMED by design: every color above is a fixed TV-clone
+    // identity color, so site themes restyle the chrome around the chart, never
+    // the instrument itself. (rsiGuides kept for future style tweaks.)
+    void rsiGuides;
+
+    /* TV-style legend: symbol · interval, then O H L C and change, colored by
+       the bar's direction; follows the crosshair, falls back to the last bar. */
+    let legend = null;
+    if (full) {
+      container.style.position = "relative";
+      legend = document.createElement("div");
+      Object.assign(legend.style, {
+        position: "absolute", top: "6px", left: "10px", zIndex: 3,
+        pointerEvents: "none", whiteSpace: "nowrap",
+        font: "11.5px " + p.mono, color: FIXED.text,
       });
-      if (full) {
-        lines.vwap.applyOptions({ color: c.accent });
-        for (const k of ["u1", "d1"]) lines[k].applyOptions({ color: alpha(c.accent, 0.4) });
-        for (const k of ["u2", "d2"]) lines[k].applyOptions({ color: alpha(c.accent, 0.22) });
-        lines.dcU.applyOptions({ color: alpha(c.dim, 0.45) });
-        lines.dcL.applyOptions({ color: alpha(c.dim, 0.45) });
-        for (const g of rsiGuides) g.applyOptions({ color: alpha(c.dim, 0.6) });
-        // ema21/sma100/sma200/rsi keep their fixed identity colors.
+      container.appendChild(legend);
+      chart.subscribeCrosshairMove((param) =>
+        paintLegend(param && param.time !== undefined ? param.time : null));
+    }
+
+    const fmtPx = (x) => (x >= 1000 ? x.toFixed(1) : x.toFixed(2));
+
+    function paintLegend(dispTime) {
+      if (!legend || !state.bars.length) return;
+      let i = state.bars.length - 1;
+      if (dispTime != null) {
+        const idx = state.dispTimes.indexOf(dispTime);
+        if (idx >= 0) i = idx;
       }
-      repaintVolume();
+      const b = state.bars[i];                       // raw OHLC, like TV's readout
+      const prevC = i > 0 ? state.bars[i - 1].c : b.o;
+      const chg = b.c - prevC;
+      const pct = prevC ? (chg / prevC) * 100 : 0;
+      const col = b.c >= b.o ? FIXED.up : FIXED.down;
+      const chgCol = chg >= 0 ? FIXED.up : FIXED.down;
+      const v = (n) => `<span style="color:${col}">${fmtPx(n)}</span>`;
+      legend.innerHTML =
+        `<span style="color:#d1d4dc;font-weight:600">${state.symbol || ""}</span>` +
+        `<span style="color:${FIXED.text}"> · ${state.ivLabel || ""}</span>&nbsp;&nbsp;` +
+        `O ${v(b.o)} H ${v(b.h)} L ${v(b.l)} C ${v(b.c)} ` +
+        `<span style="color:${chgCol}">${chg >= 0 ? "+" : ""}${fmtPx(chg)} ` +
+        `(${chg >= 0 ? "+" : ""}${pct.toFixed(2)}%)</span>`;
     }
 
     function displayBar(i) {
@@ -357,11 +432,19 @@
     }
 
     function repaintVolume() {
-      const c = palette();
       volume.setData(state.bars.map((b, i) => ({
         time: state.dispTimes[i], value: b.v,
-        color: alpha(b.c >= b.o ? c.green : c.red, 0.35),
+        color: b.c >= b.o ? FIXED.volUp : FIXED.volDown,
       })));
+      // TV's white Vol MA(30) over the histogram
+      const pts = [];
+      let s = 0;
+      for (let i = 0; i < state.bars.length; i++) {
+        s += state.bars[i].v || 0;
+        if (i >= 30) s -= state.bars[i - 30].v || 0;
+        if (i >= 29) pts.push({ time: state.dispTimes[i], value: s / 30 });
+      }
+      volMa.setData(pts);
     }
 
     const shiftPts = (pts) => pts.map((q) => ({ time: dispOf(q.time), value: q.value }));
@@ -391,6 +474,8 @@
     function setData(bars, intervalSec, extra) {
       if (intervalSec) state.intervalSec = intervalSec;
       state.daily = !!(extra && extra.daily) || state.intervalSec >= 86400;
+      if (extra && extra.symbol) state.symbol = extra.symbol;
+      if (extra && extra.label) state.ivLabel = extra.label;
       state.bars = (bars || []).map((b) => ({ ...b }));   // own copies; ticks mutate
       state.ha = computeHA(state.bars);
       rebuildDispTimes();
@@ -399,8 +484,9 @@
       repaintCandles();
       repaintVolume();
       paintStudies();
-      if (full) state.profile = computeProfile(state.bars);
+      if (full) state.profile = computeProfile(state.bars, 75);
       applyMarkers();
+      paintLegend(null);
     }
 
     function applyTick(price, tsSec) {
@@ -426,12 +512,14 @@
       }
       candles.update(displayBar(state.bars.length - 1));
       state.tickCount++;
-      if (full && state.tickCount % 50 === 0) state.profile = computeProfile(state.bars);
+      if (full && state.tickCount % 50 === 0) state.profile = computeProfile(state.bars, 75);
       const now = Date.now();
       if (now - state.lastStudyPaint > 3000) {   // studies + RSI follow, gently
         state.lastStudyPaint = now;
         paintStudies();
+        repaintVolume();
       }
+      paintLegend(null);
     }
 
     function setHeikin(on) {
@@ -469,15 +557,11 @@
       applyMarkers();
     }
 
-    const onTheme = () => paintTheme();
-    window.addEventListener("themechange", onTheme);
-    paintTheme();
-
     return {
       chart, setData, applyTick, setLevels, setMarkers, setHeikin,
       setIntervalSec: (s) => { state.intervalSec = s; },
       destroy() {
-        window.removeEventListener("themechange", onTheme);
+        if (legend) legend.remove();
         chart.remove();
       },
     };

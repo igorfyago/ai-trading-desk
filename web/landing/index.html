@@ -593,8 +593,9 @@
       t.classList.toggle("active", t.dataset.pane === name));
     document.querySelectorAll(".pane").forEach(p =>
       p.classList.toggle("active", p.id === name));
-    const frame = document.querySelector(`#${name} iframe`);
+    const frame = document.querySelector(`#${name} iframe:not(#dock-frame)`);
     if (frame && !frame.src) frame.src = frame.dataset.src;   // lazy-load
+                                                              // (dock-frame: initDash, origin-aware)
     if (name === "dash") initDash();
     if (name === "positions") { openEventStream(); refreshBook(); refreshScore(); }
     if (name === "atlas") initAtlas();

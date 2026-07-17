@@ -49,10 +49,16 @@ const THEMES = {
 };
 
 const THEME_KEY = "desk-theme";
+// ONE theme, chosen on the MAIN page. Framed surfaces (the Marcus panel, the
+// desk inside a tab) render no selector and adopt the parent's theme via a
+// request/reply handshake — their own localStorage never wins over the top.
+const FRAMED = (() => { try { return window.self !== window.top; } catch { return true; } })();
+let currentTheme = "shadcn";
 
 function applyTheme(name, { broadcast = true } = {}) {
   const t = THEMES[name];
   if (!t) return;
+  currentTheme = name;
   for (const [k, v] of Object.entries(t.vars)) {
     document.documentElement.style.setProperty(k, v);
   }
@@ -95,15 +101,26 @@ function renderThemeDots() {
 
 window.addEventListener("message", (e) => {
   if (e.data && e.data.deskTheme && THEMES[e.data.deskTheme]) {
-    applyTheme(e.data.deskTheme, { broadcast: false });
+    applyTheme(e.data.deskTheme, { broadcast: e.data.rebroadcast === true });
+  }
+  if (e.data && e.data.deskThemeRequest && e.source) {
+    // a child frame just booted: hand it the current theme
+    try { e.source.postMessage({ deskTheme: currentTheme }, "*"); } catch {}
   }
 });
 
 (function initTheme() {
   const boot = () => {
-    renderThemeDots();
     let saved = "shadcn";
     try { saved = localStorage.getItem(THEME_KEY) || saved; } catch {}
+    if (FRAMED) {
+      // no selector inside frames — paint the local guess to avoid a flash,
+      // then ask the top page for the real theme
+      applyTheme(saved, { broadcast: false });
+      try { window.top.postMessage({ deskThemeRequest: true }, "*"); } catch {}
+      return;
+    }
+    renderThemeDots();
     applyTheme(saved, { broadcast: false });
   };
   if (document.readyState === "loading") {

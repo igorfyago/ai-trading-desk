@@ -96,6 +96,91 @@ services:
     ports:
       - "127.0.0.1:8321:8321"             # live agent-DAG demo (proxied by caddy)
 
+  # ---------------------------------------------------------------- minibank
+  # The raw-Java neobank (clone side-by-side: /opt/apps/minibank). Five
+  # containers: the app, two REGION databases (eu/uk), a control-plane
+  # database (directory + notifications), and Kafka. Heaps are capped —
+  # this instance is small and the bank is polite.
+  minibank-shard0:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: minibank
+      POSTGRES_PASSWORD: minibank     # never published to the host; internal network only
+      POSTGRES_DB: minibank
+    volumes:
+      - bank_shard0:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minibank"]
+      interval: 10s
+      retries: 5
+
+  minibank-shard1:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: minibank
+      POSTGRES_PASSWORD: minibank
+      POSTGRES_DB: minibank
+    volumes:
+      - bank_shard1:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minibank"]
+      interval: 10s
+      retries: 5
+
+  minibank-control:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: minibank
+      POSTGRES_PASSWORD: minibank
+      POSTGRES_DB: minibank
+    volumes:
+      - bank_control:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minibank"]
+      interval: 10s
+      retries: 5
+
+  minibank-kafka:
+    image: apache/kafka:3.8.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@minibank-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://minibank-kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
+
+  minibank:
+    build: ../../minibank/ledger-service
+    restart: unless-stopped
+    depends_on:
+      minibank-shard0:
+        condition: service_healthy
+      minibank-shard1:
+        condition: service_healthy
+      minibank-control:
+        condition: service_healthy
+      minibank-kafka:
+        condition: service_started
+    environment:
+      MINIBANK_SHARD0_URL: jdbc:postgresql://minibank-shard0:5432/minibank
+      MINIBANK_SHARD1_URL: jdbc:postgresql://minibank-shard1:5432/minibank
+      MINIBANK_DB_URL: jdbc:postgresql://minibank-control:5432/minibank
+      MINIBANK_KAFKA: minibank-kafka:9092
+      MINIBANK_POOL: "10"
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
+    ports:
+      - "127.0.0.1:8085:8080"             # debugging only; caddy proxies internally
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -108,9 +193,12 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../web/landing:/srv/landing:ro
       - caddy_data:/data
-    depends_on: [desk, gex-api, observatory]
+    depends_on: [desk, gex-api, observatory, minibank]
 
 volumes:
   pgdata:
   caddy_data:
   deskdata:
+  bank_shard0:
+  bank_shard1:
+  bank_control:

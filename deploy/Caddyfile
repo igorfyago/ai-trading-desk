@@ -23,6 +23,10 @@ obs.{$BASE_DOMAIN} {
     reverse_proxy observatory:8321
 }
 
+bank.{$BASE_DOMAIN} {
+    reverse_proxy minibank:8080
+}
+
 # Anyone hitting the raw IP gets sent to the real site (secure context needed
 # for mic + crypto APIs anyway).
 :80 {

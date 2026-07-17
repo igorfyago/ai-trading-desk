@@ -280,6 +280,24 @@ def get_spot(ticker: str) -> dict | None:
     return fetch_spots([sym]).get(sym)
 
 
+def poll_spots(symbols: list[str], max_age_s: float = 20.0) -> dict[str, dict]:
+    """Batched cache-or-refetch for the SSE side channel (symbols the watch
+    loop doesn't cover). Cache hits younger than max_age_s are served as-is;
+    the rest go down the provider chain in one batched pass — so any number
+    of subscribers polling the same symbols share one provider budget."""
+    now = time.monotonic()
+    out: dict[str, dict] = {}
+    with _lock:
+        for s in symbols:
+            hit = _spot_cache.get(s)
+            if hit and now - hit[0] < max_age_s:
+                out[s] = hit[1]
+    stale = [s for s in symbols if s not in out]
+    if stale:
+        out.update(fetch_spots(stale))
+    return out
+
+
 # ------------------------------------------------------------------ bars ----
 
 def _scrub_bars(bars: list[dict]) -> list[dict]:

@@ -85,6 +85,31 @@ def test_fetch_spots_falls_through_providers(monkeypatch):
     assert out["SPY"]["delayed"] is True and out["SPY"]["source"] == "cboe·15m"
 
 
+def test_poll_spots_serves_cache_and_batches_stale(monkeypatch):
+    """Side-channel polling: fresh cache entries cost zero provider calls;
+    only the stale symbols go down the chain, in one batched pass."""
+    monkeypatch.setenv("QUOTES_PROVIDER", "yahoo")
+    calls = []
+
+    def fake_yahoo(sym):
+        calls.append(sym)
+        return {"ticker": sym, "price": 42.0, "ts": None, "source": "yahoo",
+                "delayed": False, "session": None}
+
+    monkeypatch.setattr(quotes, "_spot_yahoo", fake_yahoo)
+    quotes._spot_cache.clear()
+    quotes._spot_cache["NOW"] = (time.monotonic(), {
+        "ticker": "NOW", "price": 900.0, "ts": None, "source": "yahoo",
+        "delayed": False, "session": None})
+
+    out = quotes.poll_spots(["NOW", "META"], max_age_s=20.0)
+    assert out["NOW"]["price"] == 900.0          # cache hit, no provider call
+    assert calls == ["META"]
+
+    out = quotes.poll_spots(["NOW", "META"], max_age_s=0.0)   # everything stale
+    assert calls == ["META", "NOW", "META"] and out["NOW"]["price"] == 42.0
+
+
 def test_session_label_covers_the_24h_clock():
     # July = EDT (UTC-4); January = EST (UTC-5); weekend = the 24h tape
     assert quotes.session_label("2026-07-16T15:00:00Z") == "rth"        # 11:00 ET

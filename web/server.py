@@ -295,10 +295,17 @@ def _sse(gen):
                                       "X-Accel-Buffering": "no"})
 
 
+# The bus only carries ticks for WATCH_SYMBOLS (what watch_loop polls); a
+# stream focused on any other ticker side-polls it itself at this cadence,
+# batched through the provider chain so the request budget stays tiny.
+SIDE_POLL_S = 25.0
+
+
 @app.get("/api/stream/quotes")
 async def stream_quotes(symbols: str = ""):
     """SSE: live ticks for the requested symbols (default: the watch list).
-    One shared upstream feed, any number of browser subscribers."""
+    One shared upstream feed, any number of browser subscribers; symbols the
+    watch loop doesn't cover keep ticking via a per-stream side poll."""
     import asyncio
 
     from common import bus, quotes
@@ -308,14 +315,34 @@ async def stream_quotes(symbols: str = ""):
 
     async def gen():
         q = bus.subscribe()
+        loop = asyncio.get_running_loop()
+        extra = sorted(want - set(quotes.watch_symbols()))
+        seen: dict[str, tuple] = {}    # side-channel dedup: (price, ts)
+        next_side = loop.time() + SIDE_POLL_S
         try:
             for sym in sorted(want):   # current state first, ticks after
                 spot = quotes.get_spot(sym)
                 if spot:
+                    if sym in extra:
+                        seen[sym] = (spot["price"], spot["ts"])
                     yield f"data: {json.dumps({'type': 'quote', **spot})}\n\n"
             while True:
+                if extra and loop.time() >= next_side:
+                    next_side = loop.time() + SIDE_POLL_S
+                    try:
+                        spots = await asyncio.to_thread(
+                            quotes.poll_spots, extra, SIDE_POLL_S * 0.8)
+                    except Exception:
+                        spots = {}
+                    for sym in extra:
+                        spot = spots.get(sym)
+                        if spot and seen.get(sym) != (spot["price"], spot["ts"]):
+                            seen[sym] = (spot["price"], spot["ts"])
+                            yield f"data: {json.dumps({'type': 'quote', **spot}, default=str)}\n\n"
+                timeout = 15.0 if not extra else \
+                    max(0.2, min(15.0, next_side - loop.time()))
                 try:
-                    ev = await asyncio.wait_for(q.get(), timeout=15)
+                    ev = await asyncio.wait_for(q.get(), timeout=timeout)
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
                     continue

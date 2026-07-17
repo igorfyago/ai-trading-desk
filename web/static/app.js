@@ -358,8 +358,10 @@ async function handleVoiceEvent(ev) {
   switch (ev.type) {
     case "response.created": {
       // reply starting after a long quiet spell: hold the speaker until the
-      // transcript proves it was a person, not the room (fail-open in 4s)
-      if (Date.now() - voice.lastActivity > IDLE_GUARD_MS && voice.audioEl) {
+      // transcript proves it was a person, not the room (fail-open in 4s).
+      // NEVER guard a reply the caller asked for (real turn / tool follow-up) —
+      // muting those made Marcus "say nothing" after slow tool calls.
+      if (!voice.expectReply && Date.now() - voice.lastActivity > IDLE_GUARD_MS && voice.audioEl) {
         voice.audioEl.muted = true;
         voice.muteGuard = true;
         setTimeout(liftMuteGuard, 4000);
@@ -386,6 +388,7 @@ async function handleVoiceEvent(ev) {
         break;
       }
       voice.lastActivity = Date.now();        // ONLY real speech keeps the line open
+      voice.expectReply = true;               // the caller asked — never mute the answer
       liftMuteGuard();
       const b = bubble("You (voice)", "user");
       b.querySelector(".md").textContent = words;
@@ -397,6 +400,7 @@ async function handleVoiceEvent(ev) {
     }
     case "response.done": {
       voice.agentLine = null;
+      voice.expectReply = false;
       const items = ev.response?.output || [];
       if (voice.scrubNext || ev.response?.status === "cancelled") {
         voice.scrubNext = false;              // ghost reply: erase it from context
@@ -420,17 +424,48 @@ async function handleVoiceEvent(ev) {
 async function runVoiceTool(item) {
   const b = [...document.querySelectorAll(".bubble.agent")].pop();
   if (b) chip(b, "tool", `🔧 ${item.name}`);
-  const url = current.kind === "persona" ? `/tool/${current.id}` : `/tool/bridge/${current.id}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: item.name, arguments: JSON.parse(item.arguments), session: sessionId }),
-  }).then((r) => r.json());
+  let output;
+  if (item.name === "draw_levels") {
+    // chart-side tool: the line must appear the moment Marcus says the number
+    try { output = JSON.stringify(drawCallerLevels(JSON.parse(item.arguments || "{}"))); }
+    catch (e) { output = JSON.stringify({ error: String(e) }); }
+  } else {
+    const url = current.kind === "persona" ? `/tool/${current.id}` : `/tool/bridge/${current.id}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: item.name, arguments: JSON.parse(item.arguments), session: sessionId }),
+    }).then((r) => r.json());
+    output = res.output;
+  }
   voice.dc.send(JSON.stringify({
     type: "conversation.item.create",
-    item: { type: "function_call_output", call_id: item.call_id, output: res.output },
+    item: { type: "function_call_output", call_id: item.call_id, output },
   }));
+  voice.expectReply = true;                   // the follow-up speech is solicited
   voice.dc.send(JSON.stringify({ type: "response.create" }));
+}
+
+const LEVEL_COLORS = { green: "--green", red: "--red", accent: "--accent", dim: "--dim" };
+
+function drawCallerLevels(args) {
+  const levels = (args.clear ? [] : (args.levels || []))
+    .filter((l) => l && typeof l.price === "number" && isFinite(l.price) && l.price > 0)
+    .slice(0, 8)
+    .map((l) => ({ price: l.price, label: String(l.label || "").slice(0, 28),
+                   color: LEVEL_COLORS[l.color] ? l.color : "accent" }));
+  const msg = { deskDrawLevels: { levels, clear: !!args.clear } };
+  if (window.parent !== window) window.parent.postMessage(msg, "*");  // embed: the parent owns the chart
+  dock.extraLevels = levels;
+  if (dock.chart) {
+    if (dock.active) dockLevels(dock.active);
+    else {
+      const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+      dock.chart.setLevels(levels.map((l) => ({
+        price: l.price, color: cssv(LEVEL_COLORS[l.color]), style: 2, title: l.label })));
+    }
+  }
+  return { drawn: levels.length, cleared: !!args.clear };
 }
 
 /* --------------------------------------------------------------- wire ---- */
@@ -545,6 +580,10 @@ function dockLevels(t) {
       price: t.thesis_reference, color: cssv("--dim") || "#9ba3b2",
       style: 3, title: "thesis",
     },
+    ...(dock.extraLevels || []).map((l) => ({
+      price: l.price, color: cssv(LEVEL_COLORS[l.color]) || "#7c8aff",
+      style: 2, title: l.label,
+    })),
   ].filter(Boolean));
 }
 

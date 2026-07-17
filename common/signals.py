@@ -200,6 +200,21 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                      f"double {'bottom' if d_kind == 'call' else 'top'} and VWAP "
                      f"{'reclaimed' if d_kind == 'call' else 'lost'} - after capitulation "
                      "the desk stops leaning with the old trend.")
+    elif ds and ((ds["shape"].startswith("bull") and score <= 0)
+                 or (ds["shape"].startswith("bear") and score >= 0)):
+        # established reversal day vs an opposing structure lean: the desk
+        # NEVER fades a capitulation day. Late chases graded flat-to-negative
+        # too (docs/BACKTEST.md) - so the call is the day's side, pullback-only.
+        d_kind = "call" if ds["shape"].startswith("bull") else "put"
+        name = f"long {d_kind} (reversal day - pullback only)"
+        bias = (f"{'bullish' if d_kind == 'call' else 'bearish'} - reversal day "
+                "(pullback only, no chase)")
+        legs = [_leg(snap, atm, d_kind, "buy", dte)]
+        invalidation = (f"a 15m close back {'below' if d_kind == 'call' else 'above'} "
+                        f"the session VWAP at {tape['vwap']:.2f}")
+        rationale = ("Reversal day on the tape - the desk never fades it, and the "
+                     "clean entry window has passed: no chase at market, work a "
+                     f"pullback that holds the session VWAP at {tape['vwap']:.2f}.")
 
     execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score,
                                 dte, atm, step, em, tape=tape)
@@ -273,8 +288,16 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     trig = tape if (tape and tape.get("stage") == "triggered"
                     and tape.get("bias")) else None
     dshape = (tape or {}).get("day_shape") if tape else None
+    est = False
     if dshape and not dshape.get("takeable", True):
-        dshape = None   # forming, not the trade — same gate as the bias branch
+        # outside the entry window the shape still VETOES counter-trend: the
+        # desk never fades a capitulation day. If structure already points the
+        # day's way it runs the show; if it opposes, plan the pullback instead.
+        opposes = ((dshape["shape"].startswith("bull") and score <= 0)
+                   or (dshape["shape"].startswith("bear") and score >= 0))
+        est = opposes
+        if not opposes:
+            dshape = None
     if trig:
         bullish = trig["bias"] == "long"
         headline = f"TAPE says {'long' if bullish else 'short'} reversal - triggered"
@@ -283,10 +306,14 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
                "1-sigma band - price runs the low-volume gap")
     elif dshape:
         bullish = dshape["shape"].startswith("bull")
-        headline = f"TAPE says {'bullish' if bullish else 'bearish'} reversal day"
+        headline = (f"TAPE says {'bullish' if bullish else 'bearish'} reversal day"
+                    + (" - pullback only, no chase" if est else ""))
         why = (f"capitulation ({dshape['capitulation_x']}x volume) at the double "
                f"{'bottom' if bullish else 'top'} and VWAP "
                f"{'reclaimed' if bullish else 'lost'} - the old trend is done for today")
+        if est:
+            why += ("; the clean entry window has passed, so no chase at market - "
+                    "work a pullback that holds the session VWAP")
     elif regime == "negative_gamma":
         bullish = (spot >= flip) if flip_ok else (score >= 0)
         headline = f"GEX says {'bullish' if bullish else 'bearish'} momentum holds today"

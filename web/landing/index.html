@@ -1361,7 +1361,7 @@
   }
 
   let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null,
-      tapeChecks = null;
+      tapeChecks = null, callerLevels = null;
 
   function applyTapeMarkers() {
     // circle the LATEST bar each reversal check fired on — max one per check
@@ -1417,8 +1417,24 @@
       if (p.tp50_underlying) lv.push({ price: p.tp50_underlying, color: cssv("--green"),
         style: 2, title: "trim +50%" });
     }
+    if (callerLevels && callerLevels.sym === focus) {
+      const cmap = { green: "--green", red: "--red", accent: "--accent", dim: "--dim" };
+      for (const l of callerLevels.levels) {
+        lv.push({ price: l.price, color: cssv(cmap[l.color] || "--accent"),
+                  style: 2, title: l.label });
+      }
+    }
     deskChart.setLevels(lv);
   }
+
+  // Marcus draws what he says: the embedded voice panel posts levels the
+  // moment he speaks them, and they land on THIS chart as labeled lines
+  window.addEventListener("message", (e) => {
+    const d = e.data && e.data.deskDrawLevels;
+    if (!d) return;
+    callerLevels = d.clear ? null : { sym: focus, levels: d.levels || [] };
+    applyGexLevels();
+  });
 
   function openQuoteStream() {
     if (quotesES) quotesES.close();

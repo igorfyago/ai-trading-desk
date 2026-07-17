@@ -286,9 +286,11 @@ def test_reversal_day_flips_the_engine(monkeypatch):
         assert "reversal day" in r["plain_english"]
 
 
-def test_morning_day_shape_stays_context(monkeypatch):
-    """The backtested gate (docs/BACKTEST.md): the same shape finishing before
-    12:45 ET is FORMING — the engine keeps the structure trade and says so."""
+def test_morning_day_shape_never_fights_the_day(monkeypatch):
+    """The backtested gate (docs/BACKTEST.md) + the transcript lesson: a shape
+    outside the entry window is not a market entry — but the desk NEVER fades
+    it either. Opposing structure ⇒ pullback-only on the day's side, not puts
+    into a rip; agreeing structure ⇒ the structure trade stands."""
     from common import tape as tape_mod
 
     bars = [{**b, "t": b["t"] - 7 * 3600} for b in _double_bottom_day()]
@@ -301,14 +303,23 @@ def test_morning_day_shape_stays_context(monkeypatch):
 
     real = market.latest_snapshot
 
-    def fake(ticker, as_of=None):
-        snap = real(ticker)
-        snap["regime"] = "negative_gamma"
-        snap["signal_score"] = -40
-        snap["gamma_flip"] = None
-        return snap
+    def fake(score):
+        def _f(ticker, as_of=None):
+            snap = real(ticker)
+            snap["regime"] = "negative_gamma"
+            snap["signal_score"] = score
+            snap["gamma_flip"] = None
+            return snap
+        return _f
 
-    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(-40))
     r = signals.recommend_trade("SPY", tape_bars=bars)
     if "tape triggered" not in r["bias"]:                    # trigger may outrank
-        assert "reversal day" not in r["bias"]               # gate held the lean
+        assert "pullback only" in r["bias"]                  # never counter-trend
+        assert r["execution"]["kind"] == "call"              # the day's side
+        assert "pullback" in r["plain_english"] or "no chase" in r["plain_english"]
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(40))
+    r2 = signals.recommend_trade("SPY", tape_bars=bars)
+    if "tape triggered" not in r2["bias"]:
+        assert "pullback only" not in r2["bias"]             # agreeing structure runs

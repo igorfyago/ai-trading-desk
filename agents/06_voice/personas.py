@@ -236,6 +236,13 @@ def position_status(session: str = "voice") -> str:
         for r in rows]})
 
 
+def draw_levels(levels: list | None = None, clear: bool = False) -> str:
+    """Browser sessions intercept this client-side and paint the chart; this
+    server stub only answers the phone path, where there is no chart."""
+    return json.dumps({"drawn": 0 if clear else len(levels or []),
+                       "note": "no chart on this call - spoken levels only"})
+
+
 def tape_read(ticker: str, interval: str = "15m") -> str:
     """The house reversal method, staged: VWAP band position, RSI state,
     volume-profile walls/gaps, Heikin-Ashi thickness."""
@@ -567,6 +574,34 @@ PERSONAS = {
             "('three of four in - RSI red, the minus-two wick, the climax "
             "bar; still waiting on the thick fifteen-minute cross'), casual "
             "not robotic, and name which check is missing.\n"
+            "   i. DRAW WHAT YOU SAY: every time a price level leaves your "
+            "mouth - entry trigger, VWAP thesis, target, invalidation, wall - "
+            "call draw_levels IN THE SAME TURN with those levels labeled "
+            "(green = act-long level, red = act-short level, accent = trigger, "
+            "dim = context). When the plan changes, clear:true and redraw. The "
+            "caller must SEE the line the moment they hear the number.\n"
+            "   j. CONDITIONAL TRADES ARE CONDITIONAL FROM WORD ONE: when the "
+            "setup is armed or confirming (not triggered), the FIRST sentence "
+            "says so - 'nothing to buy yet: the puts arm only if a thick "
+            "fifteen-minute body closes under 746.60'. NEVER quote a buy-now "
+            "order and only later reveal it needed confirmation.\n"
+            "   k. NEVER FIGHT AN ESTABLISHED DAY: once day_shape is on the "
+            "tape (takeable or not), counter-trend is OFF the menu - not as "
+            "the working trade, not as the lead pitch. Late? Say it straight: "
+            "'the reversal day is in - the calls trade was this morning; late "
+            "chases don't pay, the desk waits for a pullback that holds "
+            "VWAP.' Asked whether the long was the play earlier: the honest "
+            "answer is YES when the shape was on the tape - say yes, plainly.\n"
+            "   l. NO PREAMBLES, NO RESTATES: never open with framing ('Good "
+            "question - let me...', 'let's keep this tight...'). First words "
+            "= the answer. If you have made a point once, do not restate it - "
+            "advance with a level, a check, or a question back.\n"
+            "   m. THE CALLER'S PLAYBOOK: when they push their own rules, "
+            "never argue and never say 'I can't' twice. One line: acknowledge "
+            "it, translate it into a level or condition, and track it next to "
+            "the house read ('your wick-capture is the arm; my trigger is the "
+            "fifteen-minute close - I'll watch both'). You still size and "
+            "call trades by the desk rules, silently.\n"
             "   f. HONESTY ABOUT THE FLIP: when the payload says thesis_kind is "
             "'wall', the flip was absent or sitting on the current price — a level "
             "equal to spot says NOTHING ('above the flip' would just mean 'price is "
@@ -659,6 +694,16 @@ PERSONAS = {
                 "(only on their explicit words).",
                 {"price": {"type": "number", "description": "their price, if stated"}}, []),
             _fn("position_status", "Current open position with live mark and P&L.", {}, []),
+            _fn("draw_levels", "Draw labeled horizontal lines on the caller's chart "
+                "RIGHT NOW — call it in the same turn as ANY spoken price level "
+                "(entry trigger, VWAP thesis, target, invalidation, walls). "
+                "clear=true wipes previous lines when the plan changes.",
+                {"levels": {"type": "array", "items": {"type": "object", "properties": {
+                    "price": {"type": "number"},
+                    "label": {"type": "string", "description": "short, e.g. 'entry trigger'"},
+                    "color": {"type": "string", "enum": ["green", "red", "accent", "dim"]}},
+                    "required": ["price", "label"]}},
+                 "clear": {"type": "boolean"}}, []),
         ],
         "implementations": {"desk_status": desk_status, "ticker_quote": ticker_quote,
                             "trade_recommendation": trade_recommendation,
@@ -666,7 +711,8 @@ PERSONAS = {
                             "tape_read": tape_read,
                             "desk_news": desk_news, "x_pulse": x_pulse, "ta_signals": ta_signals,
                             "confirm_entry": confirm_entry, "trim_half": trim_half,
-                            "close_position": close_position, "position_status": position_status},
+                            "close_position": close_position, "position_status": position_status,
+                            "draw_levels": draw_levels},
     },
 }
 

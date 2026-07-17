@@ -140,3 +140,90 @@ def test_replay_blindfold_and_grading(monkeypatch):
     v2 = replay.score_path(rec, flat)
     assert v2["gradable"] and v2["trim"] is None  # theta bleeds, no trim
     assert v2["pnl_usd"] < 0
+
+
+def _reversal_bars():
+    """A tape that genuinely walks the house long-reversal checklist (same
+    script the tape tests use): mixed-delta bleed keeps RSI honest, a -2σ
+    flush, a 4x-volume hammer, thick up candles through the wall — plus one
+    extra push bar, which is what tips 'confirming' into 'triggered'."""
+    def bar(t, o, h, l, c, v):
+        return {"t": t, "o": o, "h": h, "l": l, "c": c, "v": v}
+
+    # 09:30 New York on an arbitrary day — one clean session, no VWAP reset
+    bars, t, px = [], 20_000 * 86400 + 4 * 3600 + 34_200, 101.0
+    for i in range(30):
+        o = px
+        c = px + (0.20 if i % 3 == 0 else -0.19)
+        bars.append(bar(t, o, max(o, c) + 0.15, min(o, c) - 0.15, c, 1000))
+        t += 900
+        px = c
+    for o, c, l, h, v in [(99.2, 98.6, 98.5, 99.3, 1500),
+                          (98.6, 98.0, 97.9, 98.7, 1800),
+                          (98.0, 97.7, 97.5, 98.1, 2000)]:
+        bars.append(bar(t, o, h, l, c, v))
+        t += 900
+    bars.append(bar(t, 97.7, 99.4, 97.4, 99.2, 4000))     # the hammer
+    t += 900
+    for o, c, l, h, v in [(99.2, 99.9, 99.1, 100.0, 3000),
+                          (99.9, 100.5, 99.8, 100.6, 2800),
+                          (100.5, 100.9, 100.4, 101.0, 2600),
+                          (100.9, 101.5, 100.8, 101.6, 2600)]:   # the push
+        bars.append(bar(t, o, h, l, c, v))
+        t += 900
+    return bars
+
+
+def test_triggered_tape_reversal_takes_the_trade(monkeypatch):
+    """Igor's rework: a fired reversal checklist beats the structure lean —
+    bearish structure + triggered long tape = CALLS with a local thesis and
+    an achievable target, not puts into a rip."""
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40          # structure says sellers...
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    bars = _reversal_bars()
+    from common import tape as tape_mod
+    read = tape_mod.read_tape(bars)
+    assert read["stage"] == "triggered" and read["bias"] == "long", read["plain"]
+
+    r = signals.recommend_trade("SPY", tape_bars=bars)
+    assert "reversal" in r["bias"]          # ...but the tape takes the trade
+    assert r["execution"]["kind"] == "call"
+    assert r["execution"]["thesis_label"] == "the session VWAP"
+    assert r["execution"]["target"] is not None
+    assert "TAPE says" in r["plain_english"]
+
+
+def test_far_wall_demotes_to_local_line(monkeypatch):
+    """Horizon discipline: a thesis wall beyond today's reach is context,
+    never the working line."""
+    real_snap = market.latest_snapshot
+    real_walls = signals._latest_walls
+
+    def fake(ticker, as_of=None):
+        snap = real_snap(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    def far_walls(ticker, as_of=None):
+        w = real_walls(ticker, as_of)
+        spot = real_snap("SPY")["spot"]
+        return {"call": {"strike": round(spot * 1.05), "strength": 1},
+                "put": {"strike": round(spot * 0.95), "strength": 1}}
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    monkeypatch.setattr(signals, "_latest_walls", far_walls)
+    r = signals.recommend_trade("SPY")
+    x = r["execution"]
+    assert x["context_level"] is not None       # the far wall got demoted
+    assert x["thesis_label"] != "the call wall"
+    assert "beyond" in x["thesis_note"]

@@ -94,7 +94,11 @@ def score_path(rec: dict, bars: list[dict]) -> dict:
 
 
 def run(ticker: str, at: str, interval: str = "15m") -> dict:
-    rec = signals.recommend_trade(ticker, as_of=at)
+    bars = _bars_for(ticker, interval)
+    t0 = _parse(at).timestamp()
+    past = [b for b in bars if b["t"] <= t0]
+    rec = signals.recommend_trade(
+        ticker, as_of=at, tape_bars=past if len(past) >= 30 else None)
     if "error" in rec:
         return {"error": rec["error"]}
     out = {
@@ -106,7 +110,8 @@ def run(ticker: str, at: str, interval: str = "15m") -> dict:
                       ("kind", "strike", "expiry", "entry_option_price_est",
                        "entry_underlying", "thesis_label", "thesis_reference",
                        "contract_plan")},
-        "verdict": score_path(rec, _bars_for(ticker, interval)),
+        "tape": rec.get("tape"),
+        "verdict": score_path(rec, bars),
     }
     return out
 
@@ -121,13 +126,18 @@ def sweep(ticker: str, start: str, end: str, step_minutes: int = 60,
     t = t_start
     while t <= t_end and len(results) < max_runs:
         at = t.isoformat()
-        rec = signals.recommend_trade(ticker, as_of=at)
+        t0 = t.timestamp()
+        past = [b for b in bars if b["t"] <= t0]
+        rec = signals.recommend_trade(
+            ticker, as_of=at, tape_bars=past if len(past) >= 30 else None)
         t += timedelta(minutes=step_minutes)
         if "error" in rec:
             continue
-        if rec["as_of"] in seen_snapshots:
-            continue                       # same snapshot = same decision
-        seen_snapshots.add(rec["as_of"])
+        tp = rec.get("tape") or {}
+        key = f"{rec['as_of']}|{tp.get('stage')}|{tp.get('bias')}"
+        if key in seen_snapshots:
+            continue          # same snapshot AND same tape state = same decision
+        seen_snapshots.add(key)
         v = score_path(rec, bars)
         if not v.get("gradable"):
             continue

@@ -64,10 +64,13 @@ def _leg(snap: dict, strike: float, kind: str, side: str, dte: float) -> dict:
             "indicative_price": px["price"], "delta": px["delta"]}
 
 
-def recommend_trade(ticker: str, as_of: str | None = None) -> dict:
+def recommend_trade(ticker: str, as_of: str | None = None,
+                    tape_bars: list | None = None) -> dict:
     """Exact trade for the current regime, or an error dict.
     With as_of: the REPLAY blindfold — the engine decides from the snapshot at
-    or before that moment only; no live feed, no future, no exceptions."""
+    or before that moment only; no live feed, no future, no exceptions.
+    tape_bars: the intraday bars the tape read runs on (replay passes its own
+    past-only slice; live mode fetches from the shared feed)."""
     snap = market.latest_snapshot(ticker, as_of)
     if snap is None:
         return {"error": f"No data for {ticker}. Covered: SPY, QQQ, IWM, XSP."}
@@ -103,6 +106,22 @@ def recommend_trade(ticker: str, as_of: str | None = None) -> dict:
     flip_raw = snap["gamma_flip"]
     flip = flip_raw if (flip_raw is not None
                         and abs(spot - flip_raw) >= 0.25 * em) else None
+
+    # ---- THE TAPE: the 2-3 hour horizon ---------------------------------
+    # The desk trades the next couple of hours. The structure lean stands
+    # UNLESS the house tape read (RSI red at the band, wick-held -2σ, climax
+    # volume, thick back through -1σ) has TRIGGERED a reversal — then the
+    # tape TAKES the trade. Armed/confirming states ride along as the spoken
+    # conditional. Replay passes its own past-only bars.
+    tape = None
+    try:
+        from common import tape as tape_mod
+        if tape_bars is not None and len(tape_bars) >= 30:
+            tape = tape_mod.read_tape(tape_bars, ticker=snap["ticker"])
+        elif tape_bars is None and as_of is None:
+            tape = tape_mod.get_tape_read(market.resolve_feed(ticker)[0])
+    except Exception:
+        tape = None
 
     if snap["regime"] == "negative_gamma":
         flip_ok = flip is not None
@@ -153,7 +172,20 @@ def recommend_trade(ticker: str, as_of: str | None = None) -> dict:
                      f"hedging pins price between the walls ({put_wall} / {call_wall}). "
                      f"Sell premium at the walls dealers defend. Signal score {score:+.0f}.")
 
-    execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em)
+    # A TRIGGERED tape reversal takes the trade over any structure lean —
+    # the desk trades the next 2-3 hours, and a fired checklist IS the tape.
+    if tape and tape.get("stage") == "triggered" and tape.get("bias"):
+        t_kind = "call" if tape["bias"] == "long" else "put"
+        name = f"long {t_kind} (tape reversal triggered)"
+        bias = f"{'bullish' if t_kind == 'call' else 'bearish'} reversal - tape triggered"
+        legs = [_leg(snap, atm, t_kind, "buy", dte)]
+        invalidation = (f"a 15m close back {'below' if t_kind == 'call' else 'above'} "
+                        f"the session VWAP at {tape['vwap']:.2f}")
+        rationale = ("The house tape read fired: " + tape["plain"] +
+                     " A triggered reversal takes the trade over the structure lean.")
+
+    execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score,
+                                dte, atm, step, em, tape=tape)
     if snap["ticker"] == "XSP":
         # house rule: XSP fills are ugly on spreads - single direction only
         name = f"long {execution['kind']} (XSP: single-leg only, no spreads)"
@@ -172,6 +204,13 @@ def recommend_trade(ticker: str, as_of: str | None = None) -> dict:
         "execution": execution,
         "plain_english": plain,
         "levels_note": snap.get("levels_note"),
+        "horizon": "the next 2-3 hours",
+        "tape": None if tape is None else {
+            "stage": tape.get("stage"), "bias": tape.get("bias"),
+            "target": tape.get("target"), "vwap": tape.get("vwap"),
+            "rsi": (tape.get("rsi") or {}).get("state"),
+            "plain": tape.get("plain"),
+        },
         "invalidation": f"Exit if {invalidation}.",
         "sizing": "Risk no more than 1% of account on the structure's max loss.",
     }
@@ -197,7 +236,8 @@ def _spot_for_option_price(target_px, strike, dte, iv, kind, spot_hint):
     return round((lo + hi) / 2, 2)
 
 
-def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em) -> dict:
+def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step, em,
+                    tape=None) -> dict:
     """The desk's management rules, computed deterministically:
       - ONE option to buy (0-5 DTE), direction from the GEX regime
       - take profit on OPTION P&L: sell HALF at +50%% on the contract,
@@ -208,7 +248,15 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     regime = snap["regime"]
     ticker = snap["ticker"]
     flip_ok = flip is not None
-    if regime == "negative_gamma":
+    trig = tape if (tape and tape.get("stage") == "triggered"
+                    and tape.get("bias")) else None
+    if trig:
+        bullish = trig["bias"] == "long"
+        headline = f"TAPE says {'long' if bullish else 'short'} reversal - triggered"
+        why = ("the checklist fired: the 2-sigma band held on wicks, climax "
+               "volume marked the turn, and a thick candle crossed the "
+               "1-sigma band - price runs the low-volume gap")
+    elif regime == "negative_gamma":
         bullish = (spot >= flip) if flip_ok else (score >= 0)
         headline = f"GEX says {'bullish' if bullish else 'bearish'} momentum holds today"
         if flip_ok:
@@ -225,12 +273,30 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
                "lean " + ("long from the low end" if bullish else "short from the high end"))
     # the thesis line: the flip when it is a real level, else the wall the
     # trade leans on — always a DISTINCT price, never a mirror of spot
-    if flip_ok:
+    if trig:
+        thesis_level, thesis_label = trig["vwap"], "the session VWAP"
+    elif flip_ok:
         thesis_level, thesis_label = flip, "the tipping point"
     elif bullish:
         thesis_level, thesis_label = put_wall, "the put wall"
     else:
         thesis_level, thesis_label = call_wall, "the call wall"
+
+    # HORIZON DISCIPLINE: the desk trades the next 2-3 hours. A thesis line
+    # beyond today's realistic reach (~1.2x the one-day expected move) is
+    # CONTEXT, not the working line — the local level takes over.
+    context_level = context_label = None
+    reach = market.expected_move(spot, snap["atm_iv"], min(dte, 1.0)) * 1.2
+    if not trig and abs(thesis_level - spot) > reach:
+        context_level, context_label = thesis_level, thesis_label
+        if tape and tape.get("vwap"):
+            thesis_level, thesis_label = tape["vwap"], "the session VWAP"
+        else:
+            near = min((atm, put_wall, call_wall), key=lambda v: abs(v - spot))
+            thesis_level, thesis_label = near, "the nearest level"
+
+    # the achievable TARGET: on a triggered reversal, the tape's gap/wall
+    target = trig.get("target") if trig else None
 
     kind = "call" if bullish else "put"
     entry_px = market.black_scholes(spot, atm, dte, snap["atm_iv"], kind)["price"]
@@ -253,12 +319,18 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         "risk_plan": "no stop-loss by design: size small (half a percent of the "
                      "account max) and accept the contract can go to zero",
         "thesis_reference": round(thesis_level, 2),
-        "thesis_kind": "flip" if flip_ok else "wall",
+        "thesis_kind": ("tape" if trig else "flip" if flip_ok else "wall"),
         "thesis_label": thesis_label,
+        "target": None if target is None else round(target, 2),
+        "context_level": None if context_level is None else round(context_level, 2),
+        "context_label": context_label,
+        "horizon": "the next 2-3 hours",
         "thesis_note": (f"{thesis_label} at {thesis_level:g} is the line for the THESIS - "
                         "if it breaks, don't add and don't re-enter, but the position "
                         "itself is managed by the +50% trim and small sizing"
-                        + ("" if flip_ok else
+                        + (f" ({context_label} at {context_level:g} is context - beyond "
+                           f"today's realistic reach)" if context_level is not None else "")
+                        + ("" if (flip_ok or trig) else
                            " (no usable gamma flip on this snapshot - the level would "
                            "just mirror the price, so the wall carries the thesis)")),
         "estimates_note": "option prices are Black-Scholes estimates at ATM vol",
@@ -342,7 +414,9 @@ def _plain_english_exec(ticker: str, x: dict) -> str:
         f"{x['tp50_option_price']:.2f}, {ticker} near {x['tp50_underlying_est']:g} - "
         f"then let the rest ride. "
         f"{sizing_bit}"
-        f"No stop-loss: size for zero; {x.get('thesis_label', 'the tipping point')} at "
+        + (f"Target {x['target']:g} - the low-volume gap, achievable today - "
+           "then reassess. " if x.get("target") else "")
+        + f"No stop-loss: size for zero; {x.get('thesis_label', 'the tipping point')} at "
         f"{x['thesis_reference']:g} only tells you whether the thesis still stands."
     )
 

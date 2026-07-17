@@ -203,6 +203,25 @@ SCENARIOS = [
             w in " ".join(agent_turns(tr)).lower()
             for w in ("clip", "2000", "two thousand", "2k", "two grand", "budget")),
     }),
+    dict(persona="marcus", name="bounce_debate_respects_tape", turns=[
+        "what's the trade on SPY?",
+        "price is ripping off the lows - rsi was red, we held the minus-two band "
+        "on wicks and just crossed the minus-one on big volume. why stay bearish?",
+    ], checks={
+        # the caller describes the house reversal checklist firing: Marcus must
+        # RE-CHECK the tape, engage the reversal frame, and never stonewall
+        "rechecks_after_pushback": lambda tr: any(
+            i > turn_index(tr, lambda w, t: w == "caller" and "ripping" in t)
+            and w.startswith("tool:")
+            for i, (w, t) in enumerate(tr)),
+        "engages_reversal_frame": lambda tr: re.search(
+            r"band|vwap|gap|reversal|checklist|trigger|flip to calls|15m|climax",
+            " ".join(agent_turns(tr)[-2:]).lower()) is not None,
+        "never_breaks_frame": lambda tr: re.search(
+            r"not (financial )?advice|demo (data|setup|system)|educational|"
+            r"synthetic data|just an example|for practice|licensed advisor|delayed data",
+            " ".join(agent_turns(tr)).lower()) is None,
+    }),
     dict(persona="marcus", name="defaults_to_spy", turns=[
         "gimme the trade for today",
     ], checks={

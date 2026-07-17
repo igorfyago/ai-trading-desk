@@ -182,9 +182,15 @@ def expected_move(spot: float, iv: float, dte_days: float) -> float:
     return round(spot * iv * math.sqrt(max(dte_days, 0.5) / 365.0), 2)
 
 
-def days_to(expiry_iso: str) -> float:
+def days_to(expiry_iso: str, from_iso: str | None = None) -> float:
+    """DTE from now — or from a past moment (the replay blindfold: a July-6
+    decision must price July-6's time value, not today's)."""
     d = date.fromisoformat(expiry_iso)
-    return max((d - datetime.now(timezone.utc).date()).days, 0.5)
+    if from_iso:
+        ref = datetime.fromisoformat(from_iso.replace("Z", "+00:00")).date()
+    else:
+        ref = datetime.now(timezone.utc).date()
+    return max((d - ref).days, 0.5)
 
 
 # Live spot may only be blended into snapshot STRUCTURE when the two agree

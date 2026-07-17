@@ -86,7 +86,8 @@ def recommend_trade(ticker: str, as_of: str | None = None) -> dict:
         spot_source = live["source"]
 
     spot = snap["spot"]
-    dte = market.days_to(snap["expiry"])
+    # under the blindfold, time value is measured from the decision moment
+    dte = market.days_to(snap["expiry"], as_of)
     # index ETFs/XSP trade $1 strikes; 0.5%-spaced grid only for anything else
     step = 1 if ticker in ("SPY", "XSP", "QQQ", "IWM") else max(round(spot * 0.005), 1)
     atm = round(spot / step) * step

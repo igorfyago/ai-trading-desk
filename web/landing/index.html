@@ -140,8 +140,8 @@
   .wchip.focus { border-color:var(--accent); color:var(--accent); font-weight:500; }
   .wchip.add { color:var(--dim); border-style:dashed; }
   .dgrid { display:grid; gap:5px; flex:1; min-height:0;
-           grid-template-columns:minmax(0,var(--dgc1,1.25fr)) 8px
-                                 minmax(340px,var(--dgc2,1fr)) 8px
+           grid-template-columns:minmax(340px,var(--dgc2,1fr)) 8px
+                                 minmax(0,var(--dgc1,1.25fr)) 8px
                                  var(--dgc3,278px); }
 
   /* ------------------------------------------------ pane splitters ---- */
@@ -213,7 +213,7 @@
   #wl-menu .mflags { display:flex; gap:7px; padding:7px 10px; }
   #wl-menu .mflags span { width:14px; height:14px; border-radius:50%; cursor:pointer;
                           border:1px solid var(--line); }
-  @media (max-width:1400px){ .dgrid{grid-template-columns:minmax(0,1.25fr) minmax(340px,1fr);}
+  @media (max-width:1400px){ .dgrid{grid-template-columns:minmax(340px,1fr) minmax(0,1.25fr);}
                              #watch-rail{display:none;} .pdiv:not(.pdiv-h){display:none;} }
   #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px);
              overflow:hidden; flex:1; min-height:340px; }
@@ -365,11 +365,6 @@
         </div>
       </div>
       <div class="dgrid">
-        <div class="dleft">
-          <div id="tv-wrap"><div id="tv-chart" style="height:100%"></div></div>
-          <div id="pos-strip"></div>
-        </div>
-        <div class="pdiv" id="div-chart" title="drag to resize · double-click resets"></div>
         <div class="dright">
           <div id="agent-dock">
             <div class="dockbar"><span>Marcus · AI options desk — live</span>
@@ -406,6 +401,11 @@
               </div>
             </div>
           </div>
+        </div>
+        <div class="pdiv" id="div-chart" title="drag to resize · double-click resets"></div>
+        <div class="dleft">
+          <div id="tv-wrap"><div id="tv-chart" style="height:100%"></div></div>
+          <div id="pos-strip"></div>
         </div>
         <div class="pdiv" id="div-rail" title="drag to resize · double-click resets"></div>
         <aside id="watch-rail">
@@ -1068,10 +1068,10 @@
       el.addEventListener("dblclick", () => { onReset(); persist(); });
     };
 
-    bind("div-chart", "x", (dx, s) => {           // chart <-> data column
+    bind("div-chart", "x", (dx, s) => {           // data column <-> chart
       const w1 = s.l.width + dx, w2 = s.r.width - dx;
-      if (w1 < 320 || w2 < 340) return;
-      saved.c1 = +(2 * w1 / (w1 + w2)).toFixed(3);
+      if (w1 < 340 || w2 < 320) return;
+      saved.c1 = +(2 * w2 / (w1 + w2)).toFixed(3);      // c1 = the CHART's share
       grid.style.setProperty("--dgc1", saved.c1 + "fr");
       grid.style.setProperty("--dgc2", (2 - saved.c1).toFixed(3) + "fr");
     }, () => {
@@ -1096,6 +1096,36 @@
       dright.style.removeProperty("--dockgrow");
       dright.style.removeProperty("--sidegrow");
     });
+  }
+
+  /* real X posts under the pulse — the actual tweets, media and all */
+  let twttrLoading = null;
+  function ensureTwitterWidgets() {
+    if (window.twttr && window.twttr.widgets) return Promise.resolve();
+    if (!twttrLoading) {
+      twttrLoading = new Promise((res) => {
+        const s = document.createElement("script");
+        s.src = "https://platform.twitter.com/widgets.js";
+        s.async = true;
+        s.onload = res;
+        s.onerror = res;
+        document.head.appendChild(s);
+      });
+    }
+    return twttrLoading;
+  }
+
+  async function loadXEmbeds(t, container) {
+    try {
+      const d = await fetch(`${API}/api/xfeed/${t}`).then(r => r.json());
+      if (t !== focus || !(d.posts || []).length) return;
+      const wrap = document.createElement("div");
+      wrap.className = "xembeds";
+      wrap.innerHTML = d.posts.map(p => p.html).join("");
+      container.appendChild(wrap);
+      await ensureTwitterWidgets();
+      if (window.twttr && window.twttr.widgets) window.twttr.widgets.load(wrap);
+    } catch { /* pulse text alone is fine */ }
   }
 
   function setFocus(t) {
@@ -1124,6 +1154,7 @@
       const cites = (d.pulse.citations || []).slice(0, 4).map((u, i) =>
         `<a href="${u}" target="_blank" style="color:var(--accent);font-size:11px;margin-right:8px">[${i + 1}]</a>`).join("");
       body.innerHTML = bullets + (cites ? `<div style="margin-top:8px">${cites}</div>` : "");
+      loadXEmbeds(t, body);
     } catch { body.innerHTML = `<span class="dnote">X pulse unreachable</span>`; }
   }
 
@@ -1162,7 +1193,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=8`));
+      .then(() => load(`${API}/static/desk-chart.js?v=9`));
     return chartLib;
   }
 

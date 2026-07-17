@@ -197,6 +197,16 @@ def latest_ta_signals(ticker: str, limit: int = 5) -> list[dict]:
     return [{"created_at": r[0], "signal": r[1], "price": r[2], "interval": r[3]} for r in rows]
 
 
+@app.get("/api/xfeed/{ticker}")
+def xfeed(ticker: str):
+    """The X card's real posts: the pulse's citations as oEmbed HTML."""
+    from common import xpulse
+
+    if not xpulse.available():
+        return {"available": False, "posts": []}
+    return {"available": True, "posts": xpulse.embeds_for(ticker)}
+
+
 @app.get("/api/spot/{ticker}")
 def spot(ticker: str):
     """Lightweight spot for always-on price chips: LIVE feed first, the

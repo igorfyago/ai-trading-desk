@@ -38,7 +38,23 @@ AGENT_META = [   # category: finance | agency | custom
      "hint": "Run the desk on SPY"},
 ]
 
-TICKER_RE = re.compile(r"\b(SPY|QQQ|IWM|XSP)\b", re.I)
+from common import tickers as universe
+
+# any watchlist name matches case-insensitively — EXCEPT tickers that collide
+# with English (NOW, BE, RUN...), which need CAPS or a $ prefix to count
+_SAFE = sorted(universe.WATCHLIST - universe.AMBIGUOUS, key=len, reverse=True)
+_AMB = sorted(universe.AMBIGUOUS & universe.WATCHLIST, key=len, reverse=True)
+# (?!\w) instead of \b as the right boundary — \b can't follow "ES1!"
+TICKER_RE = re.compile(r"(?<![\w$])(" + "|".join(map(re.escape, _SAFE)) + r")(?!\w)", re.I)
+_AMB_RE = re.compile(r"(?i:\$(" + "|".join(map(re.escape, _AMB)) + r")(?!\w))|"
+                     r"(?<![\w$])(" + "|".join(map(re.escape, _AMB)) + r")(?!\w)")
+
+
+def extract_tickers(text: str) -> list[str]:
+    found = {m.upper() for m in TICKER_RE.findall(text)}
+    for dollar, caps in _AMB_RE.findall(text):        # $now or literal NOW
+        found.add((dollar or caps).upper())
+    return sorted(found, key=lambda t: (t != "SPY", t))
 
 
 def _live_context(text: str) -> str:
@@ -47,9 +63,8 @@ def _live_context(text: str) -> str:
     from common import market, news
 
     # SPY is the desk's home ticker: it leads when named, and no ticker at all
-    # means SPY only — QQQ/IWM context arrives when the user asks for them
-    found = {m.upper() for m in TICKER_RE.findall(text)}
-    tickers = sorted(found, key=lambda t: (t != "SPY", t)) or ["SPY"]
+    # means SPY only — the rest of the universe joins when the user names it
+    tickers = extract_tickers(text) or ["SPY"]
     parts = []
     for t in tickers[:3]:
         live = market.live_spot(t)

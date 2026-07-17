@@ -106,12 +106,28 @@ def _spot_and_iv(ticker: str) -> tuple[float, float, str, str | None] | None:
     return snap["spot"], snap["atm_iv"], "snapshot", None
 
 
+def ticker_quote(ticker: str) -> str:
+    """ANY name on the tape: last, day change, extended move, session."""
+    from common import quotes
+
+    rows = quotes.watch_quotes([ticker])
+    r = rows[0] if rows else {}
+    if not r.get("price"):
+        return json.dumps({"error": f"no tape for {ticker}"})
+    return json.dumps(r)
+
+
 def desk_status(ticker: str) -> str:
     from common import trades
 
     snap = market.latest_snapshot(ticker)
     if not snap:
-        return json.dumps({"error": f"No data for {ticker}. We cover SPY, QQQ, IWM."})
+        # not in the GEX complex — still on the tape: quote it instead of
+        # claiming blindness
+        q = json.loads(ticker_quote(ticker))
+        q["note"] = ("no dealer-positioning structure for this name (GEX covers "
+                     "SPY/QQQ/IWM) - price, chart and news are live")
+        return json.dumps(q)
     out = {k: snap[k] for k in ("ticker", "spot", "regime", "traffic_light",
                                 "signal_score", "gamma_flip", "atm_iv", "captured_at")}
     gl = market.live_gex(ticker)
@@ -462,8 +478,14 @@ PERSONAS = {
             "## Length\n1-3 sentences per turn; a full trade walk-through may run "
             "longer but stays tight.\n\n"
             "# Context\n"
-            "The desk covers SPY, QQQ and IWM; SPY is the home ticker — quote it "
-            "unless the caller names another. Positive net GEX = "
+            "GEX dealer-positioning structure covers SPY, QQQ and IWM. The TAPE "
+            "covers the WHOLE watchlist - ticker_quote reads any name (NVDA, NOW, "
+            "ES1!, BTCUSD...). NEVER say you can't see a ticker. SPY is the home "
+            "ticker - quote it unless the caller names another.\n"
+            "Caller says 'now' where a ticker fits the sentence ('how's now "
+            "doing', 'check now premarket')? That's NOW - ServiceNow, watchlist "
+            "CORE - not the adverb. Same instinct for BE, RUN, OPEN, COIN.\n"
+            "Positive net GEX = "
             "dealers long gamma = pinned, mean-reverting tape. Negative = short "
             "gamma = amplified, momentum tape. The gamma flip is where it changes.\n\n"
             "# Your feed — facts, never improvised humility\n"
@@ -554,8 +576,13 @@ PERSONAS = {
             "us honest'), then straight back to the game."
         ),
         "tools": [
-            _fn("desk_status", "Current regime, signal and gamma flip for a ticker.",
-                {"ticker": {"type": "string", "description": "SPY, QQQ or IWM"}}, ["ticker"]),
+            _fn("desk_status", "Current regime, signal and gamma flip for a ticker "
+                "(GEX structure: SPY/QQQ/IWM; any other name returns its live quote).",
+                {"ticker": {"type": "string", "description": "any ticker"}}, ["ticker"]),
+            _fn("ticker_quote", "Live quote for ANY watchlist name - stocks, ETFs, "
+                "futures (ES1!), crypto (BTCUSD): last, day change, extended move.",
+                {"ticker": {"type": "string", "description": "any ticker, e.g. NVDA, NOW, ES1!"}},
+                ["ticker"]),
             _fn("trade_recommendation", "The exact rule-based trade for the current regime: "
                 "structure, legs with strikes/expiry/prices, rationale, invalidation, sizing.",
                 {"ticker": {"type": "string"}}, ["ticker"]),
@@ -592,7 +619,8 @@ PERSONAS = {
                 {"price": {"type": "number", "description": "their price, if stated"}}, []),
             _fn("position_status", "Current open position with live mark and P&L.", {}, []),
         ],
-        "implementations": {"desk_status": desk_status, "trade_recommendation": trade_recommendation,
+        "implementations": {"desk_status": desk_status, "ticker_quote": ticker_quote,
+                            "trade_recommendation": trade_recommendation,
                             "quote_option": quote_option, "expected_move": expected_move,
                             "tape_read": tape_read,
                             "desk_news": desk_news, "x_pulse": x_pulse, "ta_signals": ta_signals,

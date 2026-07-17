@@ -83,7 +83,9 @@ def pulse(ticker: str) -> dict | None:
                         "Answer with 3-5 terse bullets: concrete catalysts, overall mood, "
                         "and any widely-repeated claims (mark rumors as rumors). "
                         "Quote levels and prices as plain digits. "
-                        "Plain text bullets starting with '- ', no preamble, no markdown headers."
+                        "Plain text bullets starting with '- ', no preamble, no markdown headers. "
+                        "After the bullets add one line 'POSTS:' followed by the x.com "
+                        "URLs of the 3-6 most load-bearing posts you used, one per line."
                     ),
                 }],
                 "tools": [tool],
@@ -93,7 +95,8 @@ def pulse(ticker: str) -> dict | None:
         resp.raise_for_status()
         data = resp.json()
         summary, inline_cites = _clean_inline_citations(_extract_text(data))
-        citations = _extract_citations(data) or inline_cites
+        summary, post_urls = _lift_posts_block(summary)
+        citations = post_urls or _extract_citations(data) or inline_cites
         result = {"summary": summary, "citations": citations}
         if not result["summary"]:
             result = None
@@ -129,6 +132,16 @@ def _clean_inline_citations(text: str) -> tuple[str, list[str]]:
     return cleaned.strip(), urls[:8]
 
 
+def _lift_posts_block(text: str) -> tuple[str, list[str]]:
+    """The prompt asks for a trailing 'POSTS:' block of x.com URLs — lift it
+    out so the bullets stay clean and the URLs become embeddable citations."""
+    m = re.search(r"\n?\s*POSTS:\s*\n?((?:\s*https?://\S+\s*\n?)+)", text, re.I)
+    if not m:
+        return text, []
+    urls = re.findall(r"https?://\S+", m.group(1))
+    return (text[:m.start()] + text[m.end():]).strip(), urls[:8]
+
+
 def _extract_citations(data: dict) -> list[str]:
     cites = data.get("citations") or []
     if isinstance(cites, list):
@@ -142,3 +155,43 @@ def pulse_block(ticker: str) -> str:
     if not p:
         return ""
     return f"X chatter on {ticker.upper()} (via Grok x_search):\n{p['summary']}"
+
+
+# ------------------------------------------------------ real-post embeds ----
+
+_OEMBED = "https://publish.twitter.com/oembed"
+_embed_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def embeds_for(ticker: str, limit: int = 6) -> list[dict]:
+    """The pulse's cited posts as REAL X embeds (oEmbed — public, keyless,
+    no login): the card renders the actual posts with media, not a summary.
+    Rides the cached pulse, so this never adds a Grok call of its own."""
+    p = pulse(ticker)
+    urls = [u for u in (p or {}).get("citations") or []
+            if "x.com" in u or "twitter.com" in u]
+    out: list[dict] = []
+    now = time.time()
+    for u in urls[:limit]:
+        hit = _embed_cache.get(u)
+        if hit and now - hit[0] < 6 * 3600:
+            if hit[1]:
+                out.append(hit[1])
+            continue
+        item = None
+        try:
+            r = httpx.get(_OEMBED, params={
+                "url": u, "theme": "dark", "omit_script": "true",
+                "dnt": "true", "hide_thread": "true"},
+                timeout=6, follow_redirects=True)
+            if r.status_code == 200:
+                d = r.json()
+                if d.get("html"):
+                    item = {"url": u, "html": d["html"],
+                            "author": d.get("author_name")}
+        except Exception:
+            item = None
+        _embed_cache[u] = (now, item)
+        if item:
+            out.append(item)
+    return out

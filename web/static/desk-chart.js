@@ -56,8 +56,10 @@
     // VWAP AA: azure core; green above / deep-orange below; 2σ dashed; the
     // script's DEFAULT inner shades: green wash above the core, orange below
     vwap: "#0496ff", bandUp: "#4caf50", bandDn: "#e65100",
-    vwapFillU1: "rgba(76,175,80,0.10)", vwapFillU2: "rgba(76,175,80,0.05)",
-    vwapFillD1: "rgba(230,81,0,0.08)", vwapFillD2: "rgba(230,81,0,0.05)",
+    // the VWAP shade WINS over every backdrop (DC fill, session tint) — you
+    // can always tell the band area apart, like on the boss's charts
+    vwapFillU1: "rgba(76,175,80,0.16)", vwapFillU2: "rgba(76,175,80,0.09)",
+    vwapFillD1: "rgba(230,81,0,0.14)", vwapFillD2: "rgba(230,81,0,0.08)",
     // Donchian 96: white 50% ceiling, red 25% floor, blue 5% channel fill —
     // that fill is the navy wash you see across the whole chart
     dcU: "rgba(255,255,255,0.50)", dcL: "rgba(242,54,69,0.25)",

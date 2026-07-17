@@ -2,7 +2,7 @@
 # (Rust collector -> Postgres -> Node API/dashboard) running 24/7, and the
 # AI agents (ai-trading-desk web) reading the SAME live Postgres.
 #
-# Layout on the host (EC2): both repos cloned side by side —
+# Layout on the host (EC2): both repos cloned side by side ·
 #   ~/apps/options-flow-analytics
 #   ~/apps/ai-trading-desk        <- run compose from this repo's deploy/
 #
@@ -99,7 +99,7 @@ services:
   # ---------------------------------------------------------------- minibank
   # The raw-Java neobank (clone side-by-side: /opt/apps/minibank). Five
   # containers: the app, two REGION databases (eu/uk), a control-plane
-  # database (directory + notifications), and Kafka. Heaps are capped —
+  # database (directory + notifications), and Kafka. Heaps are capped ·
   # this instance is small and the bank is polite.
   minibank-shard0:
     image: postgres:16-alpine

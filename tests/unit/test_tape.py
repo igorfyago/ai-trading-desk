@@ -134,6 +134,28 @@ def test_checklist_reports_the_four_checks_with_bar_times():
     assert qcl["done"] <= 2 and not qcl["checks"][3]["ok"]
 
 
+def test_action_now_never_quotes_out_of_reach_levels():
+    """The mechanical now-state: one do_now plus the nearest line each side,
+    every emitted level within reach — the voice reads this verbatim instead
+    of composing its own levels (a wall 4$ away is never 'the confirmation')."""
+    trig = tape.read_tape(_scripted_long_setup())
+    act = trig["action"]
+    assert act["stance"] in ("in_trade", "enter") and act["do_now"]  # actionable
+    assert "NOW:" in trig["plain"]
+
+    quiet = [_bar(_T0 + i * 900, 100.0, 100.2, 99.8, 100.1, 1000) for i in range(40)]
+    qact = tape.read_tape(quiet)["action"]
+    assert qact["stance"] == "wait"
+
+    for read in (trig["action"], qact):
+        for side in ("up", "down"):
+            line = read[side]
+            if line is not None:
+                assert abs(line["dist"]) <= read["reach"] + 1e-6
+                assert line["means"]
+        assert read["reach"] < 105 * 0.05          # sane bound, not the whole chart
+
+
 def test_get_tape_read_none_when_feed_off(monkeypatch):
     monkeypatch.setenv("QUOTES_PROVIDER", "off")   # conftest default, made explicit
     assert tape.get_tape_read("SPY") is None

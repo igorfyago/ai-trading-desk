@@ -475,7 +475,91 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
     checklist = {"side": cl_side, "done": sum(1 for c in checks if c["ok"]),
                  "checks": checks, "stage": stage}
 
+    # ---- MECHANICAL NOW-STATE -------------------------------------------
+    # One deterministic "you are here": what to do at THIS price plus the
+    # nearest actionable line on each side. Levels beyond realistic reach
+    # are never emitted — the voice reads this block verbatim instead of
+    # composing its own levels (a wall 4$ away is context, not a trigger).
+    reach = max(1.25 * band["sigma"], spot * 0.0015)
+
+    def _line(level, means):
+        if level is None or abs(level - spot) > reach or abs(level - spot) < spot * 1e-5:
+            return None
+        return {"level": round(level, 2), "dist": round(level - spot, 2),
+                "means": means}
+
+    vw_px = band["vwap"]
+    up = down = None
+    if stage == "triggered":
+        stance = "in_trade"
+        do_now = (f"The {bias} reversal is live - manage it, don't re-pitch it: "
+                  f"target {_fmt(target)}, thesis dies on a 15m close back "
+                  f"{'below' if bias == 'long' else 'above'} VWAP {vw_px:.2f}.")
+        if bias == "long":
+            up = _line(target, "the gap target - scale the runner there")
+            down = _line(vw_px, "a 15m close under VWAP kills the thesis - no adds")
+        else:
+            down = _line(target, "the gap target - scale the runner there")
+            up = _line(vw_px, "a 15m close over VWAP kills the thesis - no adds")
+    elif ds and ds.get("takeable"):
+        d_side = "long" if ds["shape"].startswith("bull") else "short"
+        stance = "enter"
+        do_now = (f"Reversal day is on and fresh - the {d_side} works here at "
+                  f"{spot:.2f}; the thesis line is VWAP {vw_px:.2f}.")
+        if d_side == "long":
+            up = _line(target, "first objective - the gap/wall ahead")
+            down = _line(vw_px, "the thesis - a thick 15m close under it and the day-call is wrong")
+        else:
+            down = _line(target, "first objective - the gap/wall ahead")
+            up = _line(vw_px, "the thesis - a thick 15m close over it and the day-call is wrong")
+    elif ds:
+        d_side = "long" if ds["shape"].startswith("bull") else "short"
+        stance = "wait_pullback"
+        do_now = (f"No counter-trend and no chase at {spot:.2f} - the "
+                  f"{'bullish' if d_side == 'long' else 'bearish'} reversal day is in but the "
+                  f"entry window passed; wait for a pullback toward VWAP {vw_px:.2f} that holds.")
+        if d_side == "long":
+            down = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day")
+            up = _line(wall_above, "if it gets there without a pullback, it ran without you - still no chase")
+        else:
+            up = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day")
+            down = _line(wall_below, "if it gets there without a pullback, it ran without you - still no chase")
+    elif stage == "confirming":
+        gate = ([w for w in prof["walls"] if w > bars[conf_i]["c"]] if bias == "long"
+                else [w for w in prof["walls"] if w < bars[conf_i]["c"]])
+        trig_lvl = (min(gate) if gate else None) if bias == "long" else (max(gate) if gate else None)
+        stance = "conditional"
+        do_now = (f"Nothing filled yet at {spot:.2f} - the {bias} is confirming; "
+                  "the trigger is the wall, not here.")
+        if bias == "long":
+            up = _line(trig_lvl, f"a push through it TRIGGERS the long - gap runs toward {_fmt(target)}")
+            down = _line(band["d1"], "a 15m close back under -1σ kills the confirm - stand down")
+        else:
+            down = _line(trig_lvl, f"a push through it TRIGGERS the short - gap runs toward {_fmt(target)}")
+            up = _line(band["u1"], "a 15m close back over +1σ kills the confirm - stand down")
+    elif stage == "armed":
+        stance = "conditional"
+        do_now = (f"Nothing to buy at {spot:.2f} - the {bias} reversal is armed, "
+                  "not confirmed; the entry is the confirm close, and only that.")
+        if bias == "long":
+            up = _line(band["d1"], "a high-volume 15m body closing back above -1σ CONFIRMS the long - that is the entry")
+            down = _line(band["d2"], "the tag zone - a wick re-arms it; a THICK close under it means the flush is real, no knife-catch")
+        else:
+            down = _line(band["u1"], "a high-volume 15m body closing back under +1σ CONFIRMS the short - that is the entry")
+            up = _line(band["u2"], "the tag zone - holding above it kills the fade, the trend runs")
+    else:
+        stance = "wait"
+        do_now = f"No setup armed at {spot:.2f} - nothing to do; watch the lines."
+        ups = [x for x in (band["u1"], band["u2"], wall_above) if x is not None and x > spot]
+        dns = [x for x in (band["d1"], band["d2"], wall_below) if x is not None and x < spot]
+        up = _line(min(ups) if ups else None, "reclaim and hold it and buyers take control")
+        down = _line(max(dns) if dns else None, "lose it and sellers take control")
+
+    action = {"stance": stance, "do_now": do_now, "up": up, "down": down,
+              "reach": round(reach, 2)}
+
     return {
+        "action": action,
         "spot": round(spot, 4),
         "vwap": round(band["vwap"], 4),
         "day_shape": ds,
@@ -493,7 +577,7 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         "bias": bias,
         "checklist": checklist,
         "target": None if target is None else round(target, 2),
-        "plain": f"{head} {tail}",
+        "plain": f"{head} {tail} NOW: {do_now}",
     }
 
 

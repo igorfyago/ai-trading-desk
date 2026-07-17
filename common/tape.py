@@ -21,6 +21,20 @@ import math
 import statistics
 from datetime import datetime, timezone
 
+
+def _true_et_secs(t: int) -> int:
+    """Seconds since midnight REAL Eastern Time (manual US-DST: EDT from the
+    second Sunday of March 07:00 UTC to the first Sunday of November 06:00
+    UTC). Session bucketing elsewhere keeps the fixed -4h convention; this is
+    only for clock-of-day policy gates."""
+    d = datetime.fromtimestamp(t, tz=timezone.utc)
+    mar1 = datetime(d.year, 3, 1, tzinfo=timezone.utc)
+    dst_on = mar1.replace(day=1 + (6 - mar1.weekday()) % 7 + 7, hour=7)
+    nov1 = datetime(d.year, 11, 1, tzinfo=timezone.utc)
+    dst_off = nov1.replace(day=1 + (6 - nov1.weekday()) % 7, hour=6)
+    off = -4 * 3600 if dst_on <= d < dst_off else -5 * 3600
+    return (t + off) % 86400
+
 _TINY = 1e-9
 
 RSI_N = 14           # Wilder lookback
@@ -393,12 +407,22 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
 
     ds = day_shape(bars)
     if ds:
+        # THE BACKTESTED GATE (docs/BACKTEST.md): 4.4y out-of-sample says the
+        # reversal-day trade pays after 12:45 ET while the capitulation is
+        # under two hours old; earlier/staler shapes graded flat-to-negative.
+        ds["age_h"] = round((bars[-1]["t"] - ds["capitulation_t"]) / 3600, 2)
+        ds["takeable"] = (_true_et_secs(bars[-1]["t"]) >= 12.75 * 3600
+                          and ds["age_h"] < 2.0)
         side = "bullish" if ds["shape"].startswith("bull") else "bearish"
         lvl = ds.get("low2", ds.get("high2"))
         tail += (f" DAY SHAPE: {side} reversal day - capitulation "
                  f"({ds['capitulation_x']}x volume) at the double "
                  f"{'bottom' if side == 'bullish' else 'top'} near {lvl}, "
                  f"VWAP {'reclaimed' if side == 'bullish' else 'lost'}.")
+        if not ds["takeable"]:
+            tail += (" FORMING - the desk takes reversal-day entries after "
+                     "12:45 ET on a capitulation under two hours old; until "
+                     "then it is context, not the trade.")
 
     # ---- the four-check reversal list (his indicators, numbered) ---------
     # Each check reports the LATEST bar it fired on, so the chart can circle

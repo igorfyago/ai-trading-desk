@@ -251,9 +251,9 @@ def _double_bottom_day():
         bars.append(bar(t, o, o + 0.1, c - 0.1, c, 1000)); t += 900; px = c
     bars.append(bar(t, px, px + 0.2, lo1 - 0.1, px + 0.1, 6000))   # capitulation
     t += 900; px += 0.1
-    for i in range(9):                       # the reclaim through VWAP
-        o = px
-        c = px + 0.5
+    for i in range(6):                       # the reclaim through VWAP (fresh:
+        o = px                               # capitulation stays under 2h old)
+        c = px + 0.7
         bars.append(bar(t, o, c + 0.15, o - 0.05, c, 2400)); t += 900; px = c
     return bars
 
@@ -284,3 +284,31 @@ def test_reversal_day_flips_the_engine(monkeypatch):
         assert r["execution"]["kind"] == "call"
         assert r["execution"]["thesis_label"] == "the session VWAP"
         assert "reversal day" in r["plain_english"]
+
+
+def test_morning_day_shape_stays_context(monkeypatch):
+    """The backtested gate (docs/BACKTEST.md): the same shape finishing before
+    12:45 ET is FORMING — the engine keeps the structure trade and says so."""
+    from common import tape as tape_mod
+
+    bars = [{**b, "t": b["t"] - 7 * 3600} for b in _double_bottom_day()]
+    ds = tape_mod.day_shape(bars)
+    assert ds and ds["shape"] == "bullish_reversal_day"     # shape still detected
+
+    read = tape_mod.read_tape(bars)
+    assert read["day_shape"]["takeable"] is False           # ...but gated
+    assert "FORMING" in read["plain"]
+
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    r = signals.recommend_trade("SPY", tape_bars=bars)
+    if "tape triggered" not in r["bias"]:                    # trigger may outrank
+        assert "reversal day" not in r["bias"]               # gate held the lean

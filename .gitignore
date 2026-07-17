@@ -9,3 +9,5 @@ data/chroma/
 .idea/
 .vscode/
 dist/
+scripts/out/
+scripts/out_oos/

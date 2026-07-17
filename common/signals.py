@@ -185,7 +185,10 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = ("The house tape read fired: " + tape["plain"] +
                      " A triggered reversal takes the trade over the structure lean.")
-    elif ds:
+    elif ds and ds.get("takeable", True):
+        # the gate rode in on the tape read: 4.4y out-of-sample (docs/BACKTEST.md)
+        # graded pre-12:45/stale-capitulation entries flat-to-negative, so those
+        # stay context and the structure trade stands until the window opens
         d_kind = "call" if ds["shape"].startswith("bull") else "put"
         name = f"long {d_kind} (reversal day)"
         bias = (f"{'bullish' if d_kind == 'call' else 'bearish'} - reversal day "
@@ -224,6 +227,8 @@ def recommend_trade(ticker: str, as_of: str | None = None,
             "target": tape.get("target"), "vwap": tape.get("vwap"),
             "rsi": (tape.get("rsi") or {}).get("state"),
             "day_shape": (tape.get("day_shape") or {}).get("shape"),
+            "day_shape_takeable": (tape.get("day_shape") or {}).get("takeable"),
+            "cap_age_h": (tape.get("day_shape") or {}).get("age_h"),
             "capitulation_x": (tape.get("day_shape") or {}).get("capitulation_x"),
             "checklist": tape.get("checklist"),
             "plain": tape.get("plain"),
@@ -268,6 +273,8 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     trig = tape if (tape and tape.get("stage") == "triggered"
                     and tape.get("bias")) else None
     dshape = (tape or {}).get("day_shape") if tape else None
+    if dshape and not dshape.get("takeable", True):
+        dshape = None   # forming, not the trade — same gate as the bias branch
     if trig:
         bullish = trig["bias"] == "long"
         headline = f"TAPE says {'long' if bullish else 'short'} reversal - triggered"

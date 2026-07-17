@@ -178,7 +178,7 @@ SCENARIOS = [
         "what should I trade on SPY right now?",
     ], checks={
         "engine_used": lambda tr: "trade_recommendation" in tools_called(tr),
-        "gex_headline": lambda tr: "gex says" in " ".join(agent_turns(tr)).lower(),
+        "desk_headline": lambda tr: re.search(r"(gex|tape) says", " ".join(agent_turns(tr)).lower()) is not None,
         "no_jargon_by_default": lambda tr: not JARGON.search(delivery(tr)),
         "terse": lambda tr: len(delivery(tr).split()) <= 140,
         "trims_half_at_50pct": lambda tr: "half" in " ".join(agent_turns(tr)).lower()

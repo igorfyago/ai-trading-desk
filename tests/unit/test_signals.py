@@ -75,3 +75,38 @@ def test_every_recommendation_carries_risk_fields(monkeypatch):
 
 def test_unknown_ticker_is_clean_error():
     assert "error" in signals.recommend_trade("TSLA")
+
+
+def test_degenerate_flip_never_mirrors_spot(monkeypatch):
+    """A missing flip (or one sitting on price) must NOT default to spot —
+    that made 'above the flip' a tautology and every day 'bullish'. The desk
+    signal picks the side; a real wall carries the thesis."""
+    real = market.latest_snapshot
+
+    def fake_none(ticker):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake_none)
+    r = signals.recommend_trade("SPY")
+    assert r["bias"] == "bearish momentum"           # score decides, not spot>=spot
+    x = r["execution"]
+    assert x["thesis_kind"] == "wall"
+    assert x["thesis_reference"] != round(r["spot"], 2)
+    assert x["kind"] == "put"
+    assert "wall" in r["plain_english"]
+
+    def fake_onprice(ticker):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = snap["spot"]            # the chicken-and-egg case
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake_onprice)
+    r2 = signals.recommend_trade("SPY")
+    assert r2["bias"] == "bearish momentum"
+    assert r2["execution"]["thesis_kind"] == "wall"

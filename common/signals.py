@@ -77,7 +77,7 @@ def recommend_trade(ticker: str) -> dict:
         snap = {**snap, "spot": live["price"]}
         spot_source = live["source"]
 
-    spot, flip = snap["spot"], snap["gamma_flip"] or snap["spot"]
+    spot = snap["spot"]
     dte = market.days_to(snap["expiry"])
     # index ETFs/XSP trade $1 strikes; 0.5%-spaced grid only for anything else
     step = 1 if ticker in ("SPY", "XSP", "QQQ", "IWM") else max(round(spot * 0.005), 1)
@@ -86,22 +86,42 @@ def recommend_trade(ticker: str) -> dict:
     score = snap["signal_score"] or 0
     em = market.expected_move(spot, snap["atm_iv"], dte)
 
+    # A flip only counts when it is a REAL, distinct level. Missing (cumulative
+    # GEX never crosses zero on a one-sided tape) or sitting on top of price,
+    # it carries ZERO direction — "above the flip" would just mean "the price
+    # is the price", a recursive non-signal. Then the desk SIGNAL picks the
+    # side and the opposing WALL becomes the thesis level.
+    flip_raw = snap["gamma_flip"]
+    flip = flip_raw if (flip_raw is not None
+                        and abs(spot - flip_raw) >= 0.25 * em) else None
+
     if snap["regime"] == "negative_gamma":
-        if spot < flip:
+        flip_ok = flip is not None
+        bullish = (spot >= flip) if flip_ok else (score >= 0)
+        if not bullish:
             name, bias = "put debit spread", "bearish momentum"
             legs = [_leg(snap, atm, "put", "buy", dte),
                     _leg(snap, min(put_wall, atm - step), "put", "sell", dte)]
-            invalidation = f"spot reclaims the gamma flip at {flip}"
+            invalidation = (f"spot reclaims the gamma flip at {flip}" if flip_ok
+                            else f"a reclaim of the call wall at {call_wall}")
         else:
             name, bias = "call debit spread", "bullish momentum"
             legs = [_leg(snap, atm, "call", "buy", dte),
                     _leg(snap, max(call_wall, atm + step), "call", "sell", dte)]
-            invalidation = f"spot loses the gamma flip at {flip}"
-        rationale = (f"Dealers are SHORT gamma (net GEX {snap['net_gex_total']:+,.0f}); their "
-                     f"hedging amplifies moves. Spot {spot} is "
-                     f"{'below' if spot < flip else 'above'} the flip ({flip}), so momentum "
-                     f"continues until the flip is recrossed. Target: the "
-                     f"{'put' if spot < flip else 'call'} wall.")
+            invalidation = (f"spot loses the gamma flip at {flip}" if flip_ok
+                            else f"a loss of the put wall at {put_wall}")
+        if flip_ok:
+            rationale = (f"Dealers are SHORT gamma (net GEX {snap['net_gex_total']:+,.0f}); their "
+                         f"hedging amplifies moves. Spot {spot} is "
+                         f"{'above' if bullish else 'below'} the flip ({flip}), so momentum "
+                         f"continues until the flip is recrossed. Target: the "
+                         f"{'call' if bullish else 'put'} wall.")
+        else:
+            rationale = (f"Dealers are SHORT gamma (net GEX {snap['net_gex_total']:+,.0f}); their "
+                         f"hedging amplifies moves. No usable flip on this snapshot "
+                         f"({'absent' if flip_raw is None else 'sitting on price'} — the level "
+                         f"carries no direction), so the side comes from the desk signal "
+                         f"({score:+.0f}). Target: the {'call' if bullish else 'put'} wall.")
     else:
         if score > 25:
             name, bias = "put credit spread", "bullish range"
@@ -136,7 +156,7 @@ def recommend_trade(ticker: str) -> dict:
     return {
         "ticker": snap["ticker"], "as_of": snap["captured_at"], "spot": spot,
         "spot_source": spot_source, "snapshot_iv": snap["atm_iv"],
-        "regime": snap["regime"], "gamma_flip": flip, "signal_score": score,
+        "regime": snap["regime"], "gamma_flip": flip_raw, "signal_score": score,
         "structure": name, "bias": bias, "legs": legs,
         "one_sigma_move": em, "expected_move_band": [round(spot - em, 2), round(spot + em, 2)],
         "rationale": rationale,
@@ -178,16 +198,30 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     """
     regime = snap["regime"]
     ticker = snap["ticker"]
+    flip_ok = flip is not None
     if regime == "negative_gamma":
-        bullish = spot >= flip
+        bullish = (spot >= flip) if flip_ok else (score >= 0)
         headline = f"GEX says {'bullish' if bullish else 'bearish'} momentum holds today"
-        why = ("dealers are forced to chase the move until the tipping point "
-               f"at {flip:g} breaks")
+        if flip_ok:
+            why = ("dealers are forced to chase the move until the tipping point "
+                   f"at {flip:g} breaks")
+        else:
+            why = ("dealers amplify the move and the desk signal "
+                   f"({score:+.0f}) sits with the {'buyers' if bullish else 'sellers'} "
+                   "- the flip is on price, no edge from the level itself")
     else:
         bullish = score >= 0
         headline = "GEX says pinned, mean-reversion tape today"
         why = (f"dealers defend the {put_wall:g}-{call_wall:g} range, so moves fade; "
                "lean " + ("long from the low end" if bullish else "short from the high end"))
+    # the thesis line: the flip when it is a real level, else the wall the
+    # trade leans on — always a DISTINCT price, never a mirror of spot
+    if flip_ok:
+        thesis_level, thesis_label = flip, "the tipping point"
+    elif bullish:
+        thesis_level, thesis_label = put_wall, "the put wall"
+    else:
+        thesis_level, thesis_label = call_wall, "the call wall"
 
     kind = "call" if bullish else "put"
     entry_px = market.black_scholes(spot, atm, dte, snap["atm_iv"], kind)["price"]
@@ -209,10 +243,15 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         "stop": None,
         "risk_plan": "no stop-loss by design: size small (half a percent of the "
                      "account max) and accept the contract can go to zero",
-        "thesis_reference": round(flip, 2),
-        "thesis_note": f"the tipping point at {flip:g} is the line for the THESIS - "
-                       "if it breaks, don't add and don't re-enter, but the position "
-                       "itself is managed by the +50% trim and small sizing",
+        "thesis_reference": round(thesis_level, 2),
+        "thesis_kind": "flip" if flip_ok else "wall",
+        "thesis_label": thesis_label,
+        "thesis_note": (f"{thesis_label} at {thesis_level:g} is the line for the THESIS - "
+                        "if it breaks, don't add and don't re-enter, but the position "
+                        "itself is managed by the +50% trim and small sizing"
+                        + ("" if flip_ok else
+                           " (no usable gamma flip on this snapshot - the level would "
+                           "just mirror the price, so the wall carries the thesis)")),
         "estimates_note": "option prices are Black-Scholes estimates at ATM vol",
     }
 
@@ -294,7 +333,7 @@ def _plain_english_exec(ticker: str, x: dict) -> str:
         f"{x['tp50_option_price']:.2f}, {ticker} near {x['tp50_underlying_est']:g} - "
         f"then let the rest ride. "
         f"{sizing_bit}"
-        f"No stop-loss: size for zero; the tipping point at "
+        f"No stop-loss: size for zero; {x.get('thesis_label', 'the tipping point')} at "
         f"{x['thesis_reference']:g} only tells you whether the thesis still stands."
     )
 

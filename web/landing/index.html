@@ -1364,7 +1364,8 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=12`));
+      .then(() => load(`${API}/static/desk-chart.js?v=12`))
+      .catch((err) => { chartLib = null; throw err; });  // one failed load must not poison every future mount
     return chartLib;
   }
 
@@ -1381,6 +1382,7 @@
   function applyGexLevels() {
     // one call paints EVERYTHING on the chart: GEX structure + the live book
     if (!deskChart) return;
+    if (deskChart.symbol && deskChart.symbol() !== focus) return;  // chart still on the old ticker
     const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
     const lv = [];
     if (gexLevels && gexLevels.sym === focus && GEX_COVERED.includes(focus)) {
@@ -1407,9 +1409,12 @@
       if (d.ticker === focus) {
         setFeedChip(d);
         const tile = document.getElementById("tile-spot");
-        if (tile) tile.textContent = d.price;
+        const tiles = document.getElementById("d-tiles");
+        // the tiles may still belong to the previous ticker while its summary
+        // loads — never write the new ticker's price into the old spot tile
+        if (tile && tiles && tiles.dataset.sym === focus) tile.textContent = d.price;
         if (deskChart) {
-          const ts = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : Math.floor(Date.now() / 1000);
+          const ts = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : 0;
           deskChart.applyTick(d.price, ts, d.ticker);
         }
       }
@@ -1454,6 +1459,7 @@
     if (!GEX_COVERED.includes(t)) {
       tiles.innerHTML = `<div class="dnote">GEX coverage: ${GEX_COVERED.join(", ")} — chart, news
         and chatter only for ${t}.</div>`;
+      tiles.dataset.sym = t;
       document.getElementById("d-trade").innerHTML = `<span class="dnote">n/a for ${t}</span>`;
       document.getElementById("d-asof").textContent = "";
       loadFeedsFallback(t);
@@ -1482,6 +1488,7 @@
         <div class="tile"><b>${s.signal_score ?? "—"}</b><span>signal</span></div>
         <div class="tile"><b>${(s.atm_iv * 100).toFixed(1)}%</b><span>atm iv</span></div>
         <div class="tile"><b>${s.vix ?? "—"}</b><span>vix</span></div>`;
+      tiles.dataset.sym = t;
       document.getElementById("d-trade").innerHTML =
         `<b>${d.trade.structure}</b> — ${d.trade.bias}<br><br>${d.trade.plain_english}`;
       renderNews(d.headlines);

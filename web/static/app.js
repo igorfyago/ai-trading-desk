@@ -486,7 +486,8 @@ boot();
    pops it into a Document Picture-in-Picture window that floats above every
    browser tab and app while a paper position is on. */
 
-const dock = { chart: null, active: null, pip: null, quotesES: null, eventsES: null };
+const dock = { chart: null, symbol: null, chartSeq: 0, active: null, pip: null,
+  quotesES: null, quotesSyms: "", eventsES: null };
 const DOCK_SECS = 300;   // 5m candles — the trade-management timeframe
 
 function fmtUsd(x) {
@@ -529,6 +530,7 @@ function dockRender() {
 
 function dockLevels(t) {
   if (!dock.chart) return;
+  if (t.underlying && dock.symbol && t.underlying !== dock.symbol) return;  // chart not re-seeded yet
   const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   dock.chart.setLevels([
     t.entry_underlying && {
@@ -548,6 +550,7 @@ function dockLevels(t) {
 
 function dockMarkers(t) {
   if (!dock.chart) return;
+  if (t.underlying && dock.symbol && t.underlying !== dock.symbol) return;  // chart not re-seeded yet
   const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const ts = (iso) => Math.floor(Date.parse(iso) / 1000);
   const ms = [];
@@ -563,13 +566,20 @@ function dockMarkers(t) {
 }
 
 async function dockChartBoot(underlying) {
-  if (dock.chart || !window.DeskChart) return;
+  const sym = underlying || "SPY";
+  // a QQQ trade after a SPY one must re-seed the candles, or its levels and
+  // markers land on the wrong instrument (and the tick guard starves it)
+  if (!window.DeskChart || (dock.chart && dock.symbol === sym)) return;
+  const seq = ++dock.chartSeq;
   try {
-    const data = await fetch(`/api/bars/${underlying || "SPY"}?interval=5m&limit=400`)
+    const data = await fetch(`/api/bars/${sym}?interval=5m&limit=400`)
       .then((r) => (r.ok ? r.json() : null));
+    if (seq !== dock.chartSeq) return;                // a newer boot superseded this one
     if (!data || !(data.bars || []).length) return;   // text-only dock still works
-    dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS, mode: "mini" });
-    dock.chart.setData(data.bars, DOCK_SECS);
+    if (!dock.chart) dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS, mode: "mini" });
+    dock.chart.setData(data.bars, DOCK_SECS, { symbol: sym });
+    dock.symbol = sym;
+    dockQuotes();                                     // the stream follows the chart's symbol
     if (dock.active) { dockLevels(dock.active); dockMarkers(dock.active); }
   } catch { /* chart is a bonus; the pill always works */ }
 }
@@ -642,15 +652,29 @@ function dockStreams() {
     };
     refreshScore();
   }
-  dock.quotesES = new EventSource("/api/stream/quotes?symbols=SPY");
+  dockQuotes();
+}
+
+function dockQuotes() {
+  // SPY always rides along for the price chip; the dock chart's own symbol
+  // joins so a QQQ/IWM trade chart still ticks live
+  const syms = [...new Set(["SPY", dock.symbol].filter(Boolean))].join(",");
+  if (dock.quotesES) {
+    if (dock.quotesSyms === syms) return;
+    dock.quotesES.close();
+  }
+  dock.quotesSyms = syms;
+  dock.quotesES = new EventSource(`/api/stream/quotes?symbols=${syms}`);
   dock.quotesES.onmessage = (e) => {
     let d; try { d = JSON.parse(e.data); } catch { return; }
-    if (d.type !== "quote" || d.ticker !== "SPY") return;
-    spyLive = true;
-    paintSpy(d.price, [d.session, d.source].filter(Boolean).join(" · ") || "live");
+    if (d.type !== "quote") return;
+    if (d.ticker === "SPY") {
+      spyLive = true;
+      paintSpy(d.price, [d.session, d.source].filter(Boolean).join(" · ") || "live");
+    }
     if (dock.chart) {
-      const t = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : Math.floor(Date.now() / 1000);
-      dock.chart.applyTick(d.price, t);
+      const t = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : 0;
+      dock.chart.applyTick(d.price, t, d.ticker);   // the chart's guard filters foreign ticks
     }
   };
 }

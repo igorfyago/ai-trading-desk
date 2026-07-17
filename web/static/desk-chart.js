@@ -702,6 +702,7 @@
       if (extra && extra.symbol) state.symbol = extra.symbol;
       if (extra && extra.label) state.ivLabel = extra.label;
       state.bars = (bars || []).map((b) => ({ ...b }));   // own copies; ticks mutate
+      state.lastTickTs = 0;                               // fresh tick baseline
       state.ha = computeHA(state.bars);
       rebuildDispTimes();
       chart.applyOptions({ timeScale: {
@@ -723,12 +724,25 @@
       }
     }
 
-    function applyTick(price, tsSec) {
+    function applyTick(price, tsSec, symbol) {
       if (!state.bars.length) return;
+      // mid symbol-switch the quote stream races the bar fetch: a NOW print
+      // must never land on SPY's candle (paints a monster red bar)
+      if (symbol && state.symbol && symbol !== state.symbol) return;
       const step = state.intervalSec;
-      const bucket = tsSec - (tsSec % step);
       let last = state.bars[state.bars.length - 1];
-      if (bucket > last.t) {
+      // un-timestamped or future-stamped prints can't be ordered: fold them
+      // into the live candle without advancing the ordering gate
+      const ordered = tsSec > 0 && tsSec <= Math.floor(Date.now() / 1000) + 300;
+      if (ordered) {
+        if (state.lastTickTs && tsSec < state.lastTickTs) return;  // out-of-order print
+        state.lastTickTs = tsSec;
+      }
+      // the server may append the freshest quote as a partial bar stamped
+      // mid-bucket — order by bucket, not raw t, or live ticks get dropped
+      const lastBucket = last.t - (last.t % step);
+      const bucket = ordered ? tsSec - (tsSec % step) : lastBucket;
+      if (bucket > lastBucket) {
         last = { t: bucket, o: price, h: price, l: price, c: price, v: 0 };
         state.bars.push(last);
         state.ha.push(haNext(state.ha[state.ha.length - 1] || null, last));
@@ -736,13 +750,17 @@
         const t = Math.max(tzShift(bucket), prevT + 1);
         state.dispTimes.push(t);
         state.dispByRaw.set(bucket, t);
-      } else {
+      } else if (bucket === lastBucket || state.daily) {
         // mutate the raw last bar, re-derive just the last HA candle
+        // (daily merges even when bucket lands earlier: providers stamp the
+        // session bar at 04:00Z/13:30Z while ticks bucket to midnight UTC)
         last.c = price;
         last.h = Math.max(last.h, price);
         last.l = Math.min(last.l, price);
         const prev = state.ha.length > 1 ? state.ha[state.ha.length - 2] : null;
         state.ha[state.ha.length - 1] = haNext(prev, last);
+      } else {
+        return;   // a print from an older candle never smears the live one
       }
       candles.update(displayBar(state.bars.length - 1));
       state.tickCount++;
@@ -794,6 +812,8 @@
     return {
       chart, setData, applyTick, setLevels, setMarkers, setHeikin,
       setIntervalSec: (s) => { state.intervalSec = s; },
+      lastBar: () => (state.bars.length ? { ...state.bars[state.bars.length - 1] } : null),
+      symbol: () => state.symbol,
       destroy() {
         if (legend) legend.remove();
         chart.remove();

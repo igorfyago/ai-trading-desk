@@ -304,7 +304,8 @@
     /* the Marcus bar: title truncates, the link never wraps */
     .dockbar { padding:8px 12px; font-size:10px; letter-spacing:.08em; gap:8px; }
     .dockbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .dockbar a { flex:none; white-space:nowrap; }
+    .dockbar a { flex:none; font-size:0; width:26px; text-align:center; }
+    .dockbar a::after { content:"↗"; font-size:14px; color:var(--accent); }
     .dgrid { display:flex; flex-direction:column; gap:10px; flex:none; min-height:0; }
     .pdiv { display:none; }
     .dleft { order:-2; flex:none; }              /* the chart leads on a phone */

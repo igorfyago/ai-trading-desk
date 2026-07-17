@@ -232,3 +232,11 @@ body.embed #dock { display: none !important; }
   #trade-sticky .tsk-contract { font-size: 13.5px; }
   #trade-sticky .tsk-tag { display: none; }
 }
+
+/* the mic invites: a soft green breath on the idle button — voice is the
+   suggested path, typing always works */
+#mic:not(.live):not(:disabled) { border-color: rgba(62,207,142,.5);
+  animation: micinvite 2.6s ease-in-out infinite; }
+@keyframes micinvite {
+  0%, 100% { box-shadow: 0 0 7px rgba(62,207,142,.20); }
+  50% { box-shadow: 0 0 18px rgba(62,207,142,.45); } }

@@ -17,7 +17,7 @@ const sessionId = (() => {
 let catalog = null;
 let current = null;            // {kind: 'text'|'persona', id, name, desc, hint}
 let busy = false;
-let voice = { live: false, pc: null, dc: null, mic: null, agentLine: null,
+let voice = { live: false, textOnly: false, pc: null, dc: null, mic: null, agentLine: null,
               audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
 const VOICE_IDLE_MS = 3 * 60 * 1000;   // auto-hangup: an open mic left alone is
                                        // background-noise triggers + token burn
@@ -121,10 +121,8 @@ function select(sel) {
   $("current-name").textContent = sel.name;
   $("current-desc").textContent = sel.desc;
   const voiceOnly = sel.kind === "persona";
-  $("input").disabled = voiceOnly;
-  $("send").disabled = voiceOnly;
   $("input").placeholder = voiceOnly
-    ? "Voice-native agent — press the mic and talk"
+    ? "Type here, or tap the glowing mic and talk"
     : (sel.hint ? `e.g. ${sel.hint}` : "Ask the agent…");
 }
 
@@ -163,7 +161,19 @@ const scroll = () => { $("log").scrollTop = $("log").scrollHeight; };
 
 async function send() {
   const text = $("input").value.trim();
-  if (!text || busy || !current || current.kind !== "text") return;
+  if (!text || busy || !current) return;
+  if (current.kind === "persona") {
+    // typed turn to a voice agent: rides the live call, or quietly opens a
+    // no-mic session whose replies still SPEAK
+    $("input").value = "";
+    const u = bubble("You", "user");
+    u.querySelector(".md").textContent = text;
+    if (voice.live) sendTextTurn(text);
+    else await startVoice({ withMic: false, queueText: text });
+    $("input").focus();
+    return;
+  }
+  if (current.kind !== "text") return;
   $("input").value = "";
   busy = true; $("send").disabled = true;
   const u = bubble("You", "user");
@@ -259,7 +269,12 @@ function renderApproval(b, body, memo) {
 /* -------------------------------------------------------------- voice ---- */
 
 async function toggleVoice() {
-  if (voice.live) { hangUp(); return; }
+  if (voice.live && !voice.textOnly) { hangUp(); return; }
+  if (voice.live && voice.textOnly) hangUp(true);   // typed session upgrades to a real call
+  await startVoice({ withMic: true });
+}
+
+async function startVoice({ withMic, queueText } = { withMic: true }) {
   if (!current) return;
   $("mic").disabled = true;
   $("voice-state").textContent = "connecting…";
@@ -271,18 +286,27 @@ async function toggleVoice() {
       return r.json();
     });
 
-    voice.mic = await navigator.mediaDevices.getUserMedia({ audio: true });
     voice.pc = new RTCPeerConnection();
     voice.pc.ontrack = (e) => {
       voice.audioEl = new Audio();            // kept: the ghost guard mutes it
       voice.audioEl.srcObject = e.streams[0];
       voice.audioEl.play();
     };
-    voice.mic.getTracks().forEach((t) => voice.pc.addTrack(t, voice.mic));
+    if (withMic) {
+      voice.mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voice.mic.getTracks().forEach((t) => voice.pc.addTrack(t, voice.mic));
+    } else {
+      // typed session: no microphone, the agent still SPEAKS its replies
+      voice.pc.addTransceiver("audio", { direction: "recvonly" });
+    }
     voice.dc = voice.pc.createDataChannel("oai-events");
     voice.dc.onmessage = (e) => handleVoiceEvent(JSON.parse(e.data));
-    // The agent answers the phone — it speaks FIRST, like a real receptionist.
-    voice.dc.onopen = () => voice.dc.send(JSON.stringify({ type: "response.create" }));
+    // Mic call: the agent answers the phone and speaks FIRST. Typed session:
+    // the queued message IS the opener, no greeting over it.
+    voice.dc.onopen = () => {
+      if (queueText) sendTextTurn(queueText);
+      else voice.dc.send(JSON.stringify({ type: "response.create" }));
+    };
 
     const offer = await voice.pc.createOffer();
     await voice.pc.setLocalDescription(offer);
@@ -293,11 +317,14 @@ async function toggleVoice() {
     await voice.pc.setRemoteDescription({ type: "answer", sdp });
 
     voice.live = true;
+    voice.textOnly = !withMic;
     voice.lastActivity = Date.now();
-    $("mic").classList.add("live");
-    $("voice-state").textContent = `voice live — ${sess.label}`;
+    if (withMic) $("mic").classList.add("live");
+    $("voice-state").textContent = withMic
+      ? `voice live — ${sess.label}` : `chat live · replies speak — ${sess.label}`;
     $("voice-state").classList.add("live");
-    divider(`voice call started — ${sess.label}`);
+    divider(withMic ? `voice call started — ${sess.label}`
+                    : `chat started · ${sess.label} answers out loud`);
   } catch (err) {
     $("voice-state").textContent = "voice error: " + err.message;
     hangUp(true);
@@ -305,12 +332,23 @@ async function toggleVoice() {
   $("mic").disabled = false;
 }
 
+function sendTextTurn(text) {
+  voice.dc.send(JSON.stringify({
+    type: "conversation.item.create",
+    item: { type: "message", role: "user",
+            content: [{ type: "input_text", text }] },
+  }));
+  voice.expectReply = true;
+  voice.lastActivity = Date.now();
+  voice.dc.send(JSON.stringify({ type: "response.create" }));
+}
+
 function hangUp(silent) {
   voice.dc?.close(); voice.pc?.close();
   voice.mic?.getTracks().forEach((t) => t.stop());
   voice.audioEl?.pause();
   const wasLive = voice.live;
-  voice = { live: false, pc: null, dc: null, mic: null, agentLine: null,
+  voice = { live: false, textOnly: false, pc: null, dc: null, mic: null, agentLine: null,
             audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
   $("mic").classList.remove("live");
   if (!silent) {

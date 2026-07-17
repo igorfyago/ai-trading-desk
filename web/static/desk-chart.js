@@ -66,7 +66,8 @@
     // VRVP: cyan up / pink down, Value-Area rows bright, the rest faint
     profUp: "rgba(38,198,218,0.25)", profDn: "rgba(236,64,122,0.25)",
     profUpVA: "rgba(38,198,218,0.70)", profDnVA: "rgba(236,64,122,0.70)",
-    eth: "rgba(251,140,0,0.045)",                        // pre/post backdrop tint
+    eth: "rgba(251,140,0,0.045)",                        // stocks: warm pre/post
+    ethFut: "rgba(41,98,255,0.05)",                      // futures: cool overnight
   };
 
   /* ------------------------------------------------------------ studies ---- */
@@ -103,13 +104,27 @@
   }
 
   function vwapBands(bars) {
-    // Session-anchored VWAP + volume-weighted σ bands. Session = NY trading
-    // day (UTC-4 approximation is fine for an index chart).
+    // TV's "VWAP Auto Anchored" — the house setup: anchor at the most recent
+    // pivot high/low (14 bars each side, the script's Length), then cumulative
+    // hlc3 VWAP + volume-weighted σ bands from the anchor forward. Nothing is
+    // drawn before the anchor — no stale flat lines dragging across sessions,
+    // and it works identically for 24h futures and equities.
+    const L = 14, n = bars.length;
     const v = [], u1 = [], d1 = [], u2 = [], d2 = [];
-    let day = null, pv = 0, vol = 0, m2 = 0;
-    for (const b of bars) {
-      const d = Math.floor((b.t - 4 * 3600) / 86400);
-      if (d !== day) { day = d; pv = 0; vol = 0; m2 = 0; }
+    if (!n) return { v, u1, d1, u2, d2 };
+    let anchor = 0;
+    for (let i = n - 1 - L; i >= L; i--) {
+      let hi = true, lo = true;
+      for (let j = i - L; j <= i + L && (hi || lo); j++) {
+        if (j === i) continue;
+        if (bars[j].h >= bars[i].h) hi = false;
+        if (bars[j].l <= bars[i].l) lo = false;
+      }
+      if (hi || lo) { anchor = i; break; }
+    }
+    let pv = 0, vol = 0, m2 = 0;
+    for (let i = anchor; i < n; i++) {
+      const b = bars[i];
       const tp = (b.h + b.l + b.c) / 3, w = b.v || 1;
       pv += tp * w; vol += w;
       const vw = pv / vol;
@@ -169,6 +184,15 @@
     if (wd === "Sat" || wd === "Sun") return true;
     const hm = parseInt(get("hour"), 10) * 60 + parseInt(get("minute"), 10);
     return hm < 9 * 60 + 30 || hm >= 16 * 60;
+  }
+
+  /* session-tint flavor per instrument: futures nights are cool, stock
+     pre/post is warm, crypto never sleeps so it never tints */
+  function tintFor(sym) {
+    const s = (sym || "").toUpperCase();
+    if (/^(BTC|ETH|SOL|DOGE)/.test(s)) return null;
+    if (/1!$|=F$/.test(s)) return "fut";
+    return "eq";
   }
 
   function computeHA(bars) {
@@ -357,7 +381,7 @@
                         const pad = rg.halfStepPx || 3;
                         const a = ((x0 === null ? 0 : x0) - pad) * hpr;
                         const b = ((x1 === null ? bitmapSize.width / hpr : x1) + pad) * hpr;
-                        ctx.fillStyle = FIXED.eth;
+                        ctx.fillStyle = state.ethColor || FIXED.eth;
                         ctx.fillRect(a, 0, Math.max(1, b - a), bitmapSize.height);
                       }
                       const dp = state.dcPts;
@@ -602,7 +626,9 @@
       // extended-hours ranges (intraday): consecutive pre/post bars, in
       // display time, for the backdrop tint
       state.ethRanges = null;
-      if (intraday) {
+      const tint = tintFor(state.symbol);
+      state.ethColor = tint === "fut" ? FIXED.ethFut : FIXED.eth;
+      if (intraday && tint) {
         const rgs = [];
         let cur = null;
         for (let i = 0; i < state.bars.length; i++) {
@@ -619,6 +645,7 @@
     function setData(bars, intervalSec, extra) {
       if (intervalSec) state.intervalSec = intervalSec;
       state.daily = !!(extra && extra.daily) || state.intervalSec >= 86400;
+      const symChanged = !!(extra && extra.symbol && extra.symbol !== state.symbol);
       if (extra && extra.symbol) state.symbol = extra.symbol;
       if (extra && extra.label) state.ivLabel = extra.label;
       state.bars = (bars || []).map((b) => ({ ...b }));   // own copies; ticks mutate
@@ -632,6 +659,15 @@
       if (full) state.profile = computeProfile(state.bars, 75);
       applyMarkers();
       paintLegend(null);
+      if (symChanged) {
+        // new instrument, new price regime (SPY ~745 vs ES ~7500): snap the
+        // scales back to auto so the chart refocuses instead of squashing
+        try {
+          chart.priceScale("right").applyOptions({ autoScale: true });
+          chart.timeScale().resetTimeScale();
+          chart.timeScale().scrollToRealTime();
+        } catch { /* cosmetic */ }
+      }
     }
 
     function applyTick(price, tsSec) {

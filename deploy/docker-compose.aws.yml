@@ -178,9 +178,18 @@ services:
       MINIBANK_KAFKA: minibank-kafka:9092
       MINIBANK_POOL: "10"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}     # Rita, the support agent (read-only, metered)
+      FX_URL: http://minibank-fx:8090         # the FX microservice · its own container
       JAVA_TOOL_OPTIONS: "-Xmx256m"
     ports:
       - "127.0.0.1:8085:8080"             # debugging only; caddy proxies internally
+
+  minibank-fx:
+    build: ../../minibank/ledger-service
+    restart: unless-stopped
+    entrypoint: ["java", "-cp", "classes:deps/*", "dev.minibank.fx.FxService"]
+    environment:
+      FX_PORT: "8090"
+      JAVA_TOOL_OPTIONS: "-Xmx48m"
 
   caddy:
     image: caddy:2-alpine

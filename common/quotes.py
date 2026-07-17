@@ -553,6 +553,16 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
     rows = []
     for s in syms:
         q = quotes_out.get(s)
+        # FRESHEST PRINT WINS ACROSS ROUNDS: after the bell alpaca's free feed
+        # re-serves the frozen 16:00 print while yahoo's rescue (bounded per
+        # round) has already given us the extended tape. An OLDER print must
+        # never displace the newer one we hold — that regression is what made
+        # ext values and session dots flap back to blanks.
+        prior = _last_watch_row.get(s)
+        if (q and prior and prior.get("ts")
+                and _age_s(prior["ts"]) < _age_s(q["ts"]) - 1):
+            rows.append(dict(prior))
+            continue
         row: dict = {"sym": s}
         if q:
             row.update({"price": q["price"], "ts": q["ts"],

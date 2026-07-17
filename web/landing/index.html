@@ -1083,9 +1083,12 @@
       const d = await fetch(`${API}/api/watch?symbols=${encodeURIComponent(syms.join(","))}`)
         .then(r => r.json());
       for (const r of d.rows || []) {
-        // belt to the server's retention: a row without a price NEVER
-        // overwrites a row that had one
-        wlQuotes[r.sym] = r.price != null ? r : { ...wlQuotes[r.sym], ...r };
+        // belts to the server's retention: an OLDER print never overwrites a
+        // newer one (ISO ts compares lexicographically), and a row without a
+        // price never overwrites a row that had one
+        const old = wlQuotes[r.sym];
+        if (old && old.ts && r.ts && r.ts < old.ts) continue;
+        wlQuotes[r.sym] = r.price != null ? r : { ...old, ...r };
       }
       if (WL.sort) wlRender(); else wlPatch();
       warmLogos();

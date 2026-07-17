@@ -161,6 +161,7 @@ def test_watch_quotes_batches_and_maps(monkeypatch):
         "delayed": False, "session": "post"})
     monkeypatch.setattr(quotes, "_closes", lambda s: (80.0, 90.0))
     quotes._watch_cache = None
+    quotes._last_watch_row.clear()
     rows = quotes.watch_quotes(["NASDAQ:TSLA", "BTCUSD", "TSLA"])   # dedup
     assert [r["sym"] for r in rows] == ["TSLA", "BTCUSD"]
     assert rows[0]["chg_pct"] == 25.0                    # vs prev close 80
@@ -194,6 +195,7 @@ def test_watch_quotes_rescues_frozen_prints(monkeypatch):
                 "ts": (now - timedelta(hours=3)).isoformat(),
                 "source": "alpaca·iex", "delayed": False, "session": "rth"}})
     quotes._watch_cache = None
+    quotes._last_watch_row.clear()
     quotes._rescue_at.clear()
     rows = quotes.watch_quotes(["SPY"])
     assert rows[0]["price"] == 749.0 and calls["yahoo"] == 1
@@ -204,6 +206,7 @@ def test_watch_quotes_rescues_frozen_prints(monkeypatch):
                 "ts": (now - timedelta(minutes=15)).isoformat(),
                 "source": "alpaca·sip15", "delayed": True, "session": "post"}})
     quotes._watch_cache = None
+    quotes._last_watch_row.clear()
     rows = quotes.watch_quotes(["SPY"])
     assert rows[0]["price"] == 750.2 and calls["yahoo"] == 1
 
@@ -213,6 +216,7 @@ def test_watch_quotes_rescues_frozen_prints(monkeypatch):
                 "ts": (now - timedelta(hours=40)).isoformat(),
                 "source": "alpaca·sip15", "delayed": True, "session": "post"}})
     quotes._watch_cache = None
+    quotes._last_watch_row.clear()
     quotes._rescue_at.clear()
     rows = quotes.watch_quotes(["SPY"])
     assert rows[0]["price"] == 748.0 and calls["yahoo"] == 1
@@ -245,3 +249,45 @@ def test_extract_tickers_universe_and_ambiguity():
     assert registry.extract_tickers("check $now") == ["NOW"]
     assert "ES1!" in registry.extract_tickers("es1! overnight")
     assert registry.extract_tickers("spy leads") == ["SPY"]
+
+
+def test_watch_rows_never_regress_to_an_older_print(monkeypatch):
+    """The 24h contract: once the extended tape has printed, a provider round
+    that re-serves the FROZEN close (older ts) must not blank ext or flip the
+    session dot back - the freshest known print wins across rounds."""
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("QUOTES_PROVIDER", "auto")
+    monkeypatch.setenv("ALPACA_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    now = datetime.now(timezone.utc)
+    fresh = (now - timedelta(minutes=1)).isoformat()
+    frozen = (now - timedelta(hours=4)).isoformat()
+    monkeypatch.setattr(quotes, "_closes", lambda s: (330.0, 333.25))
+    quotes._watch_cache = None
+    quotes._last_watch_row.clear()
+
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "AAPL": {"ticker": "AAPL", "price": 333.75, "ts": fresh,
+                 "source": "yahoo", "delayed": False, "session": "post"}})
+    r1 = quotes.watch_quotes(["AAPL"])[0]
+    assert r1["session"] == "post" and r1["ext_pct"] is not None
+
+    quotes._watch_cache = None
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "AAPL": {"ticker": "AAPL", "price": 333.25, "ts": frozen,
+                 "source": "alpaca", "delayed": False, "session": "rth"}})
+    monkeypatch.setattr(quotes, "_spot_yahoo",
+                        lambda s: (_ for _ in ()).throw(RuntimeError("down")))
+    r2 = quotes.watch_quotes(["AAPL"])[0]
+    assert r2["price"] == 333.75 and r2["session"] == "post"
+    assert r2["ext_pct"] == r1["ext_pct"]
+
+    # and a genuinely NEWER print flows through normally
+    quotes._watch_cache = None
+    newer = (now + timedelta(seconds=5)).isoformat()
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "AAPL": {"ticker": "AAPL", "price": 334.10, "ts": newer,
+                 "source": "yahoo", "delayed": False, "session": "post"}})
+    r3 = quotes.watch_quotes(["AAPL"])[0]
+    assert r3["price"] == 334.10

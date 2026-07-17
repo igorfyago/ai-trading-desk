@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Trading Desk — talk to the agents</title>
+<title>AI Trading Desk · talk to the agents</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
@@ -16,11 +16,11 @@
   <aside id="sidebar">
     <div id="brand">
       <h1>AI TRADING <span>DESK</span></h1>
-      <p>Six agents, one conversation.<br>Type to any of them — or press the mic and talk.</p>
+      <p>Six agents, one conversation.<br>Type to any of them, or press the mic and talk.</p>
     </div>
-    <div class="section-label">📈 Finance desk — text</div>
+    <div class="section-label">📈 Finance desk · text</div>
     <nav id="text-agents"></nav>
-    <div class="section-label">📈 Finance desk — voice</div>
+    <div class="section-label">📈 Finance desk · voice</div>
     <nav id="finance-voice"></nav>
     <div class="section-label">🏢 Voice agency demos</div>
     <nav id="agency-personas"></nav>
@@ -28,7 +28,7 @@
     <nav id="custom-personas"></nav>
     <button class="agent-btn" id="open-builder" style="margin-top:6px">
       <div class="lvl">＋</div><div><div class="nm">Build an agent</div>
-      <div class="ds">name it, give it a voice &amp; tools — talk to it</div></div>
+      <div class="ds">name it, give it a voice &amp; tools, then talk to it</div></div>
     </button>
     <div id="theme-dots"></div>
     <footer>
@@ -44,17 +44,17 @@
         <div id="current-desc"></div>
       </div>
       <div id="spy-chip" title="market feed"></div>
-      <div id="score-chip" title="net P&L — realized + open"></div>
+      <div id="score-chip" title="net P&L: realized + open"></div>
       <div id="voice-state"></div>
     </header>
     <div id="dock" hidden>
       <div id="dock-head">
         <span id="dock-status"></span>
-        <span id="dock-title">—</span>
+        <span id="dock-title">–</span>
         <span id="dock-note"></span>
         <span id="dock-pnl"></span>
         <span class="dock-btns">
-          <button id="dock-pop" title="Pop out — floats above every tab and app">⧉</button>
+          <button id="dock-pop" title="Pop out: floats above every tab and app">⧉</button>
           <button id="dock-min" title="Collapse to a pill">▾</button>
         </span>
       </div>
@@ -73,11 +73,11 @@
     <h2>Build an agent</h2>
     <p class="bsub">Pick a voice, write the personality, choose its tools. It appears in the
        sidebar and you can talk to it immediately. Creating requires the admin token.</p>
-    <label>Name <input id="b-name" placeholder="e.g. Nova — AI Concierge"></label>
+    <label>Name <input id="b-name" placeholder="e.g. Nova · AI Concierge"></label>
     <label>Tagline <input id="b-tag" placeholder="one line shown in the sidebar"></label>
     <label>Voice <select id="b-voice"></select></label>
     <label>Personality &amp; instructions
-      <textarea id="b-instr" rows="6" placeholder="Who is this agent? How do they speak? What's their job? (speech mechanics — confidence, turn-taking, noise handling — are added automatically)"></textarea></label>
+      <textarea id="b-instr" rows="6" placeholder="Who is this agent? How do they speak? What's their job? (speech mechanics: confidence, turn-taking, noise handling are added automatically)"></textarea></label>
     <div class="section-label" style="margin:10px 0 6px">Tools</div>
     <div id="b-tools"></div>
     <label style="margin-top:10px">Admin token <input id="b-token" type="password" placeholder="admin token required"></label>
@@ -91,6 +91,6 @@
 <script src="/static/themes.js?v=4"></script>
 <script src="/static/vendor/lightweight-charts.standalone.production.js?v=520"></script>
 <script src="/static/desk-chart.js?v=14"></script>
-<script src="/static/app.js?v=8"></script>
+<script src="/static/app.js?v=9"></script>
 </body>
 </html>

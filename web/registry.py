@@ -111,7 +111,7 @@ def runtime() -> dict:
             return _rt
         import os
         if not os.getenv("OPENAI_API_KEY"):
-            raise RuntimeError("OPENAI_API_KEY is not set on the server — add it to .env")
+            raise RuntimeError("OPENAI_API_KEY is not set on the server: add it to .env")
         from langgraph.checkpoint.memory import InMemorySaver
 
         brief = _load("agent_brief", "agents/01_market_brief/main.py")

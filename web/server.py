@@ -125,7 +125,7 @@ def ticker_summary(ticker: str):
 
     snap = market.latest_snapshot(ticker)
     if snap is None:
-        raise HTTPException(404, f"no data for '{ticker}' — covered: SPY, QQQ, IWM")
+        raise HTTPException(404, f"no data for '{ticker}' · covered: SPY, QQQ, IWM")
     feed = market.resolve_feed(ticker)[0]
     return {
         "snapshot": snap,

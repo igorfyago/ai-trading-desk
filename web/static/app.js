@@ -24,7 +24,7 @@ const VOICE_IDLE_MS = 3 * 60 * 1000;   // auto-hangup: an open mic left alone is
 setInterval(() => {
   if (voice.live && Date.now() - voice.lastActivity > VOICE_IDLE_MS) {
     hangUp();
-    divider("call ended — idle for 3 minutes");
+    divider("call ended · idle for 3 minutes");
   }
 }, 15000);
 
@@ -99,7 +99,7 @@ async function loadHistory() {
       if (m.role === "user") b.querySelector(".md").textContent = m.content;
       else b.querySelector(".md").innerHTML = md(m.content);
     }
-    divider("live — same conversation on every screen");
+    divider("live · same conversation on every screen");
   } catch { /* fresh start is fine */ }
 }
 
@@ -131,7 +131,7 @@ function select(sel) {
 function divider(text) {
   const d = document.createElement("div");
   d.className = "divider";
-  d.textContent = `— ${text} —`;
+  d.textContent = `· ${text} ·`;
   $("log").appendChild(d);
 }
 
@@ -243,7 +243,7 @@ function renderApproval(b, body, memo) {
   );
   const box = document.createElement("div");
   box.className = "approval";
-  box.innerHTML = `<h4>Human in the loop — your call</h4>
+  box.innerHTML = `<h4>Human in the loop: your call</h4>
     <div class="btns">
       <button class="ok">Approve & publish</button>
       <button class="rev">Request changes</button>
@@ -321,9 +321,9 @@ async function startVoice({ withMic, queueText } = { withMic: true }) {
     voice.lastActivity = Date.now();
     if (withMic) $("mic").classList.add("live");
     $("voice-state").textContent = withMic
-      ? `voice live — ${sess.label}` : `chat live · replies speak — ${sess.label}`;
+      ? `voice live · ${sess.label}` : `chat live · replies speak · ${sess.label}`;
     $("voice-state").classList.add("live");
-    divider(withMic ? `voice call started — ${sess.label}`
+    divider(withMic ? `voice call started · ${sess.label}`
                     : `chat started · ${sess.label} answers out loud`);
   } catch (err) {
     $("voice-state").textContent = "voice error: " + err.message;
@@ -550,7 +550,7 @@ function tradeStickyFromTrade(t) {
   if (!t || !t.strike) return;
   const cond = t.status === "quoted" ? (t.quoted_px ? `@ ${t.quoted_px} · as quoted` : "as quoted")
     : t.status === "opened" ? `IN @ ${t.entry_px}`
-    : t.status === "trimmed" ? "half off — runner rides"
+    : t.status === "trimmed" ? "half off · runner rides"
     : t.status === "closed" ? `flat · ${fmtUsd(t.realized_usd)}` : t.status;
   renderTradeSticky({
     contract: dockContract(t), cond, kind: t.kind, done: t.status === "closed",
@@ -615,7 +615,7 @@ $("b-create").onclick = async () => {
     });
     const d = await resp.json();
     if (!resp.ok) throw new Error(d.detail || "failed");
-    msg.className = "ok"; msg.textContent = `created "${d.label}" — it's in the sidebar`;
+    msg.className = "ok"; msg.textContent = `created "${d.label}", it's in the sidebar`;
     await boot();
     setTimeout(() => $("builder-overlay").classList.remove("open"), 900);
   } catch (e) { msg.textContent = e.message; }
@@ -771,10 +771,10 @@ function handleDeskEvent(d) {
     dockChartBoot(d.trade.underlying);
     tradeStickyFromTrade(d.trade);
     const lines = {
-      quoted: `Marcus pinned ${dockContract(d.trade)} ~${d.trade.quoted_px} — on the chart ↑`,
-      opened: `you're IN ${dockContract(d.trade)} @ ${d.trade.entry_px} — monitoring P&L ↑`,
-      trimmed: `half off @ ${d.trade.trim_px} — runner rides`,
-      closed: `flat — ${fmtUsd(d.trade.realized_usd)} on the trade`,
+      quoted: `Marcus pinned ${dockContract(d.trade)} ~${d.trade.quoted_px} · on the chart ↑`,
+      opened: `you're IN ${dockContract(d.trade)} @ ${d.trade.entry_px} · monitoring P&L ↑`,
+      trimmed: `half off @ ${d.trade.trim_px} · runner rides`,
+      closed: `flat · ${fmtUsd(d.trade.realized_usd)} on the trade`,
     };
     if (lines[d.event]) divider(lines[d.event]);
     return;

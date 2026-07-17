@@ -147,7 +147,7 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         else:
             rationale = (f"Dealers are SHORT gamma (net GEX {snap['net_gex_total']:+,.0f}); their "
                          f"hedging amplifies moves. No usable flip on this snapshot "
-                         f"({'absent' if flip_raw is None else 'sitting on price'} — the level "
+                         f"({'absent' if flip_raw is None else 'sitting on price'}: the level "
                          f"carries no direction), so the side comes from the desk signal "
                          f"({score:+.0f}). Target: the {'call' if bullish else 'put'} wall.")
     else:

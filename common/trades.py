@@ -130,7 +130,7 @@ def confirm_entry(session: str, fill_price: float | None = None,
                   contracts: int | None = None) -> dict:
     trade = _latest(session, ("quoted",))
     if trade is None:
-        return {"error": "no quoted trade to confirm — ask for the trade first"}
+        return {"error": "no quoted trade to confirm, ask for the trade first"}
     now = _now()
     entry = round(float(fill_price), 2) if fill_price is not None else trade["quoted_px"]
     total = int(contracts) if contracts else trade["contracts_total"]
@@ -264,7 +264,7 @@ def book_block() -> str:
         lines.append(
             f"- {r['contract_ticker']} {r['strike']:g}{r['kind'][0]} x{r['contracts_open']}"
             f" @ {r['entry_px']} ({r['status']}), {mark}{pnl}"
-            + (" — TP ZONE (+50% trim level hit)" if r["tp_hit"] else ""))
+            + (" · TP ZONE (+50% trim level hit)" if r["tp_hit"] else ""))
     return (f"OPEN BOOK ({len(rows)} position{'s' if len(rows) != 1 else ''}, "
             f"net P&L {s['score']:+.0f} USD, realized {s['realized_usd']:+.0f}):\n"
             + "\n".join(lines))
@@ -305,7 +305,7 @@ def adjust(trade_id: int, action: str, qty: int | None = None,
     elif action == "sell":
         if t["status"] == "quoted":
             conn.close()
-            return {"error": "nothing filled yet — ADD first"}
+            return {"error": "nothing filled yet, ADD first"}
         sold = min(qty, t["contracts_open"])
         remaining = t["contracts_open"] - sold
         realized = t["realized_usd"] + (px - t["entry_px"]) * 100 * sold

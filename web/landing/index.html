@@ -259,9 +259,19 @@
   @media (max-width:700px){
     nav { width:44px; padding:20px 6px; }
     main { margin-left:44px; }
-    #g-score { top:8px; right:8px; padding:5px 10px; font-size:11px; }
     #dash { overflow-y:auto; overflow-x:hidden; padding:10px 10px 46px; }
-    .dtop { padding-right:0; gap:8px; }
+    /* the control strip: ONE swipeable row, the P&L chip seated at its right
+       edge like part of the strip — nothing wraps, nothing overlaps */
+    #g-score { top:12px; right:10px; padding:5px 12px; font-size:11.5px; }
+    .dtop { flex:none; flex-wrap:nowrap; overflow-x:auto; gap:6px; margin-right:90px;
+            padding:2px 8px 2px 0; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    .dtop::-webkit-scrollbar { display:none; }
+    .dtop .watch { flex-wrap:nowrap; flex:none; gap:6px; margin-left:0 !important; }
+    .dtop .wchip { padding:5px 12px; font-size:12px; white-space:nowrap; }
+    /* the Marcus bar: title truncates, the link never wraps */
+    .dockbar { padding:8px 12px; font-size:10px; letter-spacing:.08em; gap:8px; }
+    .dockbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .dockbar a { flex:none; white-space:nowrap; }
     .dgrid { display:flex; flex-direction:column; gap:10px; flex:none; min-height:0; }
     .pdiv { display:none; }
     .dleft { order:-1; flex:none; }              /* the chart leads on a phone */

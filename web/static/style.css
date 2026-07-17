@@ -218,3 +218,17 @@ body.embed #dock { display: none !important; }
 @keyframes tskpulse-r {
   0%, 100% { box-shadow: 0 0 14px rgba(244,101,127,.24); }
   50% { box-shadow: 0 0 26px rgba(244,101,127,.46); } }
+
+/* ---- phone / narrow embed: the header stacks instead of colliding ---- */
+@media (max-width: 480px) {
+  #chat-header { flex-wrap: wrap; gap: 6px 10px; }
+  #current-name { font-size: 14px; }
+  #current-desc { display: none; }          /* the pitch line is noise on a phone */
+  #spy-chip { flex: 1 1 100%; order: 9; text-align: center; white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; border-radius: 8px;
+              padding: 5px 10px; font-size: 11.5px; }
+  #voice-state { font-size: 11.5px; }
+  #trade-sticky { max-width: 98%; padding: 9px 12px; gap: 9px; }
+  #trade-sticky .tsk-contract { font-size: 13.5px; }
+  #trade-sticky .tsk-tag { display: none; }
+}

@@ -279,8 +279,10 @@ def watch(symbols: str = ""):
 # CDNs, cached on DISK forever, served with long-lived cache headers. A miss
 # falls back to a generated monogram SVG so every row always has an icon.
 
-_LOGO_DIR = STATIC / "logo-cache"
-_LOGO_DIR.mkdir(exist_ok=True)
+from common.db import DATA_DIR as _DATA_DIR  # noqa: E402
+
+_LOGO_DIR = _DATA_DIR / "logos"              # the deskdata volume: survives rebuilds
+_LOGO_DIR.mkdir(parents=True, exist_ok=True)
 _LOGO_SOURCES = [
     "https://assets.parqet.com/logos/symbol/{sym}?format=png",
     "https://financialmodelingprep.com/image-stock/{sym}.png",

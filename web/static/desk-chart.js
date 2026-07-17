@@ -717,15 +717,19 @@
       recomputeProfile();
       applyMarkers();
       paintLegend(null);
-      if (symChanged) {
-        // new instrument, new price regime (SPY ~745 vs ES ~7500): snap the
-        // scales back to auto so the chart refocuses instead of squashing
-        try {
-          chart.priceScale("right").applyOptions({ autoScale: true });
-          chart.timeScale().resetTimeScale();
-          chart.timeScale().scrollToRealTime();
-        } catch { /* cosmetic */ }
-      }
+      // PRESENTATION: land already framed, no drag needed. An interval-sized
+      // lookback (45m ≈ the last 3 days), the price scale auto-fit to what's
+      // visible, and the last candle pushed LEFT so the volume profile's
+      // right-edge zone never covers the live tape.
+      const LOOKBACK = { 300: 78, 900: 96, 2700: 66, 14400: 42, 86400: 130 };
+      const win = LOOKBACK[state.intervalSec] || 80;
+      const pad = Math.round(win * 0.5);      // profile owns the right ~third
+      const nb = state.bars.length;
+      try {
+        chart.priceScale("right").applyOptions({ autoScale: true });
+        chart.timeScale().setVisibleLogicalRange(
+          { from: Math.max(0, nb - win), to: nb - 1 + pad });
+      } catch { /* cosmetic */ }
     }
 
     function applyTick(price, tsSec, symbol) {
@@ -785,6 +789,26 @@
       if (state.bars.length) repaintCandles();
     }
 
+    // TWO price lines after the bell, like TV: the frozen REGULAR CLOSE
+    // (dashed, dim) plus the live extended print, whose line takes the
+    // session's color: orange for pre/post, blue for the overnight tape.
+    let closeLine = null, lastSessKey = "";
+    function setSessionInfo(info) {
+      const key = info ? `${info.session}|${info.close}` : "";
+      if (key === lastSessKey) return;
+      lastSessKey = key;
+      const sess = info && info.session;
+      const col = sess === "overnight" ? "#4fc3f7"
+        : (sess === "pre" || sess === "post") ? "#ffb154" : "";
+      try { candles.applyOptions({ priceLineColor: col }); } catch { /* older lib */ }
+      if (closeLine) { candles.removePriceLine(closeLine); closeLine = null; }
+      if (info && info.close && sess && sess !== "rth") {
+        closeLine = candles.createPriceLine({
+          price: info.close, color: "rgba(255,255,255,.45)", lineWidth: 1,
+          lineStyle: 1, axisLabelVisible: true, title: "close" });
+      }
+    }
+
     function setLevels(levels) {
       for (const l of state.priceLines) candles.removePriceLine(l);
       state.priceLines = (levels || []).filter((l) => l && l.price).map((l) =>
@@ -818,7 +842,7 @@
     }
 
     return {
-      chart, setData, applyTick, setLevels, setMarkers, setHeikin,
+      chart, setData, applyTick, setLevels, setMarkers, setHeikin, setSessionInfo,
       setIntervalSec: (s) => { state.intervalSec = s; },
       lastBar: () => (state.bars.length ? { ...state.bars[state.bars.length - 1] } : null),
       symbol: () => state.symbol,

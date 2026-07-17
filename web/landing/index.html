@@ -942,6 +942,30 @@
     return out;
   }
 
+  function wlAllSyms() {
+    // EVERY symbol, collapsed sections included: one batched provider call
+    // covers 150, so hidden rows arrive pre-priced before they're expanded
+    const out = [];
+    for (const sec of WL.sections) sec.items.forEach(i => out.push(i.s));
+    if (!out.includes(focus)) out.push(focus);
+    return out.slice(0, 150);
+  }
+
+  let logosWarmed = false;
+  function warmLogos() {
+    // trickle-fetch every logo once; the server caches them on disk forever
+    if (logosWarmed) return;
+    logosWarmed = true;
+    const syms = wlAllSyms();
+    let i = 0;
+    (function step() {
+      for (let k = 0; k < 6 && i < syms.length; k++, i++) {
+        new Image().src = `${API}/api/logo/${encodeURIComponent(syms[i])}`;
+      }
+      if (i < syms.length) setTimeout(step, 350);
+    })();
+  }
+
   const wlFmt = (v, d = 2) => v == null ? "–"
     : v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 
@@ -1053,7 +1077,7 @@
 
   async function wlPoll() {
     if (document.hidden || !document.querySelector("#dash.active")) return;
-    const syms = wlVisibleSyms();
+    const syms = wlAllSyms();   // collapsed sections stay warm too
     if (!syms.length) return;
     try {
       const d = await fetch(`${API}/api/watch?symbols=${encodeURIComponent(syms.join(","))}`)
@@ -1064,7 +1088,12 @@
         wlQuotes[r.sym] = r.price != null ? r : { ...wlQuotes[r.sym], ...r };
       }
       if (WL.sort) wlRender(); else wlPatch();
-    } catch { /* provider hiccup — next tick */ }
+      warmLogos();
+      const fq = wlQuotes[focus];
+      if (deskChart && fq && (!deskChart.symbol || deskChart.symbol() === focus)) {
+        deskChart.setSessionInfo({ close: fq.reg_close, session: fq.session });
+      }
+    } catch { /* provider hiccup: next tick */ }
   }
 
   function wlRemove(sec, sym) {
@@ -1529,7 +1558,7 @@
       document.head.appendChild(s);
     });
     chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
-      .then(() => load(`${API}/static/desk-chart.js?v=14`))
+      .then(() => load(`${API}/static/desk-chart.js?v=15`))
       .catch((err) => { chartLib = null; throw err; });  // one failed load must not poison every future mount
     return chartLib;
   }
@@ -1597,6 +1626,10 @@
         if (deskChart) {
           const ts = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : 0;
           deskChart.applyTick(d.price, ts, d.ticker);
+          if (!deskChart.symbol || deskChart.symbol() === focus) {
+            deskChart.setSessionInfo({ close: (wlQuotes[focus] || {}).reg_close,
+                                       session: d.session });
+          }
         }
       }
     };

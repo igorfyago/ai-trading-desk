@@ -17,10 +17,12 @@ the web server runs watch_loop() to push ticks onto the bus for SSE clients.
 QUOTES_PROVIDER=off kills all network (tests / CI).
 """
 
+import json
 import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 
@@ -464,7 +466,17 @@ _closes_cache: dict[str, tuple[float, float | None, float | None]] = {}
 _CLOSES_TTL = 2 * 3600.0     # prev-close changes once a session
 _watch_cache: tuple[float, tuple, list] | None = None   # (t, key, rows)
 _rescue_at: dict[str, float] = {}    # sym -> last stale-rescue (monotonic)
-_last_watch_row: dict[str, dict] = {}   # sym -> last COMPLETE row (blank-proofing)
+
+# sym -> last COMPLETE row: the blank-proofing memory, persisted to disk so a
+# container restart in the middle of the night still knows every last print
+_WATCH_FILE = Path(__file__).resolve().parent.parent / "data" / "watch-last.json"
+try:
+    _last_watch_row: dict[str, dict] = json.loads(_WATCH_FILE.read_text())
+    for _r in _last_watch_row.values():
+        _r["held"] = True
+except Exception:
+    _last_watch_row = {}
+_watch_saved = 0.0
 
 
 def _closes(symbol: str) -> tuple[float | None, float | None]:
@@ -549,6 +561,8 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
             if prev:
                 row["chg"] = round(q["price"] - prev, 2)
                 row["chg_pct"] = round((q["price"] / prev - 1) * 100, 2)
+            if reg:
+                row["reg_close"] = reg
             if (reg and q.get("session") in ("pre", "post", "overnight")
                     and abs(q["price"] - reg) > 1e-9):
                 row["ext_pct"] = round((q["price"] / reg - 1) * 100, 2)
@@ -556,7 +570,7 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
             # carry chg/ext forward while the session hasn't changed
             held = _last_watch_row.get(s)
             if held and held.get("session") == row.get("session"):
-                for k in ("chg", "chg_pct", "ext_pct"):
+                for k in ("chg", "chg_pct", "ext_pct", "reg_close"):
                     if k not in row and k in held:
                         row[k] = held[k]
             _last_watch_row[s] = row
@@ -566,6 +580,16 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
             row = {**_last_watch_row[s], "held": True}
         rows.append(row)
     _watch_cache = (now, key, rows)
+    global _watch_saved
+    if time.time() - _watch_saved > 60 and _last_watch_row:
+        _watch_saved = time.time()
+        try:
+            _WATCH_FILE.parent.mkdir(exist_ok=True)
+            _WATCH_FILE.write_text(json.dumps(
+                {k: {kk: vv for kk, vv in v.items() if kk != "held"}
+                 for k, v in _last_watch_row.items()}))
+        except Exception:
+            pass
     return rows
 
 

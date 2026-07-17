@@ -438,6 +438,7 @@ async function runVoiceTool(item) {
     }).then((r) => r.json());
     output = res.output;
   }
+  if (item.name === "trade_recommendation") tradeStickyFromPayload(output);
   voice.dc.send(JSON.stringify({
     type: "conversation.item.create",
     item: { type: "function_call_output", call_id: item.call_id, output },
@@ -447,6 +448,82 @@ async function runVoiceTool(item) {
 }
 
 const LEVEL_COLORS = { green: "--green", red: "--red", accent: "--accent", dim: "--dim" };
+
+/* ------------------------------------------------- the trade sticky ----
+   Marcus's call, pinned in the conversation until the position is flat.
+   "XSP 746p @ 2.30 · now" / "XSP 746p @ 2.30 · if a 15m thick closes 746.62" */
+
+function renderTradeSticky(s) {
+  const log = $("log");
+  if (!log) return;
+  let el = $("trade-sticky");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "trade-sticky";
+    el.innerHTML = `<span class="tsk-dot"></span><span class="tsk-contract"></span>
+      <span class="tsk-cond"></span><span class="tsk-tag">the call</span>`;
+    el.onclick = () => {
+      const lv = el._levels;
+      if (lv && lv.length && !el.classList.contains("done")) drawCallerLevels({ levels: lv });
+    };
+    log.prepend(el);
+  }
+  el.className = s.kind === "call" ? "call" : s.kind === "put" ? "put" : "";
+  if (s.done) el.classList.add("done");
+  el.querySelector(".tsk-contract").textContent = s.contract;
+  el.querySelector(".tsk-cond").textContent = s.cond ? `· ${s.cond}` : "";
+  el.querySelector(".tsk-tag").textContent = s.tag || "the call";
+  el._levels = s.levels || [];
+}
+
+function tradeStickyFromPayload(raw) {
+  try {
+    const p = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const x = p.execution;
+    if (!x || !x.strike) return;
+    const px = Number(x.entry_option_price_est);
+    const cp = x.contract_plan || {};
+    const name = cp.contract_ticker && cp.contract
+      ? `${cp.contract_ticker} ${cp.contract}`          // the desk notation: "XSP 748p"
+      : `${p.ticker} ${Number(x.strike)}${x.kind[0]}`;
+    const contract = name + (isFinite(px) ? ` @ ${px.toFixed(2)}` : "");
+    const a = (p.tape || {}).action || {};
+    let cond = "now";
+    if (a.stance === "conditional") {
+      const trig = [a.down, a.up].find(l => l && /CONFIRM|TRIGGER/i.test(l.means));
+      cond = trig ? `if a 15m thick closes ${trig.level}` : "on confirmation only";
+    } else if (a.stance === "wait_pullback") {
+      const vw = Number((p.tape || {}).vwap);
+      cond = `on a pullback that holds VWAP${isFinite(vw) ? " " + vw.toFixed(2) : ""}`;
+    } else if (a.stance === "wait") {
+      cond = "when the setup arms";
+    }
+    const levels = [
+      x.entry_underlying && { price: x.entry_underlying, label: "entry", color: "accent" },
+      x.tp50_underlying_est && { price: x.tp50_underlying_est, label: "trim +50%", color: "green" },
+      x.thesis_reference && { price: x.thesis_reference, label: x.thesis_label || "thesis", color: "dim" },
+      x.target && { price: x.target, label: "target", color: x.kind === "call" ? "green" : "red" },
+    ].filter(Boolean);
+    renderTradeSticky({ contract, cond, kind: x.kind, levels });
+  } catch { /* the sticky is a bonus; the voice already said it */ }
+}
+
+function tradeStickyFromTrade(t) {
+  if (!t || !t.strike) return;
+  const cond = t.status === "quoted" ? (t.quoted_px ? `@ ${t.quoted_px} · as quoted` : "as quoted")
+    : t.status === "opened" ? `IN @ ${t.entry_px}`
+    : t.status === "trimmed" ? "half off — runner rides"
+    : t.status === "closed" ? `flat · ${fmtUsd(t.realized_usd)}` : t.status;
+  renderTradeSticky({
+    contract: dockContract(t), cond, kind: t.kind, done: t.status === "closed",
+    tag: t.status === "opened" || t.status === "trimmed" ? "live position" : "the call",
+    levels: [
+      t.entry_underlying && { price: t.entry_underlying, label: "entry", color: "accent" },
+      t.tp50_underlying && { price: t.tp50_underlying, label: "trim +50%", color: "green" },
+      t.thesis_reference && { price: t.thesis_reference, label: "thesis", color: "dim" },
+    ].filter(Boolean),
+  });
+}
 
 function drawCallerLevels(args) {
   const levels = (args.clear ? [] : (args.levels || []))
@@ -645,6 +722,7 @@ function handleDeskEvent(d) {
       dock.active = latest;
       dockRender();
       dockChartBoot(latest.underlying);
+      tradeStickyFromTrade(latest);           // the call survives a reload
       if (open) dockPnl(d.positions);
     }
     return;
@@ -653,6 +731,7 @@ function handleDeskEvent(d) {
     dock.active = d.trade;
     dockRender();
     dockChartBoot(d.trade.underlying);
+    tradeStickyFromTrade(d.trade);
     const lines = {
       quoted: `Marcus pinned ${dockContract(d.trade)} ~${d.trade.quoted_px} — on the chart ↑`,
       opened: `you're IN ${dockContract(d.trade)} @ ${d.trade.entry_px} — monitoring P&L ↑`,

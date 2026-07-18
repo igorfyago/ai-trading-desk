@@ -100,6 +100,9 @@ services:
       OBS_COOLDOWN_S: ${OBS_COOLDOWN_S:-20}
       OBS_MAX_CONCURRENT: ${OBS_MAX_CONCURRENT:-3}
       OBS_SES_FROM: ${OBS_SES_FROM:-}      # unset = alerts degrade to log lines
+      # the SES identity lives in eu-west-2 while the box is us-east-1, so the
+      # alert region is pinned explicitly rather than inherited from AWS_REGION
+      OBS_SES_REGION: ${OBS_SES_REGION:-eu-west-2}
       OBS_ALERT_TO: ${OBS_ALERT_TO:-igor.yago@gmail.com}
       AWS_REGION: ${AWS_REGION:-us-east-1}   # the box and the account both live here
     volumes:

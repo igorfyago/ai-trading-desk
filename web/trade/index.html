@@ -169,7 +169,11 @@
                      font:12.5px var(--mono); outline:none; text-transform:uppercase; }
   #wl-addrow input:focus { border-color:var(--accent); }
   #wl-cols, .wlrow { display:grid; grid-template-columns:10px 20px minmax(0,1fr) 62px 52px 44px;
-                     gap:6px; align-items:center; padding:0 10px 0 8px; }
+                     gap:6px; align-items:center; padding:0 10px 0 8px;
+                     /* rows carry a 2px active-row indicator and box-sizing is
+                        border-box, so the header needs the same border or every
+                        row's grid starts 2px right of the header's */
+                     border-left:2px solid transparent; }
   .wlogo { width:18px; height:18px; border-radius:50%; object-fit:cover;
            background:var(--panel2); display:block; }
   /* TradingView session lights: green tape, orange extended, blue overnight */
@@ -185,7 +189,8 @@
   #wl-cols .wlc { cursor:pointer; text-align:right; }
   #wl-cols .wlc:hover { color:var(--text); }
   #wl-cols .wlc.on { color:var(--accent); }
-  #wl-body { flex:1; overflow-y:auto; min-height:0; overscroll-behavior:contain; }
+  #wl-body { flex:1; overflow-y:auto; min-height:0; overscroll-behavior:contain;
+             scrollbar-gutter:stable; }
   .wlsec { display:flex; align-items:center; gap:7px; padding:8px 10px 5px;
            font-family:var(--mono); font-size:10.5px; text-transform:uppercase;
            letter-spacing:.1em; color:var(--dim); cursor:pointer; user-select:none; }
@@ -753,7 +758,22 @@
     }
     document.querySelectorAll("#wl-cols .wlc").forEach(c =>
       c.classList.toggle("on", WL.sort && WL.sort.key === c.dataset.sort));
+    wlSyncGutter();
   }
+
+  function wlSyncGutter() {
+    // The column header lives OUTSIDE the scrolling body, so the body's
+    // scrollbar makes every row narrower than the header and the right-aligned
+    // Last / Chg% / Ext columns drift left of their labels. Measure the gutter
+    // the body actually reserves and give the header the same. Measured, not
+    // hard coded: overlay scrollbars report 0 and must not add padding.
+    const body = document.getElementById("wl-body");
+    const cols = document.getElementById("wl-cols");
+    if (!body || !cols) return;
+    const gutter = body.offsetWidth - body.clientWidth;
+    cols.style.paddingRight = (10 + gutter) + "px";
+  }
+  addEventListener("resize", wlSyncGutter);
 
   function wlPatch() {                  // update numbers in place + tick flash
     document.querySelectorAll("#wl-body .wlrow").forEach(row => {

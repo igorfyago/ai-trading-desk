@@ -316,11 +316,29 @@ def fetch_spots(symbols: list[str]) -> dict[str, dict]:
 
     def _keep_newest(cands: dict[str, dict]) -> None:
         for s, q in cands.items():
-            if s not in out or _age_s(q["ts"]) < _age_s(out[s]["ts"]):
+            prior = out.get(s)
+            if prior is None:
+                out[s] = q
+                continue
+            # Real time beats delayed however the two are stamped. Alpaca's free
+            # SIP feed stamps its 15-minute-delayed bars at the BAR BOUNDARY, so
+            # a delayed SPY print stamped 00:00:00.07 was outranking a genuine
+            # 23:59:57 Yahoo trade on age alone. blendable_spot then threw the
+            # delayed winner away for being delayed, so SPY lost live gamma
+            # entirely while QQQ, which Alpaca did not answer for, was fine.
+            if bool(prior.get("delayed")) != bool(q.get("delayed")):
+                if not q.get("delayed"):
+                    out[s] = q
+                continue
+            if _age_s(q["ts"]) < _age_s(prior["ts"]):
                 out[s] = q
 
     for prov in provider_order():
-        want = [s for s in symbols if s not in out or _age_s(out[s]["ts"]) > _FRESH_S]
+        # Keep asking while a symbol is stale OR still only has a delayed print,
+        # so a later real-time provider gets the chance to upgrade it.
+        want = [s for s in symbols
+                if s not in out or _age_s(out[s]["ts"]) > _FRESH_S
+                or out[s].get("delayed")]
         if not want:
             break
         try:

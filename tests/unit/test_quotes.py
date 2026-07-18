@@ -315,3 +315,49 @@ def test_watch_rows_never_regress_to_an_older_print(monkeypatch):
                  "source": "yahoo", "delayed": False, "session": "post"}})
     r3 = quotes.watch_quotes(["AAPL"])[0]
     assert r3["price"] == 334.10
+
+
+def test_a_realtime_print_beats_a_delayed_one_however_it_is_stamped(monkeypatch):
+    """The SPY bug. Alpaca's free SIP feed stamps its 15-minute-delayed bars at
+    the bar boundary, so a delayed print stamped 00:00:00 looked NEWER than a
+    genuine 23:59:57 trade and won the merge on age alone. blendable_spot then
+    discarded it for being delayed, so SPY had no live gamma at all while QQQ,
+    which Alpaca did not answer for, worked fine."""
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("QUOTES_PROVIDER", "auto")
+    monkeypatch.setenv("ALPACA_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    now = datetime.now(timezone.utc)
+    boundary = now.isoformat()                                  # delayed, but newest
+    real_print = (now - timedelta(seconds=90)).isoformat()      # real time, older
+
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "SPY": {"ticker": "SPY", "price": 743.29, "ts": boundary,
+                "source": "alpaca·sip15", "delayed": True, "session": "overnight"}})
+    monkeypatch.setattr(quotes, "_spot_yahoo", lambda sym: {
+        "ticker": sym, "price": 744.10, "ts": real_print,
+        "source": "yahoo", "delayed": False, "session": "post"})
+    quotes._spot_cache.clear()
+    quotes._last_watch_row.clear()
+
+    out = quotes.fetch_spots(["SPY"])
+    assert out["SPY"]["delayed"] is False, "a delayed print must not win"
+    assert out["SPY"]["source"] == "yahoo" and out["SPY"]["price"] == 744.10
+
+
+def test_a_delayed_print_is_still_better_than_nothing(monkeypatch):
+    """Preferring real time must not mean discarding the only quote there is."""
+    monkeypatch.setenv("QUOTES_PROVIDER", "auto")
+    monkeypatch.setenv("ALPACA_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
+        "SPY": {"ticker": "SPY", "price": 743.29, "ts": None,
+                "source": "alpaca·sip15", "delayed": True, "session": "rth"}})
+    monkeypatch.setattr(quotes, "_spot_yahoo", lambda sym: None)
+    monkeypatch.setattr(quotes, "_spot_cboe", lambda sym: None)
+    quotes._spot_cache.clear()
+    quotes._last_watch_row.clear()
+
+    out = quotes.fetch_spots(["SPY"])
+    assert out["SPY"]["price"] == 743.29 and out["SPY"]["delayed"] is True

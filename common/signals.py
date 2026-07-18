@@ -185,6 +185,18 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = ("The house tape read fired: " + tape["plain"] +
                      " A triggered reversal takes the trade over the structure lean.")
+    elif (grun := (tape or {}).get("gap_run")) and grun.get("fired"):
+        # thicks rule, then volume profiles: wicks based at the band, a thick
+        # candle crossed the trigger into a THIN book - it travels fast
+        g_kind = "call" if grun["side"] == "long" else "put"
+        name = f"long {g_kind} (gap run)"
+        bias = f"{'bullish' if g_kind == 'call' else 'bearish'} momentum - gap run"
+        legs = [_leg(snap, atm, g_kind, "buy", dte)]
+        invalidation = (f"a 15m close back {'below' if g_kind == 'call' else 'above'} "
+                        f"the trigger at {grun['trigger']}")
+        rationale = (f"Gap run: wicks based {'between -1σ and VWAP' if g_kind == 'call' else 'between VWAP and +1σ'}, "
+                     f"a thick 15m candle crossed {grun['trigger']} and the profile is "
+                     f"thin to {grun['target']} - price travels an empty book fast.")
     elif ds and ds.get("takeable", True):
         # the gate rode in on the tape read: 4.4y out-of-sample (docs/BACKTEST.md)
         # graded pre-12:45/stale-capitulation entries flat-to-negative, so those
@@ -250,6 +262,7 @@ def recommend_trade(ticker: str, as_of: str | None = None,
             "capitulation_x": (tape.get("day_shape") or {}).get("capitulation_x"),
             "checklist": tape.get("checklist"),
             "action": tape.get("action"),
+            "gap_run": tape.get("gap_run"),
             "bands": tape.get("bands"),
             "band_position": tape.get("band_position"),
             "plain": tape.get("plain"),
@@ -304,12 +317,20 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         est = opposes
         if not opposes:
             dshape = None
+    grun = (tape or {}).get("gap_run") if tape else None
+    if grun and not grun.get("fired"):
+        grun = None                       # loaded rides as the conditional, not the plan
     if trig:
         bullish = trig["bias"] == "long"
         headline = f"TAPE says {'long' if bullish else 'short'} reversal - triggered"
         why = ("the checklist fired: the 2-sigma band held on wicks, climax "
                "volume marked the turn, and a thick candle crossed the "
                "1-sigma band - price runs the low-volume gap")
+    elif grun:
+        bullish = grun["side"] == "long"
+        headline = f"TAPE says {'bullish' if bullish else 'bearish'} gap run - thin book ahead"
+        why = (f"wicks based at the band, a thick close crossed {grun['trigger']} "
+               f"and the profile is empty to {grun['target']} - it travels fast")
     elif dshape:
         bullish = dshape["shape"].startswith("bull")
         headline = (f"TAPE says {'bullish' if bullish else 'bearish'} reversal day"
@@ -337,7 +358,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
                "lean " + ("long from the low end" if bullish else "short from the high end"))
     # the thesis line: the flip when it is a real level, else the wall the
     # trade leans on — always a DISTINCT price, never a mirror of spot
-    if trig or dshape:
+    if trig or dshape or grun:
         thesis_level, thesis_label = tape["vwap"], "the session VWAP"
     elif flip_ok:
         thesis_level, thesis_label = flip, "the tipping point"
@@ -351,7 +372,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     # CONTEXT, not the working line — the local level takes over.
     context_level = context_label = None
     reach = market.expected_move(spot, snap["atm_iv"], min(dte, 1.0)) * 1.2
-    if not trig and not dshape and abs(thesis_level - spot) > reach:
+    if not trig and not dshape and not grun and abs(thesis_level - spot) > reach:
         context_level, context_label = thesis_level, thesis_label
         if tape and tape.get("vwap"):
             thesis_level, thesis_label = tape["vwap"], "the session VWAP"
@@ -467,12 +488,19 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
     else:
         s3 = box("checklist", "gray", "no active setup on this side")
 
-    # 4. Stage: how far the machine has walked
+    # 4. Stage: how far the machine has walked (a FIRED gap run counts - it
+    # is his continuation trigger, same thicks-rule mechanics)
+    gap = tape.get("gap_run") or {}
+    gap_dir = 0 if not gap else (1 if gap.get("side") == "long" else -1)
     tape_dir = 0 if not tape.get("bias") else (1 if tape["bias"] == "long" else -1)
     if stage == "triggered" and tape_dir == side:
         s4 = box("stage", "green", "TRIGGERED - the confirm printed")
+    elif gap.get("fired") and gap_dir == side:
+        s4 = box("stage", "green", f"GAP RUN fired - thick close through {gap.get('trigger')}")
     elif stage == "confirming" and tape_dir == side:
         s4 = box("stage", "gray", "confirming - the thick close hasn't printed")
+    elif gap.get("ready") and gap_dir == side:
+        s4 = box("stage", "gray", f"gap run loaded - thick close through {gap.get('trigger')} starts it")
     elif stage in ("armed", "confirming") and tape_dir == -side:
         s4 = box("stage", "red", f"the machine is {stage} the OTHER way")
     else:
@@ -490,7 +518,8 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
 
     states = [s1, s2, s3, s4, s5]
     reds = states.count("red")
-    support = (s2 == "green") or (s3 == "green" and s4 == "green")
+    support = ((s2 == "green") or (s3 == "green" and s4 == "green")
+               or (gap.get("fired") and gap_dir == side))
     if support and s1 == "green" and reds == 0:
         verdict = "full_confluence"
     elif reds >= 2 or (reds and not support and s1 != "green"):

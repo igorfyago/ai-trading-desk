@@ -295,6 +295,67 @@ def day_shape(bars: list[dict]) -> dict | None:
     return None
 
 
+def _gap_run(bars: list[dict], prof: dict, band: dict, spot: float) -> dict | None:
+    """His continuation read (the FIG +52% pattern): 15m WICKS basing
+    directionally between the -1σ band and VWAP, a THIN-VOLUME GAP in the
+    profile just past the basing reaching toward the +1σ band, and a THICK
+    candle through the trigger starts the traverse - price travels the empty
+    book fast to the next wall. Mirror for shorts. Thicks rule, then volume
+    profiles. Returns {side, ready, fired, trigger, target} or None."""
+    n = len(bars)
+    sig = band["sigma"]
+    if n < 11 or sig <= spot * 1e-4:
+        return None
+    last = bars[-6:-1]     # the basing candles; the LIVE bar is judged as the trigger
+
+    def wick_dom(b, side):
+        body = abs(b["c"] - b["o"]) + 1e-9
+        wick = (min(b["o"], b["c"]) - b["l"]) if side > 0 else (b["h"] - max(b["o"], b["c"]))
+        return wick >= 0.6 * body
+
+    for side, lo_z, hi_z in ((1, band["d1"], band["vwap"] + 0.15 * sig),
+                             (-1, band["vwap"] - 0.15 * sig, band["u1"])):
+        if not all(lo_z - 1e-9 <= b["c"] <= hi_z + 1e-9 for b in last):
+            continue
+        if sum(1 for b in last if wick_dom(b, side)) < 3:
+            continue
+        near = max(0.7 * sig, 0.004 * spot)    # σ can be tight after a long base
+        reach = max(0.5 * sig, 0.003 * spot)
+        # profiles are noisy: a thin zone split by sliver-rows is ONE gap
+        merged: list[dict] = []
+        for g0 in prof["gaps"]:
+            if merged and g0["lo"] - merged[-1]["hi"] <= max(0.2 * sig, 0.002 * spot):
+                merged[-1] = {"lo": merged[-1]["lo"], "hi": g0["hi"]}
+            else:
+                merged.append(dict(g0))
+        prof = {**prof, "gaps": merged}
+        if side > 0:
+            gaps = [g for g in prof["gaps"]
+                    if spot - 0.2 * sig <= g["lo"] <= spot + near
+                    and g["hi"] >= spot + reach]
+            wall = min((w for w in prof["walls"] if w > spot + reach), default=None)
+        else:
+            gaps = [g for g in prof["gaps"]
+                    if spot - near <= g["hi"] <= spot + 0.2 * sig
+                    and g["lo"] <= spot - reach]
+            wall = max((w for w in prof["walls"] if w < spot - reach), default=None)
+        if not gaps:
+            continue
+        g = gaps[0]
+        base_edge = max(b["h"] for b in last) if side > 0 else min(b["l"] for b in last)
+        trigger = (max(base_edge, band["vwap"]) if side > 0
+                   else min(base_edge, band["vwap"]))
+        target = wall if wall is not None else (g["hi"] if side > 0 else g["lo"])
+        lb = bars[-1]
+        thick = abs(lb["c"] - lb["o"]) / max(lb["h"] - lb["l"], _TINY) >= MEANINGFUL_BODY
+        fired = thick and (lb["c"] > trigger if side > 0 else lb["c"] < trigger)
+        return {"side": "long" if side > 0 else "short", "ready": True,
+                "fired": fired, "trigger": round(trigger, 2), "target": round(target, 2),
+                "why": ("wicks basing " + ("-1σ..VWAP" if side > 0 else "VWAP..+1σ")
+                        + f", thin book to {round(target, 2)}")}
+    return None
+
+
 def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
     """The full house read on a bar series. Pure: no I/O, deterministic."""
     if not bars:
@@ -315,14 +376,27 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
     # ---- stage machine, latest bars only -------------------------------
     # ARM: a -2/+2 band tag with RSI on the wrong side of its MA, inside the
     # lookback. Warm-up bars and degenerate session-open bands can't arm.
+    # HIS GENERALIZATION: the turn doesn't have to print at the 2-sigma band -
+    # a volume-profile HILL beyond the 1-sigma band catches the knife too.
     arm_long = arm_short = None
     for i in range(max(0, n - ARM_LOOKBACK), n):
         st = _rsi_state(rsi_s, ma_s, i)
         if st is None or vw[i]["sigma"] <= spot * 1e-4:
             continue
-        if bars[i]["l"] <= vw[i]["d2"] and st in ("red", "red_curling"):
+        tol = max(0.0015 * spot, 0.1 * vw[i]["sigma"])
+        # the hill only arms on a REJECTION at an extreme: the bar stretches
+        # beyond the 1-sigma band, tags a wall out there, and CLOSES back away
+        # from it (a wick turn, not a close-through)
+        rng = max(bars[i]["h"] - bars[i]["l"], _TINY)
+        rejected_low = (bars[i]["c"] - bars[i]["l"]) >= 0.5 * rng
+        rejected_high = (bars[i]["h"] - bars[i]["c"]) >= 0.5 * rng
+        low_hill = rejected_low and bars[i]["l"] < vw[i]["d1"] and any(
+            abs(bars[i]["l"] - w) <= tol and w < vw[i]["d1"] for w in prof["walls"])
+        high_hill = rejected_high and bars[i]["h"] > vw[i]["u1"] and any(
+            abs(bars[i]["h"] - w) <= tol and w > vw[i]["u1"] for w in prof["walls"])
+        if (bars[i]["l"] <= vw[i]["d2"] or low_hill) and st in ("red", "red_curling"):
             arm_long = i
-        if bars[i]["h"] >= vw[i]["u2"] and st in ("green", "green_fading"):
+        if (bars[i]["h"] >= vw[i]["u2"] or high_hill) and st in ("green", "green_fading"):
             arm_short = i
     if arm_long is not None and (arm_short is None or arm_long >= arm_short):
         bias, arm_i = "long", arm_long
@@ -380,6 +454,11 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         target = wall_above if wall_above is not None else band["vwap"]
     elif bias == "short":
         target = wall_below if wall_below is not None else band["vwap"]
+
+    # the continuation read rides alongside the reversal machine
+    gap = _gap_run(bars, prof, band, spot)
+    if target is None and gap:
+        target = gap["target"]
 
     # ---- plain-language read (numbers stay numbers) ----------------------
     pos = _band_position(spot, band)
@@ -524,6 +603,17 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         else:
             up = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day")
             down = _line(wall_below, "if it gets there without a pullback, it ran without you - still no chase")
+    elif gap and gap["fired"]:
+        g_long = gap["side"] == "long"
+        stance = "enter"
+        do_now = (f"GAP RUN fired at {spot:.2f} - a thick close through "
+                  f"{gap['trigger']} into a thin book; it travels fast to {gap['target']}.")
+        if g_long:
+            up = _line(gap["target"], "the far side of the thin book - scale there")
+            down = _line(band["vwap"], "back under VWAP kills the run")
+        else:
+            down = _line(gap["target"], "the far side of the thin book - scale there")
+            up = _line(band["vwap"], "back over VWAP kills the run")
     elif stage == "confirming":
         gate = ([w for w in prof["walls"] if w > bars[conf_i]["c"]] if bias == "long"
                 else [w for w in prof["walls"] if w < bars[conf_i]["c"]])
@@ -547,6 +637,17 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         else:
             down = _line(band["u1"], "a high-volume 15m body closing back under +1σ CONFIRMS the short - that is the entry")
             up = _line(band["u2"], "the tag zone - holding above it kills the fade, the trend runs")
+    elif gap:
+        g_long = gap["side"] == "long"
+        stance = "conditional"
+        do_now = (f"Gap run LOADED at {spot:.2f} - wicks basing, thin book "
+                  f"{'overhead' if g_long else 'below'}; the thick close starts it.")
+        if g_long:
+            up = _line(gap["trigger"], f"a THICK 15m close above it starts the run - thin book to {gap['target']}")
+            down = _line(band["d1"], "losing the basing zone kills the idea")
+        else:
+            down = _line(gap["trigger"], f"a THICK 15m close below it starts the run - thin book to {gap['target']}")
+            up = _line(band["u1"], "losing the basing zone kills the idea")
     else:
         stance = "wait"
         do_now = f"No setup armed at {spot:.2f} - nothing to do; watch the lines."
@@ -558,8 +659,14 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
     action = {"stance": stance, "do_now": do_now, "up": up, "down": down,
               "reach": round(reach, 2)}
 
+    if gap:
+        tail += (f" GAP RUN {'FIRED' if gap['fired'] else 'loaded'}: {gap['why']}; "
+                 f"thick close through {gap['trigger']} "
+                 f"{'did it' if gap['fired'] else 'starts it'}, target {gap['target']}.")
+
     return {
         "action": action,
+        "gap_run": gap,
         "bands": {"u2": round(band["u2"], 2), "u1": round(band["u1"], 2),
                   "vwap": round(band["vwap"], 2), "d1": round(band["d1"], 2),
                   "d2": round(band["d2"], 2)},

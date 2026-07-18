@@ -134,6 +134,51 @@ def test_checklist_reports_the_four_checks_with_bar_times():
     assert qcl["done"] <= 2 and not qcl["checks"][3]["ok"]
 
 
+def _gap_run_bars():
+    """The FIG pattern, scripted: a fat volume hill builds around 100, a fast
+    two-bar pop to 102 leaves a THIN zone overhead, price bases back at the
+    hill with lower wicks between -1σ and VWAP, then a thick candle crosses
+    the trigger into the empty book."""
+    bars, t = [], _T0
+    px = 100.0
+    for i in range(20):                      # a WIDE fat hill: chop 99.6-100.4
+        o = px
+        c = 100.3 if i % 2 == 0 else 99.7
+        bars.append(_bar(t, o, max(o, c) + 0.1, min(o, c) - 0.1, c, 2600)); t += 900; px = c
+    for o, c in [(px, 100.9), (100.9, 101.2)]:   # fast pop: thin rows overhead
+        bars.append(_bar(t, o, c + 0.1, o - 0.05, c, 300)); t += 900; px = c
+    for o, c in [(px, 100.6), (100.6, 100.05)]:  # give it back fast (still thin)
+        bars.append(_bar(t, o, o + 0.05, c - 0.1, c, 280)); t += 900; px = c
+    for i in range(5):                       # basing: lower wicks, tight closes
+        o = px
+        c = 99.98 + 0.01 * i
+        bars.append(_bar(t, o, max(o, c) + 0.04, min(o, c) - 0.26, c, 900)); t += 900; px = c
+    bars.append(_bar(t, px, 100.25, px - 0.03, 100.22, 1600))  # the THICK trigger close
+    return bars
+
+
+def test_gap_run_detects_the_continuation_and_fires_on_the_thick_close():
+    bars = _gap_run_bars()
+    read = tape.read_tape(bars, ticker="FIG")
+    g = read["gap_run"]
+    assert g is not None, read["plain"]
+    assert g["side"] == "long" and g["ready"]
+    assert g["fired"], g
+    assert g["target"] > g["trigger"] > 0
+    assert read["action"]["stance"] == "enter"
+    assert "GAP RUN" in read["plain"]
+
+    # replace the thick trigger with a thin indecision candle at the base:
+    # the setup is LOADED (a conditional), never an entry
+    loaded_bars = bars[:-1] + [_bar(bars[-1]["t"], bars[-2]["c"],
+                                    bars[-2]["c"] + 0.03, bars[-2]["c"] - 0.04,
+                                    bars[-2]["c"] + 0.01, 700)]
+    loaded = tape.read_tape(loaded_bars, ticker="FIG")
+    g2 = loaded["gap_run"]
+    assert g2 is not None and not g2["fired"], g2
+    assert loaded["action"]["stance"] in ("conditional", "wait")
+
+
 def test_action_now_never_quotes_out_of_reach_levels():
     """The mechanical now-state: one do_now plus the nearest line each side,
     every emitted level within reach — the voice reads this verbatim instead

@@ -110,6 +110,30 @@ def test_poll_spots_serves_cache_and_batches_stale(monkeypatch):
     assert calls == ["META", "NOW", "META"] and out["NOW"]["price"] == 42.0
 
 
+def test_next_trading_day_skips_weekends_and_holidays():
+    """The Friday bug: 'tomorrow' must resolve to the next TRADING day, never
+    Saturday, and NYSE holidays are jumped too."""
+    from datetime import date, timedelta
+
+    def nxt(d):
+        d = d + timedelta(days=1)
+        while not quotes._is_trading_day(d):
+            d += timedelta(days=1)
+        return d
+
+    assert nxt(date(2026, 7, 17)).isoformat() == "2026-07-20"   # Fri -> Mon
+    assert nxt(date(2026, 7, 2)).isoformat() == "2026-07-06"    # Thu -> Mon (Jul 3 closed)
+    assert nxt(date(2026, 12, 24)).isoformat() == "2026-12-28"  # Christmas + weekend
+    assert not quotes._is_trading_day(date(2026, 7, 3))         # holiday
+    assert not quotes._is_trading_day(date(2026, 7, 18))        # Saturday
+    assert quotes._is_trading_day(date(2026, 7, 20))            # Monday
+
+    c = quotes.trading_clock()                                  # live shape check
+    assert set(c) >= {"today", "weekday", "market_state", "next_trading_day",
+                      "next_trading_weekday", "is_trading_day"}
+    assert quotes._is_trading_day(date.fromisoformat(c["next_trading_day"]))
+
+
 def test_session_label_covers_the_24h_clock():
     # July = EDT (UTC-4); January = EST (UTC-5); weekend = the 24h tape
     assert quotes.session_label("2026-07-16T15:00:00Z") == "rth"        # 11:00 ET

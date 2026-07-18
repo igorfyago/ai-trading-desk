@@ -86,6 +86,80 @@ def _et_wall(ts: datetime) -> datetime:
     return ts + timedelta(hours=offset)
 
 
+# NYSE full-day closures (observed dates), so "next trading day" skips them,
+# not just weekends. Extend per year as the calendar rolls.
+_MARKET_HOLIDAYS = {
+    "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
+    "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25",
+    "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31",
+    "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24",
+}
+_WEEKDAY = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+            "Saturday", "Sunday"]
+
+
+def _is_trading_day(d) -> bool:
+    return d.weekday() < 5 and d.isoformat() not in _MARKET_HOLIDAYS
+
+
+def trading_clock() -> dict:
+    """Deterministic 'what day is it, really' for the agents: today in ET, the
+    market state RIGHT NOW, and the actual NEXT trading day (skips weekends AND
+    NYSE holidays) so nothing ever says 'tomorrow' on a Friday."""
+    et = _et_wall(datetime.now(timezone.utc))
+    today = et.date()
+    hm = et.hour * 60 + et.minute
+    trading_today = _is_trading_day(today)
+    if not trading_today:
+        state = "closed"                      # weekend or holiday
+    elif hm < 4 * 60:
+        state = "overnight"
+    elif hm < 9 * 60 + 30:
+        state = "pre-market"
+    elif hm < 16 * 60:
+        state = "open"
+    elif hm < 20 * 60:
+        state = "post-market"
+    else:
+        state = "overnight"
+    # the session the desk is planning FOR: today if the regular session hasn't
+    # ended yet on a trading day, else the next trading day
+    if trading_today and hm < 16 * 60:
+        planning = today
+    else:
+        d = today + timedelta(days=1)
+        while not _is_trading_day(d):
+            d += timedelta(days=1)
+        planning = d
+    return {
+        "today": today.isoformat(),
+        "weekday": _WEEKDAY[today.weekday()],
+        "et_time": f"{et.hour:02d}:{et.minute:02d}",
+        "market_state": state,
+        "is_trading_day": trading_today,
+        "next_trading_day": planning.isoformat(),
+        "next_trading_weekday": _WEEKDAY[planning.weekday()],
+        "next_is_today": planning == today,
+    }
+
+
+def trading_clock_block() -> str:
+    """The clock as a prompt-injectable fact block."""
+    c = trading_clock()
+    nxt = ("today (the regular session is still ahead)" if c["next_is_today"]
+           else f"{c['next_trading_weekday']} {c['next_trading_day']}")
+    return (
+        "# The trading clock (authoritative - never guess the date)\n"
+        f"Right now it is {c['weekday']}, {c['today']}, {c['et_time']} ET. "
+        f"The US regular market is {c['market_state'].upper()}.\n"
+        f"The next regular session the desk plans for is {nxt}.\n"
+        "NEVER say 'tomorrow' for the next session - name the weekday. On a "
+        "Friday, evening, or holiday the next session is the next TRADING day "
+        "(Monday, not Saturday), and any conditional trade ('if a 15m body "
+        "closes...') triggers then, live, not before the open."
+    )
+
+
 def session_label(iso) -> str | None:
     """Which tape printed this: rth / pre / post / overnight (ET clock)."""
     ts = _ts_utc(iso)

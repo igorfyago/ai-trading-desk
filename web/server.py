@@ -699,9 +699,10 @@ async def create_session(persona: str):
         raise HTTPException(404, f"unknown persona '{persona}'")
     instructions = p["instructions"]
     if "position_status" in p.get("implementations", {}):
-        # trading personas start the call already knowing the book
-        from common import trades
+        # trading personas start the call already knowing the clock and the book
+        from common import quotes, trades
 
+        instructions += "\n\n" + quotes.trading_clock_block()
         book = trades.book_block() or "BOOK: flat, nothing on."
         instructions += (
             "\n\n# The book at call start\n" + book +

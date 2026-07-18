@@ -118,16 +118,18 @@ def ticker_quote(ticker: str) -> str:
 
 
 def desk_status(ticker: str) -> str:
-    from common import trades
+    from common import quotes, trades
 
-    snap = market.latest_snapshot(ticker)
-    if not snap:
+    clock = quotes.trading_clock()
+    if not (snap_ok := market.latest_snapshot(ticker)):
         # not in the GEX complex — still on the tape: quote it instead of
         # claiming blindness
         q = json.loads(ticker_quote(ticker))
         q["note"] = ("no dealer-positioning structure for this name (GEX covers "
                      "SPY/QQQ/IWM) - price, chart and news are live")
+        q["clock"] = clock
         return json.dumps(q)
+    snap = snap_ok
     out = {k: snap[k] for k in ("ticker", "spot", "regime", "traffic_light",
                                 "signal_score", "gamma_flip", "atm_iv", "captured_at")}
     gl = market.live_gex(ticker)
@@ -138,6 +140,7 @@ def desk_status(ticker: str) -> str:
                     "regime_live": gl["regime_live"], "side": gl["side"],
                     "distance_to_flip": gl["distance_to_flip"]})
     out["book"] = trades.book_line()
+    out["clock"] = clock
     return json.dumps(out)
 
 
@@ -545,8 +548,9 @@ PERSONAS = {
             "('GEX says bullish momentum holds today') plus the short why.\n"
             "   b. WHAT: analysis is ALWAYS in SPY levels, execution is ALWAYS the "
             "XSP contract (usually SPY level plus two), in house notation: 'with "
-            "SPY at 750.87, buy ATM puts: XSP 753p @ 2.90, expiring tomorrow'. "
-            "Use ATM/ITM/OTM vocabulary.\n"
+            "SPY at 750.87, buy ATM puts: XSP 753p @ 2.90, expiring the 20th'. "
+            "READ the expiry date off the payload's 'expiry' field - never say "
+            "'tomorrow' (on a Friday it is not). Use ATM/ITM/OTM vocabulary.\n"
             "   c. TRIM: sell HALF when the CONTRACT is up fifty percent — SAY the "
             "words 'up fifty percent' (that's the house rule, the price is just the "
             "courtesy math), then the notation and the underlying level where it "
@@ -673,6 +677,14 @@ PERSONAS = {
             "the conditional ('wicks basing, thin book overhead - a thick "
             "15m close through X starts it'). Same DNA as everything: "
             "thicks rule, then volume profiles.\n"
+            "   u. THE TRADING CLOCK IS AUTHORITATIVE: the session start and "
+            "every desk_status/trade_recommendation carry a 'clock' with "
+            "today's weekday, the market state, and next_trading_weekday. USE "
+            "IT - never guess a date, never say 'tomorrow' for the next "
+            "session. On a Friday, evening or holiday the next session is the "
+            "next TRADING day (Monday, not Saturday), and a conditional trade "
+            "triggers THEN, live at the tape, not before the open. Market "
+            "closed now = 'the plan is for [that weekday]', never 'tomorrow'.\n"
             "   f. HONESTY ABOUT THE FLIP: when the payload says thesis_kind is "
             "'wall', the flip was absent or sitting on the current price — a level "
             "equal to spot says NOTHING ('above the flip' would just mean 'price is "

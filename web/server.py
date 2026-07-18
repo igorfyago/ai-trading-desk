@@ -596,8 +596,8 @@ def execute_tool(persona: str, call: ToolCall):
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
-# Local dev convenience: the landing portal (served by Caddy in prod) is
-# browsable at /landing so layout work can be verified without a deploy.
-# local dev: preview the apex portal without deploying (Caddy serves it in prod)
+# Local dev convenience: preview the apex portal without deploying. Caddy serves
+# it in production. Mounted at /portal, not /landing, which no route has ever
+# answered.
 app.mount("/portal", StaticFiles(directory=STATIC.parent / "portal", html=True),
           name="portal")

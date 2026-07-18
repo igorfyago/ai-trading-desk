@@ -560,6 +560,9 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
 
     return {
         "action": action,
+        "bands": {"u2": round(band["u2"], 2), "u1": round(band["u1"], 2),
+                  "vwap": round(band["vwap"], 2), "d1": round(band["d1"], 2),
+                  "d2": round(band["d2"], 2)},
         "spot": round(spot, 4),
         "vwap": round(band["vwap"], 4),
         "day_shape": ds,

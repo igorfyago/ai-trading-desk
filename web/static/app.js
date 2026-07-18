@@ -370,19 +370,27 @@ function hangUp(silent) {
 const REAL_WORDS = /[\p{L}\p{N}]{2,}/u;
 const IDLE_GUARD_MS = 30_000;
 
-function killGhostTurn(userItemId) {
+function killGhostTurn(userItemId, wasSpeaking) {
   try {
     voice.dc.send(JSON.stringify({ type: "response.cancel" }));
     voice.dc.send(JSON.stringify({ type: "output_audio_buffer.clear" }));
     if (userItemId) {
       voice.dc.send(JSON.stringify({ type: "conversation.item.delete", item_id: userItemId }));
     }
-  } catch { /* channel closing — nothing to kill */ }
+  } catch { /* channel closing: nothing to kill */ }
   voice.scrubNext = true;                     // response.done will delete its items
   const ghost = voice.agentLine && voice.agentLine.closest(".bubble");
   if (ghost) ghost.remove();                  // never happened, don't show it
   voice.agentLine = null;
   liftMuteGuard();
+  // BACKGROUND MUSIC/NOISE barge-in cancels the agent MID-WORD before the
+  // transcript proves it was nobody: once proven, tell him to FINISH the
+  // thought instead of leaving the sentence dead in the air
+  if (wasSpeaking && Date.now() - (voice.resumeAt || 0) > 2500) {
+    voice.resumeAt = Date.now();
+    voice.expectReply = true;
+    try { voice.dc.send(JSON.stringify({ type: "response.create" })); } catch { /* closing */ }
+  }
 }
 
 function liftMuteGuard() {
@@ -408,6 +416,7 @@ async function handleVoiceEvent(ev) {
     }
     case "response.output_audio_transcript.delta": {
       voice.lastActivity = Date.now();        // agent mid-speech keeps the line open
+      voice.lastAgentDelta = Date.now();      // barge-in repair: was he talking?
       if (!voice.agentLine) {
         const b = bubble(`${current.name} (voice)`, "agent");
         voice.agentLine = b.querySelector(".md");
@@ -417,12 +426,20 @@ async function handleVoiceEvent(ev) {
       break;
     }
     case "conversation.item.input_audio_transcription.failed":
-      killGhostTurn(ev.item_id);
+      killGhostTurn(ev.item_id, Date.now() - (voice.lastAgentDelta || 0) < 4000);
       break;
     case "conversation.item.input_audio_transcription.completed": {
       const words = (ev.transcript || "").trim();
+      const speaking = Date.now() - (voice.lastAgentDelta || 0) < 4000;
       if (!REAL_WORDS.test(words)) {          // noise, breath, mic bump: not speech
-        killGhostTurn(ev.item_id);
+        killGhostTurn(ev.item_id, speaking);
+        break;
+      }
+      // music makes the transcriber HALLUCINATE short foreign-script frags
+      // ("그게 딱" mid-Spanish-call): a short burst with zero Latin letters
+      // in a Latin-script conversation is the room, not the caller
+      if (!/[A-Za-z0-9À-ɏ]{2,}/.test(words) && words.length < 8) {
+        killGhostTurn(ev.item_id, speaking);
         break;
       }
       voice.lastActivity = Date.now();        // ONLY real speech keeps the line open

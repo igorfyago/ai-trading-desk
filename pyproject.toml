@@ -1,15 +1,12 @@
 [project]
 name = "ai-trading-desk"
 version = "0.1.0"
-description = "A ladder of finance AI agents — from a single structured LLM call to multi-path LangGraph workflows and real-time voice agents staffing an options trading desk."
+description = "minitrade: a live options-trading cockpit with a deterministic tape-reading engine and Marcus, its real-time voice analyst."
 requires-python = ">=3.10"
 dependencies = [
-    "langchain>=1.0,<2.0",
-    "langchain-core>=1.0,<2.0",
-    "langgraph>=1.0,<2.0",
-    "langchain-openai>=1.0",
-    "langchain-text-splitters>=1.0",
-    "langchain-chroma>=0.2",
+    # The LangChain and LangGraph stack left with the text agents, which now
+    # live in agent-observatory. What stays is the voice desk: langsmith only
+    # so Marcus's tool calls still show up as traces.
     "langsmith>=0.3.0",
     "pydantic>=2.7",
     "python-dotenv>=1.0",

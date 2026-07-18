@@ -35,13 +35,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from personas import PERSONAS, run_tool  # noqa: E402
-from web import registry  # noqa: E402
-
-try:
-    from langsmith import traceable
-except ImportError:  # pragma: no cover
-    def traceable(**_kw):
-        return lambda f: f
 
 load_dotenv()
 
@@ -527,7 +520,7 @@ def x_pulse(ticker: str):
     return {"available": True, "pulse": p}
 
 
-PERSONA_CATEGORY = {"marcus": "finance", "riley": "agency", "quinn": "agency"}
+DESK_PERSONAS = ["marcus"]   # the agency demos moved to the observatory
 
 
 @app.get("/agents")
@@ -537,86 +530,12 @@ def agents():
     gallery it used to feed now lives in the observatory."""
     return {
         "voice_personas": [
-            {"id": pid, "label": p["label"], "tagline": p["tagline"],
-             "category": PERSONA_CATEGORY.get(pid, "agency")}
-            for pid, p in PERSONAS.items()
+            {"id": pid, "label": PERSONAS[pid]["label"],
+             "tagline": PERSONAS[pid]["tagline"], "category": "finance"}
+            for pid in DESK_PERSONAS if pid in PERSONAS
         ],
         "realtime_model": REALTIME_MODEL,
     }
-
-
-_ATLAS_CACHE: dict = {}
-
-
-@app.get("/api/atlas")
-def atlas():
-    """The real runtime topology of every agent, as mermaid — drawn from the
-    compiled LangGraph graphs themselves, not hand-made diagrams."""
-    if _ATLAS_CACHE:
-        return _ATLAS_CACHE
-    graphs = []
-    try:
-        rt = registry.runtime()
-        for meta in registry.AGENT_META:
-            aid = meta["id"]
-            if aid == "brief":
-                nodes = ["question", "prompt + live context", "LLM structured output", "typed answer"]
-                edges = [{"s": nodes[i], "t": nodes[i + 1], "cond": False} for i in range(3)]
-            else:
-                g = rt[aid].get_graph()
-                nodes = list(g.nodes)
-                edges = [{"s": e.source, "t": e.target, "cond": bool(e.conditional)}
-                         for e in g.edges]
-            graphs.append({"id": aid, "name": meta["name"], "category": meta["category"],
-                           "kind": "LangGraph runtime" if aid != "brief" else "LangChain call",
-                           "nodes": nodes, "edges": edges})
-    except Exception as exc:
-        return {"error": str(exc), "graphs": []}
-    for pid, p in PERSONAS.items():
-        tool_names = [t["name"] for t in p["tools"]]
-        nodes = ["caller audio", "gpt-realtime-2.1 + persona"] + tool_names
-        edges = ([{"s": "caller audio", "t": nodes[1], "cond": False},
-                  {"s": nodes[1], "t": "caller audio", "cond": False}] +
-                 [{"s": nodes[1], "t": t, "cond": True} for t in tool_names] +
-                 [{"s": t, "t": nodes[1], "cond": True} for t in tool_names])
-        graphs.append({"id": pid, "name": p["label"],
-                       "category": PERSONA_CATEGORY.get(pid, "agency"),
-                       "kind": "Realtime voice (WebRTC / SIP)",
-                       "nodes": nodes, "edges": edges})
-    _ATLAS_CACHE.update({"graphs": graphs})
-    return _ATLAS_CACHE
-
-
-# ------------------------------------------------------------------- chat ----
-
-class ChatIn(BaseModel):
-    message: str
-    session: str
-
-
-def _ndjson(gen):
-    def body():
-        for event in gen:
-            yield json.dumps(event, default=str) + "\n"
-    return StreamingResponse(body(), media_type="application/x-ndjson")
-
-
-@app.post("/chat/{agent_id}")
-def chat(agent_id: str, body: ChatIn):
-    if agent_id not in {a["id"] for a in registry.AGENT_META}:
-        raise HTTPException(404, f"unknown agent '{agent_id}'")
-    return _ndjson(registry.stream_chat(agent_id, body.message, body.session))
-
-
-class ResumeIn(BaseModel):
-    session: str
-    action: str            # approve | revise | reject
-    notes: str = ""
-
-
-@app.post("/chat/analyst/resume")
-def chat_resume(body: ResumeIn):
-    return _ndjson(registry.resume_analyst(body.session, body.action, body.notes))
 
 
 # ------------------------------------------------------------------ voice ----
@@ -634,52 +553,6 @@ async def _mint_secret(session_payload: dict) -> dict:
     if resp.status_code != 200:
         raise HTTPException(resp.status_code, f"OpenAI error: {resp.text[:300]}")
     return resp.json()
-
-
-@app.post("/session/bridge/{agent_id}")
-async def create_bridge_session(agent_id: str):
-    """Voice bridge: talk to any TEXT agent through a Realtime session."""
-    meta = next((a for a in registry.AGENT_META if a["id"] == agent_id), None)
-    if meta is None:
-        raise HTTPException(404, f"unknown agent '{agent_id}'")
-
-    tools = [{
-        "type": "function", "name": "ask_agent",
-        "description": f"Send the caller's request to the {meta['name']} agent and get its "
-                       "full answer. Takes time for the complex agents — tell the caller "
-                       "you're running it before calling.",
-        "parameters": {"type": "object", "properties": {
-            "question": {"type": "string", "description": "the caller's request, complete and specific"}},
-            "required": ["question"]},
-    }]
-    extra = ""
-    if agent_id == "analyst":
-        tools.append({
-            "type": "function", "name": "resolve_approval",
-            "description": "After reading a memo awaiting approval to the caller, submit their decision.",
-            "parameters": {"type": "object", "properties": {
-                "action": {"type": "string", "enum": ["approve", "revise", "reject"]},
-                "notes": {"type": "string", "description": "revision notes, if any"}},
-                "required": ["action"]},
-        })
-        extra = (" If ask_agent returns APPROVAL_REQUIRED, summarize the memo aloud "
-                 "(bias, conviction, thesis, the exact trade) and ask the caller to "
-                 "approve, revise or reject; then call resolve_approval with their words.")
-
-    data = await _mint_secret({
-        "type": "realtime", "model": REALTIME_MODEL,
-        "instructions": (
-            f"You are the voice interface to '{meta['name']}', an AI agent: {meta['desc']} "
-            "You sound natural and human, never read JSON or markdown syntax aloud. "
-            "For EVERY substantive request: restate it crisply, say you're on it, call "
-            "ask_agent, then deliver the answer conversationally — numbers rounded the "
-            "way a person would say them, structure summarized not recited." + extra +
-            " This is a demo on synthetic data; say so if the caller asks about real money."),
-        "tools": tools, "tool_choice": "auto",
-        "audio": AUDIO_CONFIG("alloy"),
-    })
-    return {"client_secret": data["value"], "label": f"{meta['name']} (voice bridge)",
-            "model": REALTIME_MODEL}
 
 
 @app.post("/session/{persona}")
@@ -712,19 +585,6 @@ class ToolCall(BaseModel):
     name: str
     arguments: dict
     session: str = "voice"
-
-
-@app.post("/tool/bridge/{agent_id}")
-@traceable(name="voice_bridge_tool", run_type="tool")
-def execute_bridge_tool(agent_id: str, call: ToolCall):
-    if call.name == "ask_agent":
-        out = registry.run_for_voice(agent_id, call.arguments.get("question", ""), call.session)
-    elif call.name == "resolve_approval":
-        out = registry.resolve_voice_approval(
-            call.session, call.arguments.get("action", "reject"), call.arguments.get("notes", ""))
-    else:
-        out = {"error": f"unknown bridge tool {call.name}"}
-    return {"output": json.dumps(out, default=str)}
 
 
 @app.post("/tool/{persona}")

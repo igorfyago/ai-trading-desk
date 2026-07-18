@@ -25,32 +25,6 @@ def test_tool_schemas_are_valid_function_declarations():
                 assert req in t["parameters"]["properties"]
 
 
-def test_clinic_openings_deterministic():
-    a = personas.clinic_openings("Tuesday")
-    b = personas.clinic_openings("Tuesday")
-    assert a == b
-    assert json.loads(a)["open_slots"]
-
-
-def test_book_appointment_writes_row(db_conn):
-    out = json.loads(personas.book_appointment("Test Pat", "p@x.com", "cleaning", "Tue 9:00"))
-    assert out["status"] == "booked"
-    n = db_conn.execute(
-        "SELECT COUNT(*) FROM appointments WHERE patient_name='Test Pat'").fetchone()[0]
-    assert n == 1
-
-
-def test_book_appointment_rejects_unknown_service():
-    out = json.loads(personas.book_appointment("X", "x@x.com", "surgery", "Tue 9:00"))
-    assert "error" in out
-
-
-def test_estimate_project_math():
-    out = json.loads(personas.estimate_project("kitchen", 150, "premium"))
-    assert out["estimate_low_usd"] == round(95 * 150 * 1.45, -2)
-    assert out["estimate_high_usd"] > out["estimate_low_usd"]
-
-
 def test_trade_recommendation_tool_returns_engine_output():
     out = json.loads(personas.trade_recommendation("SPY"))
     assert out["ticker"] == "SPY" and out["legs"]

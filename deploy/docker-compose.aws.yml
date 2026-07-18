@@ -79,7 +79,7 @@ services:
       # the agents query the LIVE dealer-positioning DB, not the demo SQLite:
       DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
     volumes:
-      - deskdata:/app/data                 # trades log, custom personas, TA
+      - deskdata:/app/data                 # trades log, quote cache and TA
                                            # signals survive rebuilds
     ports:
       - "127.0.0.1:8000:8000"              # agents app (proxied by caddy)
@@ -93,6 +93,19 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGCHAIN_TRACING_V2: "true"
       LANGCHAIN_PROJECT: agent-observatory
+      # it is publicly reachable and runs on one personal key, so it meters
+      # itself and stops rather than surprising anyone with a bill
+      OBS_DAILY_USD: ${OBS_DAILY_USD:-2.00}
+      OBS_MONTHLY_USD: ${OBS_MONTHLY_USD:-20.00}
+      OBS_COOLDOWN_S: ${OBS_COOLDOWN_S:-20}
+      OBS_MAX_CONCURRENT: ${OBS_MAX_CONCURRENT:-3}
+      OBS_SES_FROM: ${OBS_SES_FROM:-}      # unset = alerts degrade to log lines
+      OBS_ALERT_TO: ${OBS_ALERT_TO:-igor.yago@gmail.com}
+      AWS_REGION: ${AWS_REGION:-eu-west-1}
+    volumes:
+      - obsdata:/app/data                  # the spend meter must survive a
+                                           # rebuild, or every deploy is a
+                                           # fresh budget
     ports:
       - "127.0.0.1:8321:8321"             # live agent-DAG demo (proxied by caddy)
 
@@ -257,6 +270,7 @@ volumes:
   pgdata:
   caddy_data:
   deskdata:
+  obsdata:
   bank_shard0:
   bank_shard1:
   bank_control:

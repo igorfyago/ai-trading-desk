@@ -1,146 +1,100 @@
-# ai-trading-desk
+# minitrade
 
 [![ci](https://github.com/igorfyago/ai-trading-desk/actions/workflows/ci.yml/badge.svg)](https://github.com/igorfyago/ai-trading-desk/actions/workflows/ci.yml)
 
-**Six AI agents that staff an options trading desk — a deliberate ladder from a single LLM call to multi-path LangGraph workflows and real-time voice agents.**
+**A live options-trading cockpit: a deterministic tape-reading engine, a 24-hour chart, and Marcus, the voice analyst you can talk to while the tape moves.**
 
-**🟢 Live: [desk.b4rruf3t.com](https://desk.b4rruf3t.com)** — chat with any agent or press the mic and *talk* to them (try Marcus: *"what's the trade on SPY?"*). Powered by real dealer-positioning data computed 24/7 by [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) on the same box — live dashboard at [gex.b4rruf3t.com](https://gex.b4rruf3t.com). Demo system, synthetic-adjacent delayed data, not financial advice.
+**🟢 Live: [desk.b4rruf3t.com](https://desk.b4rruf3t.com)** · press the mic and ask *"what's the trade on SPY?"*. Grounded in real dealer-positioning data computed 24/7 by [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) on the same box, with its dashboard at [gex.b4rruf3t.com](https://gex.b4rruf3t.com). Delayed and demo-adjacent data. Nothing here is financial advice.
 
-Built with **LangChain 1.0** and **LangGraph 1.0** (Python), the **OpenAI Realtime API** for speech-to-speech voice, and grounded in a real system: my [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) service (Rust + PostgreSQL + Node.js), which computes live dealer gamma/delta exposure (GEX/DEX) from option chains. Every agent works out of the box on a bundled, auto-seeded SQLite mirror of that production schema — clone, add one API key, run.
+Part of a small estate of built-from-scratch systems, all reachable from [b4rruf3t.com](https://b4rruf3t.com).
 
-Each level introduces exactly one new set of concepts on top of the previous one. The point of the repo is the *ladder*: read them in order and you've walked from "prompt" to "production agent system."
+## What this is
 
-| # | Agent | Framework | New concepts | |
-|---|---|---|---|---|
-| 1 | [Market Brief](agents/01_market_brief/) | LangChain | structured output, prompt-as-persona | one LLM call, zero tools |
-| 2 | [Text-to-SQL](agents/02_text_to_sql/) | LangChain | tool loop, self-correction on SQL errors, guardrails | English → verified SQL over the GEX database |
-| 3 | [GEX Repo Interpreter](agents/03_repo_interpreter/) | LangChain | embeddings, agentic RAG, citations | answers "how does the code work?" over the real repo |
-| 4 | [Research Graph](agents/04_research_graph/) | LangGraph | StateGraph, conditional edges, reducers, reflection loop | plan → multi-tool research → critic → revise |
-| 5 | [Desk Analyst](agents/05_desk_analyst/) | LangGraph | routing, parallel sub-agents + join, critique loop, **human-in-the-loop interrupt**, checkpointing | regime-routed signal memo, human must approve |
-| 6 | [Voice Agents](agents/06_voice/) | OpenAI Realtime | speech-to-speech, WebRTC, ephemeral credentials, server-side tools | 3 voice agents: generalist receptionist, generalist quoting agent, and an **AI Options Desk** that tells you the exact GEX trade |
+One host, one job. This repo is the trading app:
 
-**+ [the web app](web/)** — one big conversation UI over all of it: switch agents mid-chat, watch tools fire as chips, approve the desk analyst's memo with buttons, and **press the mic to talk to any agent** (a Realtime "voice bridge" wraps the text agents, so you can literally have a phone call with a LangGraph).
+- **The engine** (`common/`) is deterministic and testable. It reads a tape into a stage machine (armed, confirming, triggered), scores confluence across five independent checks, recognises day shapes like capitulation and double bottoms, and prices contracts with Black-Scholes. No model decides what the trade is. The engine does, and Marcus reads it out.
+- **The cockpit** (`web/trade/`) is the chart: 24-hour session colouring, visible-range volume profile, VWAP sigma bands, the levels the engine is watching, and a position book you can act on.
+- **Marcus** (`agents/06_voice/personas.py`) is a speech-to-speech analyst on the OpenAI Realtime API. His tools run server-side and read the same engine the chart draws, so what he says and what you see cannot drift apart.
 
-## The system at a glance
+The five text agents that used to live here (the LangChain and LangGraph ladder, plus the agent builder) moved to **[agent-observatory](https://github.com/igorfyago/agent-observatory)**, where the subject is agents themselves: how they are wired, what they call, what they cost. Splitting them means each host is one thing instead of two half-things.
+
+## The engine, briefly
+
+Everything Marcus says traces back to one deterministic read:
 
 ```mermaid
-flowchart TB
-    subgraph DATA [Shared data layer — common/]
-        DB[(SQLite mirror of the\ngex_dex_snapshots schema\nauto-seeded demo data)]
-        BS[Black-Scholes pricer\nexpected-move math]
-        LIVE[optional: live Postgres\nfrom options-flow-analytics]
-    end
-
-    subgraph TEXT [Text agents — the complexity ladder]
-        A1[1 · Market Brief\nstructured output] --> A2[2 · Text-to-SQL\ntool loop]
-        A2 --> A3[3 · Repo RAG\nretrieval as a tool]
-        A3 --> A4[4 · Research Graph\nloops + reflection]
-        A4 --> A5[5 · Desk Analyst\nfan-out + HITL]
-    end
-
-    subgraph VOICE [Voice layer]
-        W[Browser · WebRTC] <--> RT[OpenAI Realtime\ngpt-realtime-2.1]
-        RT -- function calls --> API[FastAPI backend]
-    end
-
-    A2 & A4 & A5 --> DB
-    API --> DB
-    API --> BS
-    DB -.swap.- LIVE
+flowchart LR
+    BARS[(bars · 24h tape)] --> PROF[volume profile\nwalls + gaps]
+    BARS --> VW[VWAP\nsigma bands]
+    PROF & VW --> TAPE[read_tape\narmed / confirming / triggered]
+    TAPE --> SHAPE[day_shape\ncapitulation · double bottom]
+    TAPE --> GAP[gap_run\ncontinuation]
+    SHAPE & GAP & TAPE --> CONF[confluence\n5 checks, evidence each]
+    CONF --> SIZE[contract + sizing\nfull clip / split / plan only]
+    SIZE --> CHART[the chart draws it]
+    SIZE --> MARCUS[Marcus says it]
 ```
+
+The scorecard is the point: a setup with two of five checks green is sized differently from one with five, and the reason is attached to each box rather than summarised away.
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/igorfyago/ai-trading-desk && cd ai-trading-desk
-python -m venv .venv && .venv\Scripts\activate     # Windows (source .venv/bin/activate on mac/linux)
+python -m venv .venv && .venv\Scripts\activate   # source .venv/bin/activate on mac/linux
 pip install -e ".[web]"
-copy .env.example .env                              # add your OPENAI_API_KEY
+copy .env.example .env                            # add your OPENAI_API_KEY
 
-python -m common.db                                 # build + seed the demo database
-python agents/01_market_brief/main.py "Is SPY pinned into Friday opex?"
-python agents/02_text_to_sql/main.py "Top 5 put walls by strength, with spot at the time"
-python agents/04_research_graph/main.py "Compare dealer positioning on SPY vs QQQ"
-python agents/05_desk_analyst/main.py SPY           # pauses for your approval before publishing
-uvicorn web.server:app --reload                     # http://localhost:8000 → talk to the desk
+python -m common.db                               # build and seed the demo database
+uvicorn web.server:app --reload                   # http://localhost:8000
 ```
 
-Agent 3 additionally needs a checkout of [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) (`GEX_REPO_PATH` in `.env`), then `--index` once.
-
-## The web app
-
-`uvicorn web.server:app` serves a single-page app that puts all six agents in **one conversation**:
-
-- **Agent switcher** — the full ladder in the sidebar; switch mid-conversation, the transcript keeps flowing.
-- **Live execution view** — LangGraph node progress and tool calls render as chips while the agent works; answers stream in.
-- **Human-in-the-loop in the UI** — when the Desk Analyst wants to publish, the chat shows the memo with *Approve / Request changes / Reject* buttons wired to `interrupt()`/`Command(resume=…)`.
-- **Voice on every agent** — the three voice-native personas talk directly; for the text agents a **voice bridge** mints a Realtime session whose only tool is `ask_agent`, so the model converses naturally and delegates the thinking to the LangChain/LangGraph agent server-side. Approving the analyst's memo *by voice* works too.
-
-## Observability (LangSmith)
-
-Every chat run, every graph node, every sub-agent and **every voice tool call** is traced. Setup is three env vars in `.env` (`LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `LANGSMITH_PROJECT=ai-trading-desk`) — LangChain/LangGraph pick them up automatically, and the voice path is instrumented with `@traceable`. Web runs are tagged (`web-ui`, agent id, session) so you can filter one user's conversation, inspect the Desk Analyst's parallel branches, token costs, and latencies, or replay a failing SQL loop step by step.
+`/` is the cockpit. `/marcus` is Marcus on his own, which is also what the cockpit embeds.
 
 ## Testing
 
 ```bash
 pip install -e ".[web,dev]"
-pytest                    # 48 unit + integration tests, no API key needed, ~6s
-RUN_LIVE=1 pytest tests/integration/test_live.py   # opt-in: real API round-trips
+pytest                                            # keyless, a few seconds
+RUN_LIVE=1 pytest tests/integration/test_live.py  # opt-in, spends real tokens
 ```
 
-The suite is designed around what can go wrong in an agent system, not just line coverage:
+The suite is built around what actually goes wrong in this system:
 
-- **Unit** — pricing math *properties* (put-call parity, delta bounds, monotonicity), all five branches of the trade engine, seed determinism, and **SQL guardrails** (DML/DDL/multi-statement injection attempts must come back `REJECTED`, bad SQL must come back as feedback, never an exception).
-- **Graph topology** — the LangGraph wiring *is* the design, so tests pin it: the research graph's two loops close, the analyst graph fans out from both playbooks to all three specialists and joins before synthesis.
-- **Contract** — every tool a voice persona declares to OpenAI must have a matching server-side implementation with valid JSON schema.
-- **Integration** — the FastAPI surface with a test client: NDJSON chat streams, voice tools writing real rows, and *clean failure*: with a bad key the stream must yield a structured `error` event, not a 500.
-- **Live (opt-in)** — one real structured-output run and one real Realtime session mint.
+- **Pricing properties**, not examples: put-call parity, delta bounds, monotonicity.
+- **The trade engine's branches**, including the ones that must refuse to fire.
+- **The 24-hour quote contract**: once the extended tape has printed, a later provider round serving the frozen close must not blank it. That bug shipped twice before it got a test.
+- **Tool contracts**: every tool Marcus declares to OpenAI has a server-side implementation with a valid schema, because a missing one only fails mid-call.
+- **The API surface**, including that the departed chat routes really are gone. Dead routes are how you end up with two versions of the same thing.
 
-CI runs the keyless suite on every push (badge above). Tests never spend tokens unless you set `RUN_LIVE=1`.
+CI runs the keyless suite on every push. Tests never spend tokens unless you set `RUN_LIVE=1`.
 
-## Agent evals
+## Evals
 
-Tests check the code; [evals](evals/) check the agents' *judgment*. `python evals/run_evals.py all` runs graded datasets through the agents and publishes experiments to LangSmith: text-to-SQL is graded by **executing reference SQL** against the deterministic DB and demanding the true numbers in the answer (no judge needed), extraction is exact-matched, and RAG answers get a citation check plus an LLM-as-judge verdict against author-written references. Baseline: SQL 100% across 6 tasks; the eval suite also surfaced its first real finding — RAG answers are semantically correct (judge: 100%) but under-cite source files (62%), now a measurable iteration target. See [evals/README.md](evals/README.md).
-
-## Roadmap
-
-- **Simple mode** — the same desk, explained so a 10-year-old gets it (agent output rewritten to plain language + voice)
-- **Execution** — IBKR paper-trading integration so approved memos become staged orders (behind the same human-approval interrupt)
-- **Signal fusion** — blend GEX with volume profile, VWAP σ-bands, RSI and pattern detection (the chart-reading traders do by eye, systematized)
-- **Hosting** — AWS (single EC2 like options-flow-analytics, or ECS Fargate + ALB for TLS/WebRTC)
-
-## Why finance, why GEX?
-
-Dealer positioning — who is long/short gamma, where the walls are, where hedging flows flip from dampening to amplifying — is the lens this whole stack is built around, and I'd already built the analytics service. These agents are the natural next layer: natural-language access (level 2), institutional knowledge (level 3), research automation (levels 4–5), and a phone line (level 6) for a system that already existed. AI agents are most convincing when they sit on top of something real.
+Tests check the code. [evals](evals/) check Marcus's judgment: scripted calls run against the real persona and tools, then get graded on whether he used the engine, led with the trade in plain language, respected an established day rather than fighting it, and stayed off jargon unless asked. `python evals/voice_evals.py all`.
 
 ## Design principles
 
-- **One new idea per level.** Each README has a diagram and a "concepts introduced" table; the code is written to be read top-to-bottom.
-- **The LLM is never trusted.** Read-only SQL with keyword guardrails, row caps, recursion limits, bounded loops, a risk-critic gate, and a human interrupt before anything is published. Voice tools execute server-side only.
-- **Runs for anyone.** Deterministic synthetic seed data mirrors the production schema; `DATABASE_URL` swaps in the real feed without code changes.
-- **Provider-agnostic where it's free.** All text agents go through `init_chat_model` — change `DESK_MODEL` in `.env` to swap OpenAI for Anthropic/Google/local.
+- **The model never decides the trade.** It reads out a deterministic engine. That is what makes the answer reproducible and the failure modes findable.
+- **The model is never trusted with writes.** Voice tools execute server-side only.
+- **One source of truth per fact.** The chart, Marcus, and the book read the same engine and the same quote layer. Two code paths for one number is two numbers eventually.
+- **Runs for anyone.** Deterministic seed data mirrors the production schema, and `DATABASE_URL` swaps in the real feed without code changes.
 
 ## Deployment
 
-The desk runs 24/7 on AWS alongside the real [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) pipeline — the agents query the **live** dealer-positioning Postgres in production, the bundled SQLite only in dev. Three staged paths, each fully documented in [docs/DEPLOY_AWS.md](docs/DEPLOY_AWS.md):
-
-1. **EC2 + Docker Compose** ([deploy/](deploy/)) — full stack (Postgres, Rust collector, dashboard, agents, Caddy TLS) on one instance; secrets from SSM, logs to CloudWatch, backups to S3.
-2. **Kubernetes** ([k8s/](k8s/), kubeconform-validated, built in CI) — k3s on the same box or any cluster: 2-replica stateless web tier with probes and resource limits, Secrets, Ingress + cert-manager.
-3. **Managed** — ECR + ECS Fargate + ALB/ACM (or EKS with the same manifests), RDS, GitHub Actions CD via OIDC.
-
-CI builds and smoke-tests the Docker image and validates the manifests on every push.
+Runs 24/7 on one EC2 box beside the real [options-flow-analytics](https://github.com/igorfyago/options-flow-analytics) pipeline, so in production the engine queries the live dealer-positioning Postgres and the bundled SQLite is a dev convenience. Caddy routes each hostname to its own service. Full write-up in [docs/DEPLOY_AWS.md](docs/DEPLOY_AWS.md), with [k8s/](k8s/) manifests validated in CI.
 
 ## Repo layout
 
 ```
-common/          shared model factory, demo DB (schema + seed), market math, signal engine
-agents/01..06    the ladder — each folder: main.py + README with diagram
-web/             FastAPI backend + the one-conversation chat/voice UI
-evals/           graded LangSmith experiments per agent
-tests/           unit + integration + opt-in live tests (CI-gated)
-deploy/ k8s/     Docker Compose production stack · Kubernetes manifests
+common/          the engine: tape reading, signals, market math, quotes, demo DB
+agents/06_voice/ Marcus: persona, tools, speech rules
+web/             FastAPI backend, the trade cockpit, Marcus's page, the portal
+evals/           graded voice evals for Marcus
+tests/           unit + integration + opt-in live tests, CI gated
+deploy/ k8s/     Docker Compose production stack, Kubernetes manifests
 ```
 
 ---
 
-*Demo data and indicative Black-Scholes quotes — nothing here is financial advice or an offer to trade.*
+*Demo data and indicative Black-Scholes quotes. Nothing here is financial advice or an offer to trade.*

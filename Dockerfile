@@ -1,4 +1,5 @@
-# ai-trading-desk web app: all six agents + voice behind one FastAPI process.
+# minitrade: the trading cockpit and Marcus, its voice analyst, in one
+# FastAPI process. The other agents moved to agent-observatory.
 FROM python:3.12-slim
 
 WORKDIR /app

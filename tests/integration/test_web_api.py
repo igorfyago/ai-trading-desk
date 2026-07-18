@@ -36,57 +36,35 @@ def test_agent_catalog_is_personas_only(client):
     must stay cheap: no LLM, no DB, no custom-persona lookup."""
     d = client.get("/agents").json()
     assert "text_agents" not in d and "builder" not in d
-    assert {p["id"] for p in d["voice_personas"]} == {"riley", "quinn", "marcus"}
+    assert {p["id"] for p in d["voice_personas"]} == {"marcus"}
     for p in d["voice_personas"]:
         assert p["label"] and p["tagline"]
 
 
-def test_unknown_persona_404s_without_the_custom_store(client):
+def test_unknown_persona_404s(client):
     assert client.post("/session/nobody").status_code == 404
     assert client.post("/tool/nobody", json={"name": "x", "arguments": {}}).status_code == 404
 
 
-def test_voice_tool_roundtrip_writes_db(client, db_conn):
-    r = client.post("/tool/riley", json={
-        "name": "book_appointment",
-        "arguments": {"patient_name": "Integration Ida", "contact": "ida@x.com",
-                      "service": "checkup", "slot": "Wed 11:00"}})
+def test_marcus_tool_runs_server_side_and_books_the_quote(client, db_conn):
+    """The tool endpoint is what the Realtime session calls mid-conversation.
+    It must run the engine server-side and leave the quote in the book, which
+    is what lets the chart and a later call agree on what was said."""
+    r = client.post("/tool/marcus", json={
+        "name": "trade_recommendation", "arguments": {"ticker": "IWM"},
+        "session": "integration-book"})
     assert r.status_code == 200
-    assert json.loads(r.json()["output"])["status"] == "booked"
-    n = db_conn.execute(
-        "SELECT COUNT(*) FROM appointments WHERE patient_name='Integration Ida'").fetchone()[0]
-    assert n == 1
-
-
-def test_marcus_trade_recommendation_via_api(client):
-    r = client.post("/tool/marcus", json={"name": "trade_recommendation",
-                                          "arguments": {"ticker": "IWM"}})
     out = json.loads(r.json()["output"])
     assert out["ticker"] == "IWM" and out["legs"] and "disclaimer" not in out
 
 
-def test_unknown_persona_and_agent_404(client):
-    assert client.post("/tool/nobody", json={"name": "x", "arguments": {}}).status_code == 404
-    assert client.post("/chat/nobody", json={"message": "hi", "session": "s"}).status_code == 404
-
-
-def test_chat_streams_ndjson_and_fails_clean_without_real_key(client):
-    r = client.post("/chat/brief", json={"message": "test", "session": "it-1"})
-    assert r.status_code == 200
-    assert r.headers["content-type"].startswith("application/x-ndjson")
-    events = [json.loads(line) for line in r.text.strip().splitlines()]
-    assert events, "stream must yield at least one event"
-    assert all("type" in e for e in events)
-    # dummy key → the run must surface as a structured error event, not a 500
-    assert events[-1]["type"] == "error"
-
-
-def test_resume_without_pending_memo_is_clean(client):
-    r = client.post("/chat/analyst/resume",
-                    json={"session": "never-ran", "action": "approve", "notes": ""})
-    events = [json.loads(line) for line in r.text.strip().splitlines()]
-    assert events[-1]["type"] == "error"
-    assert "awaiting approval" in events[-1]["text"]
+def test_the_chat_surface_is_gone_from_the_desk(client):
+    """The five text agents and their NDJSON chat stream moved to the
+    observatory. Leaving dead routes here is how you end up with two versions
+    of the same thing, which is the whole point of the split."""
+    for path in ("/chat/brief", "/chat/analyst/resume", "/tool/bridge/brief"):
+        assert client.post(path, json={"message": "x", "session": "s"}).status_code == 404
+    assert client.get("/api/atlas").status_code == 404
 
 
 def test_session_mint_fails_clean_with_dummy_key(client):

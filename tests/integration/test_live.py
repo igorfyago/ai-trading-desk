@@ -23,21 +23,6 @@ def real_keys(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", key)
 
 
-def test_agent1_live_structured_output():
-    import importlib.util
-    from pathlib import Path
-
-    spec = importlib.util.spec_from_file_location(
-        "a1_live", Path(__file__).resolve().parents[2] / "agents/01_market_brief/main.py")
-    a1 = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(a1)
-
-    result = a1.run("Is QQQ in a positive gamma regime good for iron condors?")
-    assert result.tickers == ["QQQ"]
-    assert 0.0 <= result.confidence <= 1.0
-    assert len(result.answer) > 100
-
-
 def test_realtime_session_mints_ephemeral_secret():
     import httpx
 

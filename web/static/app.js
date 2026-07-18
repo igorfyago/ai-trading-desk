@@ -56,29 +56,23 @@ refreshSpy();
 setInterval(refreshSpy, 30000);
 
 async function boot() {
+  // This host is the trading app now: Marcus is the only agent here. The rest
+  // of the roster and the agent builder moved to the observatory, so the
+  // catalog is just the desk's voice personas (Marcus leads).
   catalog = await fetch("/agents").then((r) => r.json());
-  const ta = $("text-agents");
-  ta.innerHTML = "";
-  for (const a of catalog.text_agents) {
-    ta.appendChild(agentButton({ kind: "text", id: a.id, name: a.name, desc: a.desc, hint: a.hint },
-      `L${a.level}`));
-  }
-  const groups = { finance: $("finance-voice"), agency: $("agency-personas"), custom: $("custom-personas") };
-  Object.values(groups).forEach((el) => (el.innerHTML = ""));
+  catalog.text_agents = catalog.text_agents || [];
+  const nav = $("persona-list");
+  nav.innerHTML = "";
   for (const p of catalog.voice_personas) {
-    const target = groups[p.category] || groups.agency;
-    target.appendChild(agentButton({ kind: "persona", id: p.id, name: p.label, desc: p.tagline }, "🎙"));
+    nav.appendChild(agentButton({ kind: "persona", id: p.id, name: p.label, desc: p.tagline }, "🎙"));
   }
-  $("custom-label").style.display = groups.custom.children.length ? "" : "none";
-  renderBuilderOptions();
   await loadHistory();
   if (!current) {
     const want = urlParams.get("agent");
-    const persona = want && catalog.voice_personas.find((p) => p.id === want);
-    const textA = want && catalog.text_agents.find((a) => a.id === want);
+    const persona = catalog.voice_personas.find((p) => p.id === want)
+      || catalog.voice_personas.find((p) => p.id === "marcus")
+      || catalog.voice_personas[0];
     if (persona) select({ kind: "persona", id: persona.id, name: persona.label, desc: persona.tagline });
-    else if (textA) select({ kind: "text", ...textA });
-    else select({ kind: "text", ...catalog.text_agents[0] });
   }
 }
 
@@ -93,7 +87,7 @@ async function loadHistory() {
     const h = await fetch(`/api/chatlog?session=${sessionId}&limit=40`).then((r) => r.json());
     if (!(h.messages || []).length) return;
     const names = {};
-    for (const a of catalog.text_agents) names[a.id] = a.name;
+    for (const p of catalog.voice_personas) names[p.id] = p.label;
     for (const m of h.messages) {
       const who = m.role === "user" ? "You" : (names[m.agent] || m.agent);
       const b = bubble(who, m.role === "user" ? "user" : "agent");
@@ -682,40 +676,6 @@ function drawCallerLevels(args) {
 /* --------------------------------------------------------------- wire ---- */
 
 /* ------------------------------------------------------------ builder ---- */
-
-function renderBuilderOptions() {
-  const b = catalog.builder || { voices: [], tools: [] };
-  $("b-voice").innerHTML = b.voices.map((v) => `<option>${v}</option>`).join("");
-  $("b-tools").innerHTML = b.tools.map((t) =>
-    `<label><input type="checkbox" value="${t}"> ${t}</label>`).join("");
-}
-
-$("open-builder").onclick = () => $("builder-overlay").classList.add("open");
-$("b-cancel").onclick = () => $("builder-overlay").classList.remove("open");
-
-$("b-create").onclick = async () => {
-  const msg = $("b-msg");
-  msg.className = ""; msg.textContent = "creating…";
-  try {
-    const resp = await fetch("/api/personas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json",
-                 "X-Admin-Token": $("b-token").value.trim() },
-      body: JSON.stringify({
-        label: $("b-name").value.trim(),
-        tagline: $("b-tag").value.trim(),
-        voice: $("b-voice").value,
-        instructions: $("b-instr").value.trim(),
-        tools: [...document.querySelectorAll("#b-tools input:checked")].map((i) => i.value),
-      }),
-    });
-    const d = await resp.json();
-    if (!resp.ok) throw new Error(d.detail || "failed");
-    msg.className = "ok"; msg.textContent = `created "${d.label}", it's in the sidebar`;
-    await boot();
-    setTimeout(() => $("builder-overlay").classList.remove("open"), 900);
-  } catch (e) { msg.textContent = e.message; }
-};
 
 $("send").onclick = send;
 $("input").addEventListener("keydown", (e) => {

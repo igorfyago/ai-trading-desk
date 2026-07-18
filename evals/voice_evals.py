@@ -5,7 +5,7 @@ REAL tools (bookings hit the DB, trades hit the engine). Grading is mechanical
 where possible (did the booking row appear? was contact collected BEFORE
 booking? does it stay in the game frame?) plus one LLM judge for tone.
 
-    python evals/voice_evals.py all            # or: riley | quinn | marcus
+    python evals/voice_evals.py all            # the desk persona: marcus
     python evals/voice_evals.py all --json     # machine-readable, for the loop
 
 The rubric intentionally covers what voice-agency kits sell: greeting, task
@@ -103,8 +103,7 @@ def db_cleanup():
     from common.db import get_connection
 
     conn = get_connection()
-    for t, col in (("appointments", "patient_name"), ("quotes", "customer")):
-        conn.execute(f"DELETE FROM {t} WHERE {col} LIKE 'EvalBot%'")
+    conn.execute("DELETE FROM trades WHERE session LIKE 'eval-%'")
     conn.commit()
     conn.close()
 
@@ -121,58 +120,6 @@ def delivery(tr) -> str:
 # ----------------------------------------------------------- scenarios ----
 
 SCENARIOS = [
-    # ---- Riley: the classic receptionist benchmark
-    dict(persona="riley", name="booking_happy_path", turns=[
-        "hi, I'd like to book a cleaning sometime Tuesday morning",
-        "9:30 works great",
-        "sure - EvalBot Riley, evalbot@test.com",
-    ], checks={
-        "greeting_first": lambda tr: "northline" in agent_turns(tr)[0].lower(),
-        "offered_real_slots": lambda tr: "clinic_openings" in tools_called(tr),
-        "collected_before_booking": lambda tr:
-            turn_index(tr, lambda w, t: w == "caller" and "EvalBot" in t)
-            < turn_index(tr, lambda w, t: w == "tool:book_appointment"),
-        "booking_row_written": lambda tr: db_count(
-            "SELECT COUNT(*) FROM appointments WHERE patient_name LIKE 'EvalBot%'") > 0,
-        "confirmed_back": lambda tr: any("9:30" in t or "nine thirty" in t.lower()
-                                         for t in agent_turns(tr)[-2:]),
-    }),
-    dict(persona="riley", name="noise_and_unintelligible", turns=[
-        "(coughing, keyboard sounds, no words)",
-        "sorry - I want an appointment, my number is 5..5..(garbled)..2",
-    ], checks={
-        "silence_on_noise": lambda tr: len(agent_turns(tr)[1].strip()) <= 45,
-        "no_guessing_contact": lambda tr: "book_appointment" not in tools_called(tr),
-        "asked_to_repeat": lambda tr: any(w in agent_turns(tr)[-1].lower()
-                                          for w in ("again", "repeat", "one more time")),
-    }),
-    dict(persona="riley", name="emergency_empathy", turns=[
-        "my crown just fell out and it really hurts, can someone see me today?",
-    ], checks={
-        "empathy_first": lambda tr: any(
-            w in t.lower() for t in agent_turns(tr)
-            for w in ("sorry", "ouch", "oh no", "that sounds", "hurts", "let's get you",
-                      "we'll get you", "hang in", "not fun", "no fun", "painful")),
-        "no_medical_advice": lambda tr: not any(w in " ".join(agent_turns(tr)).lower()
-                                                for w in ("ibuprofen", "painkiller", "antibiotic")),
-        "moved_to_slot": lambda tr: "clinic_openings" in tools_called(tr)
-            or any(w in agent_turns(tr)[-1].lower() for w in ("today", "soonest", "earliest", "right in")),
-    }),
-    # ---- Quinn: the quoting benchmark
-    dict(persona="quinn", name="estimate_flow", turns=[
-        "what would a kitchen remodel cost me?",
-        "around 150 square feet, mid-range is fine",
-        "yes please, send it in writing - EvalBot Quinn, evalbotq@test.com",
-    ], checks={
-        "asked_scope_first": lambda tr: turn_index(tr, lambda w, t: w == "tool:estimate_project") == -1
-            or turn_index(tr, lambda w, t: w == "caller" and "150" in t)
-            < turn_index(tr, lambda w, t: w == "tool:estimate_project"),
-        "estimate_tool_used": lambda tr: "estimate_project" in tools_called(tr),
-        "ballpark_caveat": lambda tr: any(w in " ".join(agent_turns(tr)).lower()
-                                          for w in ("ballpark", "site visit", "rough")),
-        "quote_row_written": lambda tr: db_count(
-            "SELECT COUNT(*) FROM quotes WHERE customer LIKE 'EvalBot%'") > 0,
-    }),
     # ---- Marcus: the finance benchmark (plain english + reliability)
     dict(persona="marcus", name="trade_plain_english", turns=[
         "what should I trade on SPY right now?",

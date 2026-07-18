@@ -18,7 +18,7 @@ import threading
 
 import httpx
 
-PHONE_PERSONA = "riley"
+PHONE_PERSONA = "marcus"   # you call the desk to reach the analyst, not a receptionist
 REALTIME_MODEL = os.getenv("REALTIME_MODEL", "gpt-realtime-2.1")
 
 

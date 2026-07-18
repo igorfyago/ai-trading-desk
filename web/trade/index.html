@@ -19,6 +19,8 @@
   }
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; }
+  /* the page itself never scrolls: panes that need it scroll inside themselves */
+  body { overflow:hidden; }
   body { background:var(--bg); color:var(--text);
          font:15px/1.65 var(--font, "Inter", system-ui, sans-serif); display:flex;
          -webkit-font-smoothing:antialiased; }
@@ -73,8 +75,15 @@
   #g-score.neg { color:var(--red); border-color:rgba(244,101,127,.4); }
 
   /* panes */
-  main { flex:1; min-width:0; display:flex; margin-left:58px; }
-  .pane { flex:1; display:none; min-width:0; }
+  /* min-height:0 is the whole reason this cockpit fits one screen.
+     A flex item defaults to min-height:auto, which means it REFUSES to shrink
+     below its own content. So when the top tab bar arrived and body became a
+     column, main kept growing to whatever the chart and the watchlist wanted
+     and pushed the page to two screens, while #dash's overflow:hidden sat
+     there unable to clip anything. Nothing was wrong with #dash: it was never
+     given a height to work inside. */
+  main { flex:1; min-width:0; min-height:0; display:flex; margin-left:58px; }
+  .pane { flex:1; display:none; min-width:0; min-height:0; }
   .pane.active { display:flex; }
   iframe { border:0; width:100%; height:100%; }
 
@@ -226,9 +235,11 @@
                           border:1px solid var(--line); }
   @media (max-width:1400px){ .dgrid{grid-template-columns:minmax(340px,1fr) minmax(0,1.25fr);}
                              #watch-rail{display:none;} .pdiv:not(.pdiv-h){display:none;} }
+  /* A hard pixel minimum is fine on a big monitor and is exactly what pushes a
+     laptop into a second screen. It yields to the viewport instead. */
   #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px);
-             overflow:hidden; flex:1; min-height:340px; }
-  #agent-dock { flex:var(--dockgrow,1.3); min-height:200px; display:flex; flex-direction:column;
+             overflow:hidden; flex:1; min-height:min(340px, 34vh); }
+  #agent-dock { flex:var(--dockgrow,1.3); min-height:min(200px, 20vh); display:flex; flex-direction:column;
                 background:var(--panel); border:1px solid var(--line);
                 border-radius:var(--radius,8px); overflow:hidden; }
   .dockbar { display:flex; justify-content:space-between; align-items:center; padding:9px 16px;

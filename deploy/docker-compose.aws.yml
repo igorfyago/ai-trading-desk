@@ -215,6 +215,35 @@ services:
       FX_PORT: "8090"
       JAVA_TOOL_OPTIONS: "-Xmx48m"
 
+  # ---- the broker: orders, fills, cost basis and the watchlist.
+  # Same image, different entrypoint, its own database (minibank_broker on
+  # the control-plane Postgres) and its own Kafka groups. The bank settles
+  # its fills over the 'orders' and 'settlements' topics.
+  #
+  # It is given no shard address, deliberately: the boundary between this
+  # service and the ledger is the absence of a connection string, not a
+  # convention someone has to remember.
+  #
+  # BROKER_VENUE stays 'simulated'. The venue port has a real-broker seam,
+  # and pointing it at one is a decision somebody makes on purpose, never a
+  # side effect of deploying.
+  minibank-broker:
+    build: ../../minibank/ledger-service
+    restart: unless-stopped
+    entrypoint: ["java", "-cp", "classes:deps/*", "dev.minibank.broker.BrokerService"]
+    depends_on:
+      minibank-control:
+        condition: service_healthy
+      minibank-kafka:
+        condition: service_started
+    environment:
+      BROKER_PORT: "8091"
+      BROKER_VENUE: simulated
+      MINIBANK_DB_URL: jdbc:postgresql://minibank-control:5432/minibank
+      MINIBANK_KAFKA: minibank-kafka:9092
+      FX_URL: http://minibank-fx:8090
+      JAVA_TOOL_OPTIONS: "-Xmx96m"
+
   # ---- minimart + minipay: a shop with a simulated economy, and its processor
   minimart:
     build: ../../minimart

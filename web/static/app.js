@@ -385,22 +385,31 @@ const REAL_WORDS = /[\p{L}\p{N}]{2,}/u;
 const IDLE_GUARD_MS = 30_000;
 
 function killGhostTurn(userItemId, wasSpeaking) {
+  // Only the GHOST may be cancelled. A reply that began BEFORE this phantom
+  // turn is a real sentence the caller is listening to · cancelling that was
+  // the desk cutting itself off while nobody spoke. Compare the clocks: the
+  // active response is the ghost only if it was created after the noise.
+  const isGhost = voice.responseActive
+    && (voice.responseStartedAt || 0) > (voice.speechStartedAt || 0);
   try {
-    voice.dc.send(JSON.stringify({ type: "response.cancel" }));
-    voice.dc.send(JSON.stringify({ type: "output_audio_buffer.clear" }));
-    if (userItemId) {
+    if (isGhost) {
+      voice.dc.send(JSON.stringify({ type: "response.cancel" }));
+      voice.dc.send(JSON.stringify({ type: "output_audio_buffer.clear" }));
+    }
+    if (userItemId) {           // the phantom turn always leaves the context
       voice.dc.send(JSON.stringify({ type: "conversation.item.delete", item_id: userItemId }));
     }
   } catch { /* channel closing: nothing to kill */ }
-  voice.scrubNext = true;                     // response.done will delete its items
-  const ghost = voice.agentLine && voice.agentLine.closest(".bubble");
-  if (ghost) ghost.remove();                  // never happened, don't show it
-  voice.agentLine = null;
+  if (isGhost) {
+    voice.scrubNext = true;                   // response.done will delete its items
+    const ghost = voice.agentLine && voice.agentLine.closest(".bubble");
+    if (ghost) ghost.remove();                // never happened, don't show it
+    voice.agentLine = null;
+  }
   liftMuteGuard();
-  // BACKGROUND MUSIC/NOISE barge-in cancels the agent MID-WORD before the
-  // transcript proves it was nobody: once proven, tell him to FINISH the
-  // thought instead of leaving the sentence dead in the air
-  if (wasSpeaking && Date.now() - (voice.resumeAt || 0) > 2500) {
+  // if a barge-in DID clip him mid-word, tell him to finish the thought
+  // instead of leaving the sentence dead in the air
+  if (isGhost && wasSpeaking && Date.now() - (voice.resumeAt || 0) > 2500) {
     voice.resumeAt = Date.now();
     requestResponse();          // gated: never races the response being cancelled
   }
@@ -423,8 +432,13 @@ async function handleVoiceEvent(ev) {
       voice.lastError = { code: ev.error?.code, msg, at: Date.now() };
       break;
     }
+    case "input_audio_buffer.speech_started": {
+      voice.speechStartedAt = Date.now();     // a turn began (real or the room)
+      break;
+    }
     case "response.created": {
       voice.responseActive = true;
+      voice.responseStartedAt = Date.now();   // whose sentence is on the air
       // reply starting after a long quiet spell: hold the speaker until the
       // transcript proves it was a person, not the room (fail-open in 4s).
       // NEVER guard a reply the caller asked for (real turn / tool follow-up) —

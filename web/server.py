@@ -102,11 +102,20 @@ REALTIME_MODEL = os.getenv("REALTIME_MODEL", "gpt-realtime-2.1")
 def AUDIO_CONFIG(voice: str) -> dict:
     """Voice out + SEMANTIC turn detection in: the model waits for end-of-thought,
     not just end-of-silence. Eagerness LOW = patient turn-taking, far fewer
-    responses triggered by coughs/taps/background noise."""
+    responses triggered by coughs/taps/background noise.
+
+    interrupt_response FALSE is the anti-cutoff rule. By default the server
+    TRUNCATES the agent mid-word the instant its VAD believes the caller
+    started speaking · a breath, a chair, music in the room all qualify, so
+    the agent kept killing his own sentences while the caller sat silent.
+    Off, he finishes the thought and answers the turn next; a caller who
+    really wants to cut in just talks, and their turn is served after the
+    sentence instead of shredding it."""
     return {
         "output": {"voice": voice},
         "input": {
-            "turn_detection": {"type": "semantic_vad", "eagerness": "low"},
+            "turn_detection": {"type": "semantic_vad", "eagerness": "low",
+                               "interrupt_response": False},
             # transcribe the caller so their words render in the chat log
             "transcription": {"model": "gpt-4o-mini-transcribe"},
         },

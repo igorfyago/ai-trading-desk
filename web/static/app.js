@@ -17,7 +17,8 @@ const sessionId = (() => {
 let catalog = null;
 let current = null;            // {kind: 'text'|'persona', id, name, desc, hint}
 let busy = false;
-let voice = { live: false, textOnly: false, pc: null, dc: null, mic: null, agentLine: null,
+let voice = { live: false, textOnly: false, responseActive: false, pendingResponse: false,
+            pc: null, dc: null, mic: null, agentLine: null,
               audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
 const VOICE_IDLE_MS = 3 * 60 * 1000;   // auto-hangup: an open mic left alone is
                                        // background-noise triggers + token burn
@@ -305,7 +306,7 @@ async function startVoice({ withMic, queueText } = { withMic: true }) {
     // the queued message IS the opener, no greeting over it.
     voice.dc.onopen = () => {
       if (queueText) sendTextTurn(queueText);
-      else voice.dc.send(JSON.stringify({ type: "response.create" }));
+      else requestResponse();
     };
 
     const offer = await voice.pc.createOffer();
@@ -332,15 +333,27 @@ async function startVoice({ withMic, queueText } = { withMic: true }) {
   $("mic").disabled = false;
 }
 
+/* THE ONE DOOR to response.create. The Realtime session can run exactly ONE
+   response at a time: a second response.create while one is speaking makes
+   the two compete and the live one dies MID-WORD. That is the cutoff. Every
+   path (greeting, typed turn, tool results, noise-repair) goes through here,
+   and anything asked for while a response is live is QUEUED, never raced. */
+function requestResponse() {
+  if (!voice.dc || voice.dc.readyState !== "open") return;
+  if (voice.responseActive) { voice.pendingResponse = true; return; }
+  voice.expectReply = true;
+  voice.lastActivity = Date.now();
+  try { voice.dc.send(JSON.stringify({ type: "response.create" })); }
+  catch { /* channel closing */ }
+}
+
 function sendTextTurn(text) {
   voice.dc.send(JSON.stringify({
     type: "conversation.item.create",
     item: { type: "message", role: "user",
             content: [{ type: "input_text", text }] },
   }));
-  voice.expectReply = true;
-  voice.lastActivity = Date.now();
-  voice.dc.send(JSON.stringify({ type: "response.create" }));
+  requestResponse();
 }
 
 function hangUp(silent) {
@@ -348,7 +361,8 @@ function hangUp(silent) {
   voice.mic?.getTracks().forEach((t) => t.stop());
   voice.audioEl?.pause();
   const wasLive = voice.live;
-  voice = { live: false, textOnly: false, pc: null, dc: null, mic: null, agentLine: null,
+  voice = { live: false, textOnly: false, responseActive: false, pendingResponse: false,
+            pc: null, dc: null, mic: null, agentLine: null,
             audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
   $("mic").classList.remove("live");
   if (!silent) {
@@ -388,8 +402,7 @@ function killGhostTurn(userItemId, wasSpeaking) {
   // thought instead of leaving the sentence dead in the air
   if (wasSpeaking && Date.now() - (voice.resumeAt || 0) > 2500) {
     voice.resumeAt = Date.now();
-    voice.expectReply = true;
-    try { voice.dc.send(JSON.stringify({ type: "response.create" })); } catch { /* closing */ }
+    requestResponse();          // gated: never races the response being cancelled
   }
 }
 
@@ -402,7 +415,16 @@ function liftMuteGuard() {
 
 async function handleVoiceEvent(ev) {
   switch (ev.type) {
+    case "error": {
+      // the server tells us when we raced it; make that visible instead of
+      // letting it show up only as Marcus dying mid-sentence
+      const msg = ev.error?.message || ev.error?.code || "realtime error";
+      console.warn("[realtime]", ev.error?.code, msg);
+      voice.lastError = { code: ev.error?.code, msg, at: Date.now() };
+      break;
+    }
     case "response.created": {
+      voice.responseActive = true;
       // reply starting after a long quiet spell: hold the speaker until the
       // transcript proves it was a person, not the room (fail-open in 4s).
       // NEVER guard a reply the caller asked for (real turn / tool follow-up) —
@@ -456,6 +478,7 @@ async function handleVoiceEvent(ev) {
     case "response.done": {
       voice.agentLine = null;
       voice.expectReply = false;
+      voice.responseActive = false;           // the floor is free again
       const items = ev.response?.output || [];
       if (voice.scrubNext || ev.response?.status === "cancelled") {
         voice.scrubNext = false;              // ghost reply: erase it from context
@@ -468,9 +491,13 @@ async function handleVoiceEvent(ev) {
         }
         break;                                // and never run its tool calls
       }
-      for (const item of items) {
-        if (item.type === "function_call") await runVoiceTool(item);
-      }
+      // ALL tool outputs first, then exactly ONE response for the batch: a
+      // turn that calls two tools (trade_recommendation + draw_levels) used
+      // to fire two responses and the second cut the first off mid-word
+      const calls = items.filter((i) => i.type === "function_call");
+      for (const item of calls) await runVoiceTool(item);
+      if (calls.length) requestResponse();
+      else if (voice.pendingResponse) { voice.pendingResponse = false; requestResponse(); }
       break;
     }
   }
@@ -494,12 +521,12 @@ async function runVoiceTool(item) {
     output = res.output;
   }
   if (item.name === "trade_recommendation") tradeStickyFromPayload(output);
+  // submit the result ONLY: the caller creates one response for the whole
+  // batch, so two tools in a turn can never race two replies
   voice.dc.send(JSON.stringify({
     type: "conversation.item.create",
     item: { type: "function_call_output", call_id: item.call_id, output },
   }));
-  voice.expectReply = true;                   // the follow-up speech is solicited
-  voice.dc.send(JSON.stringify({ type: "response.create" }));
 }
 
 const LEVEL_COLORS = { green: "--green", red: "--red", accent: "--accent", dim: "--dim" };

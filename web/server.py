@@ -446,6 +446,50 @@ async def stream_events():
     return _sse(gen())
 
 
+# ----------------------------------------------------------------- identity
+# PERMISSIVE SSO, per the estate rollout: recognise a token if one arrives,
+# never reject a request for not having one. The desk is a public demo and
+# most of its traffic will never hold an account.
+#
+# The desk's idea of "who" is a session string the browser mints into
+# localStorage. That is a conversation key, not an identity: anyone who knows
+# one can read its transcript and act on its book. Once a token can prove who
+# is calling, the token has to WIN over that string, or the parameter becomes
+# an instruction to act as somebody else.
+#
+# Settled now, while nothing is enforced and it is free, rather than on
+# activation day when it is a live IDOR. Same rule, same reasoning, as
+# dev.minibank.broker.CallerIdentity and dev.minibank.ledger.SsoIdentity.
+
+
+async def sso_user(request: Request):
+    """The SSO user behind this request, or None. Never raises, never 401s."""
+    try:
+        from common.sso_client import validate_bearer
+
+        return await validate_bearer(request.headers.get("Authorization"))
+    except Exception:
+        # An identity provider being down is an outage in the directory, not
+        # in the desk. It degrades to anonymous, which is exactly today's
+        # behaviour on every route.
+        return None
+
+
+async def caller_session(request: Request, requested: str) -> str:
+    """Which session this request may act as · the precedence rule.
+
+    A proven identity wins over the supplied string; without one the string
+    stands, byte for byte as before.
+    """
+    user = await sso_user(request)
+    # `user.sub` and not just `user`: the validator accepts an empty-string
+    # sub for parity with the Java client, and an empty owner would book
+    # trades against nobody. An empty sub is not an identity.
+    if user is not None and user.sub:
+        return user.sub
+    return requested
+
+
 @app.get("/api/trades")
 def list_trades(limit: int = 12):
     """Trade log + live-marked open positions (the dock's boot state)."""
@@ -473,10 +517,14 @@ def trade_action(trade_id: int, body: TradeAction):
 
 
 @app.get("/api/chatlog")
-def chat_history(session: str, limit: int = 60):
+async def chat_history(request: Request, session: str, limit: int = 60):
     """The shared transcript: one conversation across the dashboard panel and
     the full desk (same browser = same session id)."""
     from common.db import get_connection
+
+    # a transcript is readable by anyone who knows the session string, which
+    # is fine while nobody has an account and is not once somebody does
+    session = await caller_session(request, session)
 
     conn = get_connection()
     rows = conn.execute(
@@ -588,11 +636,15 @@ class ToolCall(BaseModel):
 
 
 @app.post("/tool/{persona}")
-def execute_tool(persona: str, call: ToolCall):
+async def execute_tool(persona: str, call: ToolCall, request: Request):
     if persona not in PERSONAS:
         raise HTTPException(404, f"unknown persona '{persona}'")
+    # confirm_entry, trim_half and close_position all act on a book keyed by
+    # this session, so this is the route where the precedence rule earns its
+    # keep. Anonymous callers are unaffected.
+    session = await caller_session(request, call.session)
     return {"output": run_tool(persona, call.name, call.arguments,
-                               session=call.session)}
+                               session=session)}
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

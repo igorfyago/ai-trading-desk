@@ -246,3 +246,9 @@ body.embed #dock { display: none !important; }
   #input { min-width: 0; padding: 10px 12px; }
   #send, #mic { padding: 0 13px; flex: none; }
 }
+
+/* pending vs live: a call you can act on RIGHT NOW reads brighter and holds
+   a steady ring; a waiting one stays quiet so it can't be mistaken for a fill */
+#trade-sticky:not(.ready):not(.done) { animation: none; opacity: .92; }
+#trade-sticky:not(.ready):not(.done) .tsk-cond { color: var(--amber, #ffb454); }
+#trade-sticky.ready .tsk-cond { color: var(--green); font-weight: 500; }

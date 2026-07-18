@@ -556,8 +556,10 @@ function renderTradeSticky(s) {
   if (!el) {
     el = document.createElement("div");
     el.id = "trade-sticky";
+    // NO label here. On an options desk "the call" reads as a CALL option:
+    // the contract line already says call or put, so anything else is noise.
     el.innerHTML = `<span class="tsk-dot"></span><span class="tsk-contract"></span>
-      <span class="tsk-cond"></span><span class="tsk-tag">the call</span>`;
+      <span class="tsk-cond"></span>`;
     el.onclick = () => {
       const lv = el._levels;
       if (lv && lv.length && !el.classList.contains("done")) drawCallerLevels({ levels: lv });
@@ -568,10 +570,11 @@ function renderTradeSticky(s) {
   }
   el.className = s.kind === "call" ? "call" : s.kind === "put" ? "put" : "";
   if (s.done) el.classList.add("done");
+  if (s.ready) el.classList.add("ready");     // the condition just came true
   el.querySelector(".tsk-contract").textContent = s.contract;
   el.querySelector(".tsk-cond").textContent = s.cond ? `· ${s.cond}` : "";
-  el.querySelector(".tsk-tag").textContent = s.tag || "the call";
   el._levels = s.levels || [];
+  el._watch = s.watch || null;                // ticker to re-check, if pending
 }
 
 function tradeStickyFromPayload(raw) {
@@ -588,16 +591,27 @@ function tradeStickyFromPayload(raw) {
     // a tradeable instruction ("XSP 608p 19/07 @ 2.30")
     const contract = [name, ddmm(x.expiry), isFinite(px) ? `@ ${px.toFixed(2)}` : ""]
       .filter(Boolean).join(" ");
-    const a = (p.tape || {}).action || {};
-    let cond = "now";
+    // The condition must always name a PRICE and say plainly whether this is
+    // live or pending · "on confirmation only" told him nothing actionable.
+    const tp = p.tape || {};
+    const a = tp.action || {};
+    const bands = tp.bands || {};
+    const side = (tp.checklist || {}).side;
+    let cond = "take it now", ready = true, watch = null;
     if (a.stance === "conditional") {
-      const trig = [a.down, a.up].find(l => l && /CONFIRM|TRIGGER/i.test(l.means));
-      cond = trig ? `if a 15m thick closes ${trig.level}` : "on confirmation only";
+      const trig = [a.down, a.up].find((l) => l && /CONFIRM|TRIGGER/i.test(l.means));
+      const lvl = trig ? trig.level : (side === "long" ? bands.d1 : bands.u1);
+      cond = lvl != null
+        ? `wait · 15m close ${side === "long" ? "over" : "under"} ${lvl}`
+        : "wait · no trigger in reach yet";
+      ready = false; watch = p.ticker;
     } else if (a.stance === "wait_pullback") {
-      const vw = Number((p.tape || {}).vwap);
-      cond = `on a pullback that holds VWAP${isFinite(vw) ? " " + vw.toFixed(2) : ""}`;
+      const vw = Number(tp.vwap);
+      cond = `wait · pullback holding VWAP${isFinite(vw) ? " " + vw.toFixed(2) : ""}`;
+      ready = false; watch = p.ticker;
     } else if (a.stance === "wait") {
-      cond = "when the setup arms";
+      cond = "no setup yet · not a trade";
+      ready = false; watch = p.ticker;
     }
     const levels = [
       x.entry_underlying && { price: x.entry_underlying, label: "entry", color: "accent" },
@@ -605,8 +619,25 @@ function tradeStickyFromPayload(raw) {
       x.thesis_reference && { price: x.thesis_reference, label: x.thesis_label || "thesis", color: "dim" },
       x.target && { price: x.target, label: "target", color: x.kind === "call" ? "green" : "red" },
     ].filter(Boolean);
-    renderTradeSticky({ contract, cond, kind: x.kind, levels });
+    renderTradeSticky({ contract, cond, kind: x.kind, levels, ready, watch });
+    watchPendingTrade();
   } catch { /* the sticky is a bonus; the voice already said it */ }
+}
+
+/* A pending call is a PROMISE: the desk re-checks the tape and flips the bar
+   to "take it now" the moment the trigger prints, instead of leaving a stale
+   condition on screen that the caller has to re-ask about. */
+let stickyTimer = null;
+function watchPendingTrade() {
+  clearInterval(stickyTimer);
+  stickyTimer = setInterval(async () => {
+    const el = $("trade-sticky");
+    if (!el || !el._watch || el.classList.contains("done") || document.hidden) return;
+    try {
+      const d = await fetch(`/api/summary/${encodeURIComponent(el._watch)}`).then((r) => r.json());
+      if (d && d.trade) tradeStickyFromPayload(JSON.stringify(d.trade));
+    } catch { /* provider hiccup: next tick */ }
+  }, 30000);
 }
 
 function tradeStickyFromTrade(t) {
@@ -618,7 +649,8 @@ function tradeStickyFromTrade(t) {
   renderTradeSticky({
     contract: [dockContract(t), ddmm(t.expiry)].filter(Boolean).join(" "),
     cond, kind: t.kind, done: t.status === "closed",
-    tag: t.status === "opened" || t.status === "trimmed" ? "live position" : "the call",
+    // a real position outranks any pending watch: stop re-checking the tape
+    ready: t.status === "opened" || t.status === "trimmed", watch: null,
     levels: [
       t.entry_underlying && { price: t.entry_underlying, label: "entry", color: "accent" },
       t.tp50_underlying && { price: t.tp50_underlying, label: "trim +50%", color: "green" },

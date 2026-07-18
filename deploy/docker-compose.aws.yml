@@ -207,9 +207,10 @@ services:
       minibank-control:
         condition: service_healthy
     environment:
-      # both databases live on the existing control-plane Postgres: a server
-      # hosting several databases is exactly what a database server is for,
-      # and this box has 2 GB of RAM to respect.
+      # all three databases live on the existing control-plane Postgres: a
+      # server hosting several databases is exactly what a database server is
+      # for, and this box has RAM to respect. They share a server and nothing
+      # else, so moving one onto its own is a change of URL.
       MINIMART_ADMIN_URL: jdbc:postgresql://minibank-control:5432/minibank
       MINIMART_DB_URL: jdbc:postgresql://minibank-control:5432/minimart
       MINIMART_DB_USER: minibank
@@ -218,13 +219,25 @@ services:
       MINIPAY_DB_URL: jdbc:postgresql://minibank-control:5432/minipay
       MINIPAY_DB_USER: minibank
       MINIPAY_DB_PASSWORD: minibank
+      # the third service: reporting, which owns no goods and no money and
+      # learns everything it knows from the event stream
+      ANALYTICS_ADMIN_URL: jdbc:postgresql://minibank-control:5432/minibank
+      ANALYTICS_DB_URL: jdbc:postgresql://minibank-control:5432/minimart_analytics
+      ANALYTICS_DB_USER: minibank
+      ANALYTICS_DB_PASSWORD: minibank
       MINIPAY_URL: http://localhost:8082
+      # the broker minibank already runs. A second topic on an existing cluster
+      # is what a broker is for, and the outbox means a broker that is down
+      # costs lag rather than orders.
+      MINIMART_KAFKA: minibank-kafka:9092
       MINIMART_POOL: "8"
       MINIPAY_POOL: "8"
-      JAVA_TOOL_OPTIONS: "-Xmx192m"
+      ANALYTICS_POOL: "4"
+      JAVA_TOOL_OPTIONS: "-Xmx320m"
     ports:
       - "127.0.0.1:8086:8081"
       - "127.0.0.1:8087:8082"
+      - "127.0.0.1:8088:8083"
 
   caddy:
     image: caddy:2-alpine

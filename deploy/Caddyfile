@@ -27,8 +27,17 @@ bank.{$BASE_DOMAIN} {
     reverse_proxy minibank:8080
 }
 
+# One hostname, three services behind it, routed by path. The browser sees a
+# single origin; /api/analytics is answered by a different process with a
+# different database from everything else on this host. Path routing at the
+# edge is what lets a service be split out without the front end noticing.
 mart.{$BASE_DOMAIN} {
-    reverse_proxy minimart:8081
+    handle /api/analytics/* {
+        reverse_proxy minimart:8083
+    }
+    handle {
+        reverse_proxy minimart:8081
+    }
 }
 
 pay.{$BASE_DOMAIN} {

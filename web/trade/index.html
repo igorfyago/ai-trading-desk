@@ -67,12 +67,6 @@
               background:var(--green); margin-right:7px; }
 
   /* the scoreboard — the game's score, visible on EVERY tab */
-  #g-score { position:fixed; top:12px; right:16px; z-index:60; cursor:pointer;
-             font-family:var(--mono); font-size:12.5px; font-weight:500;
-             font-variant-numeric:tabular-nums; padding:7px 15px; border-radius:999px;
-             background:var(--panel2); border:1px solid var(--line); color:var(--dim); }
-  #g-score.pos { color:var(--green); border-color:rgba(62,207,142,.4); }
-  #g-score.neg { color:var(--red); border-color:rgba(244,101,127,.4); }
 
   /* panes */
   /* min-height:0 is the whole reason this cockpit fits one screen.
@@ -375,20 +369,47 @@
   #atlas { flex-direction:column; }
   #atlas-grid { display:flex; flex-direction:column; gap:18px; }
 
-  /* ---- top tab bar · the estate's shared chrome (see minibank) ---------- */
+  /* ---- top tab bar · minibank's chrome, VERBATIM ------------------------
+     Not "inspired by" and not "adapted". The pill shape, the sizes, the accent
+     fill on the active tab and the two-tone wordmark are copied, because four
+     properties that each look slightly different read as four projects, and
+     one that looks the same everywhere reads as one product. The estate has a
+     house style and this is it. */
   body { flex-direction:column; }
-  .topbar { flex:none; display:flex; align-items:center; gap:4px; height:46px;
-            padding:0 12px; background:var(--panel); border-bottom:1px solid var(--line);
+  .topbar { flex:none; display:flex; align-items:center; gap:20px;
+            padding:14px 22px; border-bottom:1px solid var(--line);
             overflow-x:auto; scrollbar-width:none; }
   .topbar::-webkit-scrollbar { display:none; }
-  .brand { font-weight:700; font-size:15px; letter-spacing:-.01em; margin-right:10px;
-           white-space:nowrap; }
-  .tab-btn { background:none; border:1px solid transparent; border-radius:7px;
-             color:var(--dim); font:inherit; font-size:13px; padding:5px 11px;
-             cursor:pointer; white-space:nowrap; text-decoration:none; }
-  .tab-btn:hover { color:var(--text); background:var(--panel2); }
-  .tab-btn.on { color:var(--text); background:var(--panel2); border-color:var(--line); }
-  .tb-spacer { flex:1; }
+
+  /* minibank: h1 17px/650, and the second half of the word carries the accent */
+  .brand { font-size:17px; font-weight:650; letter-spacing:-0.02em; white-space:nowrap; }
+  .brand span { color:var(--accent); }
+
+  /* the tabs sit RIGHT, as they do on the bank, and they are pills */
+  .tb-nav { display:flex; gap:6px; margin-left:auto; align-items:center; }
+  .tab-btn { background:none; border:1px solid var(--line); color:var(--dim);
+             padding:6px 16px; border-radius:999px; font:600 13px system-ui;
+             cursor:pointer; white-space:nowrap; text-decoration:none;
+             transition:color .13s, border-color .13s, background .13s; }
+  .tab-btn:hover { color:var(--text); border-color:var(--dim); }
+  .tab-btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  /* The P&L used to float at top:12px right:16px, which is why it never lined
+     up with anything: it was positioned against the window rather than laid
+     out in the bar. It is a pill in the row now, so it aligns by construction
+     rather than by a number somebody tuned. */
+  #g-score { position:static; margin-left:2px; cursor:pointer;
+             border:1px solid var(--line); color:var(--dim);
+             padding:6px 16px; border-radius:999px; font:600 13px system-ui;
+             white-space:nowrap; }
+  #g-score.pos { color:var(--green); border-color:rgba(63,185,80,.45); }
+  #g-score.neg { color:var(--red); border-color:rgba(248,81,73,.45); }
+
+  @media (max-width:820px) {
+    .topbar { padding:10px 12px; gap:10px; }
+    .brand { font-size:15px; }
+    .tab-btn, #g-score { padding:5px 11px; font-size:12.5px; }
+  }
   main { flex:1; min-width:0; display:flex; margin-left:0 !important; }
   @media (max-width:700px) {
     .topbar { height:42px; }
@@ -399,18 +420,21 @@
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">minitrade</span>
-    <button class="tab-btn on" data-pane="dash">Trade</button>
-    <button class="tab-btn" data-pane="positions">Positions</button>
-    <button class="tab-btn" data-pane="replay">Replay</button>
-    <button class="tab-btn" data-pane="gex">GEX</button>
-    <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
-    <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
-       target="_blank">GitHub</a>
-    <span class="tb-spacer"></span>
+    <span class="brand">mini<span>trade</span></span>
+    <div class="tb-nav">
+      <button class="tab-btn on" data-pane="dash">Trade</button>
+      <button class="tab-btn" data-pane="positions">Positions</button>
+      <button class="tab-btn" data-pane="replay">Replay</button>
+      <button class="tab-btn" data-pane="gex">GEX</button>
+      <a class="tab-btn" href="https://bank.b4rruf3t.com">Bank</a>
+      <a class="tab-btn" href="https://mart.b4rruf3t.com">Mart</a>
+      <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
+      <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
+         target="_blank">GitHub</a>
+      <div id="g-score" onclick="show('positions')"
+           title="net P&amp;L: realized + open · positions">P&amp;L –</div>
+    </div>
   </header>
-
-  <div id="g-score" onclick="show('positions')" title="net P&amp;L: realized + open · positions">P&amp;L –</div>
 
   <main>
     
@@ -1157,13 +1181,22 @@
       localStorage.setItem("tv_interval", interval); mountChart(focus); };
   }
 
-  // on a phone the P&L chip sits IN the control strip (it scrolled over
-  // content as a fixed overlay); back to its fixed corner on desktop
+  // The P&L moves house depending on room. On a phone it sits IN the control
+  // strip; on desktop it belongs in the TOP BAR beside the tabs.
+  //
+  // It used to be re-seated onto document.body, because it was a fixed-position
+  // chip pinned to the top-right corner. Once it became a pill laid out in the
+  // bar, that line quietly turned it back into a full-width block at the foot
+  // of the page: the CSS said it was a pill, and the JavaScript kept moving it
+  // somewhere a pill makes no sense. Chrome that is positioned by layout must
+  // be seated by layout too.
   const _mqPhone = matchMedia("(max-width:700px)");
   function seatScore() {
     const g = document.getElementById("g-score");
-    if (_mqPhone.matches) document.querySelector(".dtop").appendChild(g);
-    else document.body.appendChild(g);
+    if (!g) return;
+    const home = _mqPhone.matches ? document.querySelector(".dtop")
+                                  : document.querySelector(".tb-nav");
+    if (home && g.parentElement !== home) home.appendChild(g);
   }
   _mqPhone.addEventListener("change", seatScore);
   seatScore();

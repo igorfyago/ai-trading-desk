@@ -222,8 +222,10 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         # house rule: XSP fills are ugly on spreads - single direction only
         name = f"long {execution['kind']} (XSP: single-leg only, no spreads)"
         legs = [_leg(snap, execution["strike"], execution["kind"], "buy", dte)]
+    confluence = _confluence(execution["kind"], snap, flip, score, tape)
     execution["contract_plan"] = _contract_and_sizing(
-        execution, snap["ticker"], snap["regime"], score)
+        execution, snap["ticker"], snap["regime"], score,
+        verdict=confluence["verdict"])
     plain = _plain_english_exec("SPY" if snap["ticker"] in ("SPY", "XSP") else snap["ticker"],
                                 execution)
     return {
@@ -234,6 +236,7 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         "one_sigma_move": em, "expected_move_band": [round(spot - em, 2), round(spot + em, 2)],
         "rationale": rationale,
         "execution": execution,
+        "confluence": confluence,
         "plain_english": plain,
         "levels_note": snap.get("levels_note"),
         "horizon": "the next 2-3 hours",
@@ -405,8 +408,104 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     }
 
 
+def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) -> dict:
+    """THE DESK MODEL, as one transparent scorecard: the original intent is
+    GEX context PLUS the house reversal checklist, and full conviction only
+    when the boxes are green TOGETHER. Every box carries its evidence; the
+    verdict drives sizing. No box, no override, no precedence magic:
+      full_confluence  every supporting box green, none red  -> full clip
+      partial          real support with a dissenter          -> half, prove it
+      wait             the tape hasn't earned a fill          -> plan only
+    Validation status is honest: the day-shape window is the OOS-validated
+    edge (docs/BACKTEST.md); a triggered tape ALONE graded ~coin-flip, which
+    is exactly why it now needs the structure box green to reach full size."""
+    side = 1 if kind == "call" else -1
+    tape = tape or {}
+    ds = tape.get("day_shape") or {}
+    cl = tape.get("checklist") or {}
+    stage = tape.get("stage") or "none"
+    boxes = []
+
+    def box(name, state, why):
+        boxes.append({"name": name, "state": state, "why": why})
+        return state
+
+    # 1. GEX structure: does dealer positioning back this side?
+    struct_dir = 1 if ((spotv := snap["spot"]) >= flip if flip is not None
+                       else score >= 0) else -1
+    if abs(score) < 15 and flip is None:
+        s1 = box("gex structure", "gray", f"signal {score:+.0f} is noise, no usable flip")
+    elif struct_dir == side:
+        s1 = box("gex structure", "green",
+                 f"{snap['regime'].replace('_', ' ')}, signal {score:+.0f}"
+                 + (f", spot {'above' if side > 0 else 'below'} the flip {flip:g}"
+                    if flip is not None else ""))
+    else:
+        s1 = box("gex structure", "red", f"dealer lean is the OTHER way (signal {score:+.0f})")
+
+    # 2. Day shape: the validated reversal-day window
+    ds_dir = 0 if not ds else (1 if ds.get("shape", "").startswith("bull") else -1)
+    if ds_dir == side and ds.get("takeable"):
+        s2 = box("day shape", "green",
+                 f"reversal day, capitulation {ds.get('capitulation_x')}x, window OPEN")
+    elif ds_dir == side:
+        s2 = box("day shape", "gray", "reversal day on the tape, entry window closed - pullback only")
+    elif ds_dir and ds_dir != side:
+        s2 = box("day shape", "red", "the DAY reversed the other way - never fade it")
+    else:
+        s2 = box("day shape", "gray", "no reversal day on the tape")
+
+    # 3. His four checks, on this side
+    cl_dir = 0 if not cl else (1 if cl.get("side") == "long" else -1)
+    done = cl.get("done", 0)
+    if cl_dir == side and done >= 3:
+        s3 = box("checklist", "green", f"{done}/4 checks in on this side")
+    elif cl_dir == side:
+        s3 = box("checklist", "gray", f"only {done}/4 checks in")
+    elif cl_dir and done >= 3:
+        s3 = box("checklist", "red", f"the tape is building the OTHER side ({done}/4)")
+    else:
+        s3 = box("checklist", "gray", "no active setup on this side")
+
+    # 4. Stage: how far the machine has walked
+    tape_dir = 0 if not tape.get("bias") else (1 if tape["bias"] == "long" else -1)
+    if stage == "triggered" and tape_dir == side:
+        s4 = box("stage", "green", "TRIGGERED - the confirm printed")
+    elif stage == "confirming" and tape_dir == side:
+        s4 = box("stage", "gray", "confirming - the thick close hasn't printed")
+    elif stage in ("armed", "confirming") and tape_dir == -side:
+        s4 = box("stage", "red", f"the machine is {stage} the OTHER way")
+    else:
+        s4 = box("stage", "gray", f"stage: {stage}")
+
+    # 5. Location: an actionable line within reach on this side
+    act = tape.get("action") or {}
+    line = act.get("down") if side < 0 else act.get("up")
+    entry_line = line or (act.get("up") if side < 0 else act.get("down"))
+    if entry_line:
+        s5 = box("location", "green",
+                 f"entry line {entry_line['level']} within reach ({entry_line['dist']:+})")
+    else:
+        s5 = box("location", "gray", "no actionable line within reach on this side")
+
+    states = [s1, s2, s3, s4, s5]
+    reds = states.count("red")
+    support = (s2 == "green") or (s3 == "green" and s4 == "green")
+    if support and s1 == "green" and reds == 0:
+        verdict = "full_confluence"
+    elif reds >= 2 or (reds and not support and s1 != "green"):
+        verdict = "wait"
+    elif support or s1 == "green" or s3 == "green":
+        verdict = "partial"
+    else:
+        verdict = "wait"
+    return {"side": "long" if side > 0 else "short", "verdict": verdict,
+            "greens": states.count("green"), "reds": reds, "boxes": boxes}
+
+
 def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float,
-                         budget: float = DEFAULT_BUDGET_USD) -> dict:
+                         budget: float = DEFAULT_BUDGET_USD,
+                         verdict: str | None = None) -> dict:
     """House conventions on top of the plan:
       - S&P trades: analysis stays in SPY levels, the CONTRACT is XSP
         (strike = SPY strike + ~2), notation like '753p'
@@ -427,8 +526,22 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
 
     est_px = execution["entry_option_price_est"]
     per_contract = max(est_px * 100, 1)
-    strong = (regime == "negative_gamma" and abs(score) >= 40)
-    if strong:
+    # CONFLUENCE DRIVES SIZE: the board's verdict outranks the old
+    # regime/score heuristic whenever it is available
+    if verdict == "full_confluence":
+        plan, now_usd, later_usd = "full clip", budget, 0
+        trigger = None
+        why = "every box on the board is green - structure and the checklist agree, full clip"
+    elif verdict == "partial":
+        plan, now_usd, later_usd = "split", budget / 2, budget / 2
+        trigger = ("add the second half only when the missing board boxes go "
+                   "green (confirmation prints or structure swings behind it)")
+        why = "the board is part-green - half now, the tape earns the add"
+    elif verdict == "wait":
+        plan, now_usd, later_usd = "plan", 0, budget
+        trigger = "no fill until the board's entry condition prints - this is the plan, not an order"
+        why = "the board says wait - quoting the structure so you're ready, not filled"
+    elif regime == "negative_gamma" and abs(score) >= 40:
         plan, now_usd, later_usd = "full clip", budget, 0
         trigger = None
         why = "momentum tape and strong signal agree - deploy the full clip"
@@ -452,7 +565,7 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         "plan": plan,
         "now_usd": round(now_usd),
         "later_usd": round(later_usd),
-        "contracts_now": max(int(now_usd // per_contract), 1),
+        "contracts_now": (max(int(now_usd // per_contract), 1) if now_usd > 0 else 0),
         "add_trigger": trigger,
         "sizing_why": why,
         "doctrine": "size for zero: the whole premium is the risk, no stop",

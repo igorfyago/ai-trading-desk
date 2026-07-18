@@ -1724,6 +1724,13 @@
       tapeChecks = cl ? { sym: t, ...cl } : null;
       const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("en-US",
         { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" });
+      const conf = d.trade.confluence;
+      const confHtml = !conf ? "" : `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <span class="dnote">THE BOARD · ${conf.side} · ${conf.verdict.replace("_", " ")}</span>
+        ${conf.boxes.map(b => `<div style="margin-top:4px">
+          <span style="color:${b.state === "green" ? "#22ab94" : b.state === "red" ? "#f7525f" : "var(--dim)"}">${b.state === "green" ? "✓" : b.state === "red" ? "✗" : "○"}</span>
+          ${b.name} <span style="color:var(--dim)">· ${b.why}</span></div>`).join("")}
+      </div>`;
       const anow = (d.trade.tape || {}).action;
       const lvl = (l, arrow) => !l ? "" : `<div style="margin-top:4px"><span style="color:var(--dim)">${arrow}</span>
         <b>${l.level}</b> <span style="color:var(--dim)">(${l.dist > 0 ? "+" : ""}${l.dist})</span> · ${l.means}</div>`;
@@ -1736,7 +1743,7 @@
         ${cl.checks.map(c => `<div style="margin-top:4px">
           <span class="${c.ok ? "pos" : ""}"${c.ok ? "" : ' style="color:var(--dim)"'}>${c.ok ? "✓" : "○"}</span>
           ${c.n}. ${c.label}${c.t ? ` <span style="color:var(--dim)">· ${hhmm(c.t)} ET</span>` : ""}</div>`).join("")}
-      </div>`) + nowHtml;
+      </div>`) + confHtml + nowHtml;
       document.getElementById("d-trade").innerHTML =
         `<b>${d.trade.structure}</b> · ${d.trade.bias}<br><br>${d.trade.plain_english}` + clHtml;
       applyTapeMarkers();

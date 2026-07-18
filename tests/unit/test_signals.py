@@ -286,6 +286,44 @@ def test_reversal_day_flips_the_engine(monkeypatch):
         assert "reversal day" in r["plain_english"]
 
 
+def test_confluence_board_is_the_model(monkeypatch):
+    """The desk model is a CONFLUENCE scorecard, not a precedence chain:
+    GEX + the checklist agreeing = full clip; a triggered tape against the
+    structure (the OOS coin-flip case) can only ever be half size."""
+    real = market.latest_snapshot
+
+    def fake(score):
+        def _f(ticker, as_of=None):
+            snap = real(ticker)
+            snap["regime"] = "negative_gamma"
+            snap["signal_score"] = score
+            snap["gamma_flip"] = None
+            return snap
+        return _f
+
+    bars = _reversal_bars()
+
+    # long reversal fires but dealers lean SHORT: support without agreement
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(-40))
+    r = signals.recommend_trade("SPY", tape_bars=bars)
+    c = r["confluence"]
+    assert len(c["boxes"]) == 5 and {b["state"] for b in c["boxes"]} <= {"green", "red", "gray"}
+    assert c["verdict"] != "full_confluence"          # structure box is red
+    assert r["execution"]["contract_plan"]["plan"] != "full clip"
+
+    # same tape with dealers BEHIND it: every box lines up, full clip
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(40))
+    r2 = signals.recommend_trade("SPY", tape_bars=bars)
+    c2 = r2["confluence"]
+    assert c2["verdict"] == "full_confluence", c2
+    assert r2["execution"]["contract_plan"]["plan"] == "full clip"
+
+    # no tape at all: structure alone is never full conviction
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(-40))
+    r3 = signals.recommend_trade("SPY")
+    assert r3["confluence"]["verdict"] in ("partial", "wait")
+
+
 def test_morning_day_shape_never_fights_the_day(monkeypatch):
     """The backtested gate (docs/BACKTEST.md) + the transcript lesson: a shape
     outside the entry window is not a market entry — but the desk NEVER fades

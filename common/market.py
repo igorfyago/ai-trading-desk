@@ -259,7 +259,14 @@ def live_gex(ticker: str) -> dict | None:
     else:
         net = snap["net_gex_total"]
 
-    flip = snap["gamma_flip"] or s1
+    # No flip is a MARKET FACT, not missing data: when cumulative dealer gamma
+    # never crosses zero the chain is one-sided and there is no tipping point
+    # among the listed strikes. This used to read `snap["gamma_flip"] or s1`,
+    # which substituted the live spot and published it under "gamma_flip", so
+    # the desk reported a flip exactly at the current price, side always
+    # "above_flip" and distance always 0.00. Say nothing rather than say that.
+    flip = snap["gamma_flip"]
+    has_flip = flip is not None
     return {
         "ticker": snap["ticker"],
         "spot_live": s1, "spot_source": live["source"], "spot_delayed": live["delayed"],
@@ -268,8 +275,12 @@ def live_gex(ticker: str) -> dict | None:
         "net_gex_total_live": round(net),
         "regime_live": "positive_gamma" if net >= 0 else "negative_gamma",
         "gamma_flip": flip,
-        "side": "above_flip" if s1 >= flip else "below_flip",
-        "distance_to_flip": round(s1 - flip, 2),
+        "side": ("above_flip" if s1 >= flip else "below_flip") if has_flip else None,
+        "distance_to_flip": round(s1 - flip, 2) if has_flip else None,
+        "flip_note": None if has_flip else (
+            "no gamma flip among the listed strikes: cumulative dealer gamma "
+            "stays one-sided across the whole chain, so there is no tipping "
+            "point to trade against"),
         "note": "structure (OI/walls/flip) from the latest chain snapshot; "
                 "gamma re-marked to the live spot",
     }

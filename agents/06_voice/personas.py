@@ -78,8 +78,15 @@ def desk_status(ticker: str) -> str:
         out.update({"spot": gl["spot_live"], "spot_source": gl["spot_source"],
                     "spot_session": gl.get("spot_session"),
                     "spot_as_of": gl.get("spot_ts"),
-                    "regime_live": gl["regime_live"], "side": gl["side"],
-                    "distance_to_flip": gl["distance_to_flip"]})
+                    "regime_live": gl["regime_live"]})
+        # Only speak a flip when one exists. Sending side and distance for an
+        # absent flip handed Marcus a payload that contradicted itself:
+        # gamma_flip null, yet "above_flip" and 0.0 away from it.
+        if gl.get("gamma_flip") is not None:
+            out.update({"side": gl["side"],
+                        "distance_to_flip": gl["distance_to_flip"]})
+        else:
+            out["flip"] = gl.get("flip_note") or "no gamma flip in this chain"
     out["book"] = trades.book_line()
     out["clock"] = clock
     return json.dumps(out)

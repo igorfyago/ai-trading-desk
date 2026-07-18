@@ -252,3 +252,16 @@ body.embed #dock { display: none !important; }
 #trade-sticky:not(.ready):not(.done) { animation: none; opacity: .92; }
 #trade-sticky:not(.ready):not(.done) .tsk-cond { color: var(--amber, #ffb454); }
 #trade-sticky.ready .tsk-cond { color: var(--green); font-weight: 500; }
+
+/* ---- embedded in the cockpit -------------------------------------------
+   The dock bar directly above already reads "Marcus · AI options desk · live",
+   so repeating the name AND a pitch line inside the frame says the same thing
+   three times and pushes the status chip into a second row. On a phone the
+   pitch line is already hidden for the same reason; embedded, the name goes
+   with it. What is left is what an embedded header should be: the live status,
+   on one line, that does not grow. */
+body.embed #current-name,
+body.embed #current-desc { display: none; }
+body.embed #chat-header { padding: 8px 4%; gap: 10px; min-height: 0; flex-wrap: nowrap; }
+body.embed #spy-chip { flex: 0 1 auto; min-width: 0; white-space: nowrap;
+                       overflow: hidden; text-overflow: ellipsis; }

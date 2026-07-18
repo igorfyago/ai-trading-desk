@@ -31,38 +31,92 @@ MINIBANK_ROOT = """  :root {
 """
 
 TOPBAR = """  <header class="topbar">
-    <span class="brand">minitrade</span>
-    <button class="tab-btn on" data-pane="dash">Trade</button>
-    <button class="tab-btn" data-pane="positions">Positions</button>
-    <button class="tab-btn" data-pane="replay">Replay</button>
-    <button class="tab-btn" data-pane="gex">GEX</button>
-    <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
-    <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
-       target="_blank">GitHub</a>
-    <span class="tb-spacer"></span>
+    <span class="brand">mini<span>trade</span></span>
+    <div class="tb-nav">
+      <button class="tab-btn on" data-pane="dash">Trade</button>
+      <button class="tab-btn" data-pane="positions">Positions</button>
+      <button class="tab-btn" data-pane="replay">Replay</button>
+      <button class="tab-btn" data-pane="gex">GEX</button>
+      <a class="tab-btn" href="https://bank.b4rruf3t.com">Bank</a>
+      <a class="tab-btn" href="https://mart.b4rruf3t.com">Mart</a>
+      <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
+      <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
+         target="_blank">GitHub</a>
+      <div id="g-score" onclick="show('positions')"
+           title="net P&amp;L: realized + open · positions">P&amp;L &ndash;</div>
+    </div>
   </header>
 """
 
 TOPBAR_CSS = """
-  /* ---- top tab bar · the estate's shared chrome (see minibank) ---------- */
-  body { flex-direction:column; }
-  .topbar { flex:none; display:flex; align-items:center; gap:4px; height:46px;
-            padding:0 12px; background:var(--panel); border-bottom:1px solid var(--line);
+  /* ---- the estate's chrome, taken from minibank VERBATIM -----------------
+     Not "inspired by". The pill shape, the sizes, the accent fill and the
+     two-tone wordmark are copied, because four properties that each look
+     slightly different read as four projects and one that looks the same
+     everywhere reads as one product. */
+  body { flex-direction:column; overflow:hidden;
+         /* the HOUSE FONT. This page used Inter at 15px/1.65 while the rest of
+            the estate uses the system stack at 14px/1.5, so the same wordmark
+            at the same nominal size rendered visibly different here. Identical
+            type is most of what "consistent" actually means. */
+         font:14px/1.5 system-ui,'Segoe UI',sans-serif; }
+  .topbar { flex:none; display:flex; align-items:center; gap:20px;
+            padding:14px 22px; border-bottom:1px solid var(--line);
             overflow-x:auto; scrollbar-width:none; }
   .topbar::-webkit-scrollbar { display:none; }
-  .brand { font-weight:700; font-size:15px; letter-spacing:-.01em; margin-right:10px;
-           white-space:nowrap; }
-  .tab-btn { background:none; border:1px solid transparent; border-radius:7px;
-             color:var(--dim); font:inherit; font-size:13px; padding:5px 11px;
-             cursor:pointer; white-space:nowrap; text-decoration:none; }
-  .tab-btn:hover { color:var(--text); background:var(--panel2); }
-  .tab-btn.on { color:var(--text); background:var(--panel2); border-color:var(--line); }
-  .tb-spacer { flex:1; }
-  main { flex:1; min-width:0; display:flex; margin-left:0 !important; }
-  @media (max-width:700px) {
-    .topbar { height:42px; }
-    .brand { font-size:14px; margin-right:6px; }
-    .tab-btn { padding:5px 9px; font-size:12.5px; }
+  .brand { font-size:17px; font-weight:650; letter-spacing:-0.02em; white-space:nowrap; }
+  .brand span { color:var(--accent); }
+  .tb-nav { display:flex; gap:6px; margin-left:auto; align-items:center; }
+  .tab-btn { background:none; border:1px solid var(--line); color:var(--dim);
+             padding:6px 16px; border-radius:999px; font:600 13px system-ui;
+             cursor:pointer; white-space:nowrap; text-decoration:none;
+             transition:color .13s, border-color .13s, background .13s; }
+  .tab-btn:hover { color:var(--text); border-color:var(--dim); }
+  .tab-btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  /* A pill laid out in the row, not a chip pinned to the window corner, which
+     is why it used to align with nothing. */
+  #g-score { position:static; margin-left:2px; cursor:pointer;
+             border:1px solid var(--line); color:var(--dim);
+             padding:6px 16px; border-radius:999px; font:600 13px system-ui;
+             white-space:nowrap; }
+  #g-score.pos { color:var(--green); border-color:rgba(63,185,80,.45); }
+  #g-score.neg { color:var(--red); border-color:rgba(248,81,73,.45); }
+
+  /* ---- one screen ------------------------------------------------------
+     min-height:0 is the whole reason this fits. A flex item defaults to
+     min-height:auto and REFUSES to shrink below its content, so main grew to
+     whatever the chart wanted and pushed the page to two screens while
+     #dash's overflow:hidden sat there with no height to clip inside. */
+  main { flex:1; min-width:0; min-height:0; display:flex; margin-left:0 !important; }
+  .pane { min-height:0; }
+  /* 22px matches the bar exactly, so the pill, the chart and the watchlist
+     share one right edge. At 18px the pill sat four pixels inside everything
+     below it. */
+  #dash { padding:14px 22px 16px !important; }
+
+  /* The strip reserved 150px on its right for the P&L chip that now lives in
+     the bar, leaving the chart's chips 149px short of every other edge. On
+     desktop it has nothing left to show; it returns on a phone, where the P&L
+     is seated in it. */
+  .dtop { display:none !important; padding-right:0 !important; }
+  @media (max-width:700px) { .dtop { display:flex !important; } }
+
+  /* The timeframes and the chart's chips are ONE row. They were two stacked
+     bands, which is what made that area look like two different pages. */
+  .chartbar { display:flex; align-items:center; gap:10px; flex:none; }
+  .chartbar #intervals { flex:1; min-width:0; }
+  .chartbar .watch { flex:none; margin-left:auto; }
+
+  /* A hard pixel floor is fine on a big monitor and is exactly what forces a
+     laptop into a second screen. */
+  #tv-wrap { min-height:min(340px, 34vh) !important; }
+  #agent-dock { min-height:min(200px, 20vh) !important; }
+
+  @media (max-width:820px) {
+    .topbar { padding:10px 12px; gap:10px; }
+    .brand { font-size:15px; }
+    .tab-btn, #g-score { padding:5px 11px; font-size:12.5px; }
   }
 """
 
@@ -127,6 +181,48 @@ def main() -> None:
                         'dock.src = "/marcus?agent=marcus&embed=1";')
     html = re.sub(r'data-src="https://desk\.b4rruf3t\.com/\?agent=marcus&embed=1"',
                   'data-src="/marcus?agent=marcus&embed=1"', html)
+
+    # 5a. The bar carries its own P&L pill, and the source page has a
+    # standalone one that used to float in the window corner. Leaving both
+    # gives the document TWO elements with the same id, which makes
+    # getElementById a coin toss and left the loose one rendering as a
+    # full-width bar at the foot of the page.
+    loose_pill = (r'\n\s*<div id="g-score" onclick="show'
+                  r'\(&apos;positions&apos;\)"[^>]*>[^<]*</div>')
+    html = re.sub(loose_pill.replace("&apos;", "'"), "\n", html, count=1)
+
+    # 5b. THIS IS the full desk, so a link that opens the full desk is
+    # nonsense here. It belongs in the portal, where the trade pane really is
+    # a window onto something else.
+    html = re.sub(r'\n\s*<a href="https://desk\.b4rruf3t\.com/\?agent=marcus"[^>]*>open full desk[^<]*</a>',
+                  "", html)
+
+    # 5c. The chart's own chips join the timeframe row instead of floating in a
+    # strip above it. Two bands for one set of controls is what made the area
+    # read as two pages.
+    chips = re.search(r'\n\s*<div class="watch" style="margin-left:auto">\s*'
+                      r'<span id="feed-chip".*?</a>\s*</div>', html, flags=re.S)
+    if chips:
+        html = html[:chips.start()] + html[chips.end():]
+        html = html.replace('<div class="watch" id="intervals"></div>',
+                            '<div class="chartbar">\n'
+                            '            <div class="watch" id="intervals"></div>\n'
+                            '            <div class="watch">\n'
+                            '              <span id="feed-chip" class="wchip"'
+                            ' style="pointer-events:none;display:none"></span>\n'
+                            '              <a id="tv-full" href="#" target="_blank" class="wchip add"\n'
+                            '                 style="text-decoration:none">TradingView \u2197</a>\n'
+                            '            </div>\n'
+                            '          </div>', 1)
+
+    # 5d. The P&L is seated by LAYOUT now, so it is seated into the bar. It used
+    # to be re-parented onto document.body, correct for a fixed corner chip and
+    # wrong for a pill: it rendered as a full-width bar at the foot of the page.
+    html = html.replace('    else document.body.appendChild(g);',
+                        '    else document.querySelector(".tb-nav").appendChild(g);')
+    html = html.replace('    if (_mqPhone.matches) document.querySelector(".dtop").appendChild(g);',
+                        '    if (!g) return;\n'
+                        '    if (_mqPhone.matches) document.querySelector(".dtop").appendChild(g);')
 
     # 6. the tab machinery: .tab -> .tab-btn, active -> on
     html = html.replace('document.querySelectorAll(".tab[data-pane]").forEach(t =>\n'

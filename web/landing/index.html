@@ -1605,7 +1605,16 @@
                   style: 2, title: l.label });
       }
     }
-    deskChart.setLevels(lv);
+    // ONE line per price: walls, the book and Marcus's drawn levels overlap
+    // constantly, and the same number twice reads as two different lines
+    const seenLv = new Set();
+    deskChart.setLevels(lv.filter(l => {
+      if (!l || !isFinite(l.price)) return false;
+      const k = Number(l.price).toFixed(2);
+      if (seenLv.has(k)) return false;
+      seenLv.add(k);
+      return true;
+    }));
   }
 
   // Marcus draws what he says: the embedded voice panel posts levels the

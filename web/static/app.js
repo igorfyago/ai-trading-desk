@@ -562,7 +562,9 @@ function renderTradeSticky(s) {
       const lv = el._levels;
       if (lv && lv.length && !el.classList.contains("done")) drawCallerLevels({ levels: lv });
     };
-    log.prepend(el);
+    // its OWN bar above the transcript, never floating inside it: as a
+    // sticky child of the scroller it sat on top of Marcus's words
+    log.parentNode.insertBefore(el, log);
   }
   el.className = s.kind === "call" ? "call" : s.kind === "put" ? "put" : "";
   if (s.done) el.classList.add("done");
@@ -582,7 +584,10 @@ function tradeStickyFromPayload(raw) {
     const name = cp.contract_ticker && cp.contract
       ? `${cp.contract_ticker} ${cp.contract}`          // the desk notation: "XSP 748p"
       : `${p.ticker} ${Number(x.strike)}${x.kind[0]}`;
-    const contract = name + (isFinite(px) ? ` @ ${px.toFixed(2)}` : "");
+    // the expiry belongs IN the notation: an option without its date is not
+    // a tradeable instruction ("XSP 608p 19/07 @ 2.30")
+    const contract = [name, ddmm(x.expiry), isFinite(px) ? `@ ${px.toFixed(2)}` : ""]
+      .filter(Boolean).join(" ");
     const a = (p.tape || {}).action || {};
     let cond = "now";
     if (a.stance === "conditional") {
@@ -611,7 +616,8 @@ function tradeStickyFromTrade(t) {
     : t.status === "trimmed" ? "half off · runner rides"
     : t.status === "closed" ? `flat · ${fmtUsd(t.realized_usd)}` : t.status;
   renderTradeSticky({
-    contract: dockContract(t), cond, kind: t.kind, done: t.status === "closed",
+    contract: [dockContract(t), ddmm(t.expiry)].filter(Boolean).join(" "),
+    cond, kind: t.kind, done: t.status === "closed",
     tag: t.status === "opened" || t.status === "trimmed" ? "live position" : "the call",
     levels: [
       t.entry_underlying && { price: t.entry_underlying, label: "entry", color: "accent" },
@@ -704,6 +710,12 @@ function fmtUsd(x) {
   return (x >= 0 ? "+$" : "−$") + Math.abs(x).toFixed(0);
 }
 
+/* "2026-07-19" -> "19/07": the expiry as a trader writes it */
+function ddmm(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  return m ? `${m[3]}/${m[2]}` : "";
+}
+
 function dockContract(t) {
   return `${t.contract_ticker} ${Number(t.strike)}${t.kind[0]}`;
 }
@@ -737,11 +749,25 @@ function dockRender() {
   dockMarkers(t);
 }
 
+/* ONE line per price. The trade pins its own entry/trim/thesis and Marcus's
+   draw_levels re-sends the same numbers, so the chart grew "thesis 743.78"
+   twice. First writer wins: the trade's own label is the canonical one. */
+function dedupeLevels(levels) {
+  const seen = new Set();
+  return levels.filter((l) => {
+    if (!l || !isFinite(l.price)) return false;
+    const key = Number(l.price).toFixed(2);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function dockLevels(t) {
   if (!dock.chart) return;
   if (t.underlying && dock.symbol && t.underlying !== dock.symbol) return;  // chart not re-seeded yet
   const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  dock.chart.setLevels([
+  dock.chart.setLevels(dedupeLevels([
     t.entry_underlying && {
       price: t.entry_underlying, color: cssv("--text") || "#eceef4",
       style: 0, title: t.status === "quoted" ? "entry" : "in",
@@ -758,7 +784,7 @@ function dockLevels(t) {
       price: l.price, color: cssv(LEVEL_COLORS[l.color]) || "#7c8aff",
       style: 2, title: l.label,
     })),
-  ].filter(Boolean));
+  ].filter(Boolean)));
 }
 
 function dockMarkers(t) {

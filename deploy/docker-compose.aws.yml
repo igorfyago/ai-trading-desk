@@ -199,6 +199,33 @@ services:
       FX_PORT: "8090"
       JAVA_TOOL_OPTIONS: "-Xmx48m"
 
+  # ---- minimart + minipay: a shop with a simulated economy, and its processor
+  minimart:
+    build: ../../minimart
+    restart: unless-stopped
+    depends_on:
+      minibank-control:
+        condition: service_healthy
+    environment:
+      # both databases live on the existing control-plane Postgres: a server
+      # hosting several databases is exactly what a database server is for,
+      # and this box has 2 GB of RAM to respect.
+      MINIMART_ADMIN_URL: jdbc:postgresql://minibank-control:5432/minibank
+      MINIMART_DB_URL: jdbc:postgresql://minibank-control:5432/minimart
+      MINIMART_DB_USER: minibank
+      MINIMART_DB_PASSWORD: minibank
+      MINIPAY_ADMIN_URL: jdbc:postgresql://minibank-control:5432/minibank
+      MINIPAY_DB_URL: jdbc:postgresql://minibank-control:5432/minipay
+      MINIPAY_DB_USER: minibank
+      MINIPAY_DB_PASSWORD: minibank
+      MINIPAY_URL: http://localhost:8082
+      MINIMART_POOL: "8"
+      MINIPAY_POOL: "8"
+      JAVA_TOOL_OPTIONS: "-Xmx192m"
+    ports:
+      - "127.0.0.1:8086:8081"
+      - "127.0.0.1:8087:8082"
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

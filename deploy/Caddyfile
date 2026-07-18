@@ -27,6 +27,14 @@ bank.{$BASE_DOMAIN} {
     reverse_proxy minibank:8080
 }
 
+mart.{$BASE_DOMAIN} {
+    reverse_proxy minimart:8081
+}
+
+pay.{$BASE_DOMAIN} {
+    reverse_proxy minimart:8082
+}
+
 # Anyone hitting the raw IP gets sent to the real site (secure context needed
 # for mic + crypto APIs anyway).
 :80 {

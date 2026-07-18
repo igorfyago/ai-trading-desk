@@ -9,8 +9,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -22,20 +22,27 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build image
         run: docker build -t ai-trading-desk:ci .
       - name: Smoke test container
         run: |
           docker run -d --name desk -p 8000:8000 -e OPENAI_API_KEY=ci-dummy ai-trading-desk:ci
           sleep 8
-          curl -sf http://localhost:8000/agents | grep -q '"brief"'
+          # this host is the trading app: the cockpit is /, Marcus is the agent
+          curl -sf http://localhost:8000/ | grep -q '<title>minitrade'
+          curl -sf http://localhost:8000/agents | grep -q '"marcus"'
+          curl -sf http://localhost:8000/marcus > /dev/null
+          # and the agents that moved to the observatory are really gone from
+          # here, so a half-finished split cannot pass CI
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/chat/brief)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/atlas)" = 404
           docker logs desk --tail 5
 
   k8s-validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: kubeconform
         run: |
           curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz

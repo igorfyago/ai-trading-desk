@@ -239,6 +239,10 @@ services:
       ANALYTICS_DB_USER: minibank
       ANALYTICS_DB_PASSWORD: minibank
       MINIPAY_URL: http://localhost:8082
+      # The processor reaches the affiliated bank's ISSUER face over HTTP, on
+      # the container network, exactly as it would reach a stranger's. On-us
+      # means skipping the card network, never skipping the boundary.
+      MINIBANK_ISSUER_URL: http://minibank:8080
       # the broker minibank already runs. A second topic on an existing cluster
       # is what a broker is for, and the outbox means a broker that is down
       # costs lag rather than orders.

@@ -30,12 +30,20 @@ def test_index_serves_minitrade_and_marcus_has_his_own_path(client):
     assert b"AI TRADING" in m.content
 
 
-def test_agent_catalog(client):
+def test_agent_catalog_is_personas_only(client):
+    """The chat agents and the builder moved to the observatory. What is left
+    is the persona catalog, which doubles as the container healthcheck, so it
+    must stay cheap: no LLM, no DB, no custom-persona lookup."""
     d = client.get("/agents").json()
-    assert [a["id"] for a in d["text_agents"]] == ["brief", "sql", "repo", "research", "analyst"]
+    assert "text_agents" not in d and "builder" not in d
     assert {p["id"] for p in d["voice_personas"]} == {"riley", "quinn", "marcus"}
-    for a in d["text_agents"]:
-        assert a["name"] and a["desc"]
+    for p in d["voice_personas"]:
+        assert p["label"] and p["tagline"]
+
+
+def test_unknown_persona_404s_without_the_custom_store(client):
+    assert client.post("/session/nobody").status_code == 404
+    assert client.post("/tool/nobody", json={"name": "x", "arguments": {}}).status_code == 404
 
 
 def test_voice_tool_roundtrip_writes_db(client, db_conn):

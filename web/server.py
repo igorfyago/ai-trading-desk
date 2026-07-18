@@ -532,41 +532,17 @@ PERSONA_CATEGORY = {"marcus": "finance", "riley": "agency", "quinn": "agency"}
 
 @app.get("/agents")
 def agents():
-    from web import personas_store
-
+    """The persona catalog. Also the container healthcheck and the k8s probe,
+    so this route stays cheap and dependency-free even though the agent
+    gallery it used to feed now lives in the observatory."""
     return {
-        "text_agents": registry.AGENT_META,
         "voice_personas": [
             {"id": pid, "label": p["label"], "tagline": p["tagline"],
              "category": PERSONA_CATEGORY.get(pid, "agency")}
             for pid, p in PERSONAS.items()
-        ] + personas_store.list_customs(),
+        ],
         "realtime_model": REALTIME_MODEL,
-        "builder": {"voices": personas_store.VOICES, "tools": personas_store.TOOL_ALLOWLIST},
     }
-
-
-class PersonaIn(BaseModel):
-    label: str
-    tagline: str = ""
-    voice: str
-    instructions: str
-    tools: list[str] = []
-
-
-@app.post("/api/personas")
-def create_persona(body: PersonaIn, request: Request):
-    """The agent builder. Admin-gated: requires the admin token to mint new agents."""
-    from web import personas_store
-
-    admin = os.getenv("ADMIN_TOKEN") or os.getenv("TV_WEBHOOK_TOKEN")
-    if not admin or request.headers.get("x-admin-token") != admin:
-        raise HTTPException(403, "admin token required")
-    try:
-        return personas_store.create(body.label, body.tagline or "custom agent",
-                                     body.voice, body.instructions, body.tools)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
 
 
 _ATLAS_CACHE: dict = {}
@@ -708,9 +684,7 @@ async def create_bridge_session(agent_id: str):
 
 @app.post("/session/{persona}")
 async def create_session(persona: str):
-    from web import personas_store
-
-    p = personas_store.resolve(persona)
+    p = PERSONAS.get(persona)
     if p is None:
         raise HTTPException(404, f"unknown persona '{persona}'")
     instructions = p["instructions"]
@@ -755,14 +729,10 @@ def execute_bridge_tool(agent_id: str, call: ToolCall):
 
 @app.post("/tool/{persona}")
 def execute_tool(persona: str, call: ToolCall):
-    if persona in PERSONAS:
-        return {"output": run_tool(persona, call.name, call.arguments,
-                                   session=call.session)}
-    from web import personas_store
-
-    if personas_store.resolve(persona) is None:
+    if persona not in PERSONAS:
         raise HTTPException(404, f"unknown persona '{persona}'")
-    return {"output": personas_store.run_custom_tool(persona, call.name, call.arguments)}
+    return {"output": run_tool(persona, call.name, call.arguments,
+                               session=call.session)}
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

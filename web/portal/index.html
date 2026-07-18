@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1117">
+<title>b4rruf3t</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⬢</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* the house palette · identical across minitrade, minibank, minimart */
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#21262d;
+    --text:#e6edf3; --dim:#8b949e;
+    --accent:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922;
+    --violet:#bc8cff;
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); min-height:100%;
+         font:15px/1.6 "Inter",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .topbar { display:flex; align-items:center; gap:10px; height:46px; padding:0 16px;
+            background:var(--panel); border-bottom:1px solid var(--line); }
+  .brand { font-weight:700; font-size:15px; }
+  .brand span { color:var(--accent); }
+  .topbar a { margin-left:auto; color:var(--dim); font-size:13px; text-decoration:none; }
+  .topbar a:hover { color:var(--text); }
+
+  main { max-width:1000px; margin:0 auto; padding:64px 20px 96px; }
+  h1 { font-size:clamp(28px,4vw,44px); font-weight:700; letter-spacing:-.02em; }
+  h1 span { color:var(--accent); }
+  .lead { color:var(--dim); margin-top:14px; max-width:60ch; font-size:16px; }
+
+  .grid { display:grid; gap:14px; margin-top:44px;
+          grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); }
+  .card { display:block; background:var(--panel); border:1px solid var(--line);
+          border-radius:12px; padding:18px 20px; text-decoration:none; color:inherit;
+          transition:border-color .14s, background .14s, transform .14s; }
+  .card:hover { border-color:var(--accent); background:var(--panel2); transform:translateY(-2px); }
+  .card h2 { font-size:16.5px; font-weight:600; display:flex; align-items:center; gap:9px; }
+  .card .dot { width:8px; height:8px; border-radius:50%; background:var(--green); flex:none; }
+  .card p { color:var(--dim); font-size:13.5px; margin-top:8px; }
+  .card .stack { margin-top:12px; font-family:var(--mono); font-size:11px;
+                 color:var(--dim); letter-spacing:.02em; }
+  .sec { margin-top:52px; font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+         text-transform:uppercase; color:var(--dim); }
+  footer { color:var(--dim); font-size:12.5px; margin-top:64px;
+           border-top:1px solid var(--line); padding-top:20px; }
+  footer a { color:var(--accent); text-decoration:none; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">b4rruf3t<span>.</span></span>
+  <a href="https://github.com/igorfyago" target="_blank">GitHub ↗</a>
+</header>
+
+<main>
+  <h1>Systems I built to <span>understand them</span>.</h1>
+  <p class="lead">Each one runs for real: live data, real databases, real brokers of
+     messages. Nothing here is a mock. Open any of them and look under the hood ·
+     they are all built to be inspected.</p>
+
+  <div class="sec">The apps</div>
+  <div class="grid">
+    <a class="card" href="https://desk.b4rruf3t.com">
+      <h2><span class="dot"></span>minitrade</h2>
+      <p>An options desk: live 24h tape, a TradingView-grade chart, a deterministic
+         trade engine and a voice agent that reads it out loud.</p>
+      <div class="stack">python · langgraph · openai realtime · postgres</div>
+    </a>
+    <a class="card" href="https://bank.b4rruf3t.com">
+      <h2><span class="dot"></span>minibank</h2>
+      <p>A neobank from first principles: double-entry ledger, sharded by customer,
+         cross-region payments settled over Kafka with an outbox.</p>
+      <div class="stack">raw java 21 · postgres · kafka · no frameworks</div>
+    </a>
+    <a class="card" href="https://mart.b4rruf3t.com">
+      <h2><span class="dot"></span>minimart</h2>
+      <p>Three services, three databases, one storefront: catalogue, payments and
+         analytics split behind a single origin by path.</p>
+      <div class="stack">raw java 21 · postgres x3 · kafka</div>
+    </a>
+    <a class="card" href="https://pay.b4rruf3t.com">
+      <h2><span class="dot"></span>minipay</h2>
+      <p>The payment service on its own hostname · the same ledger discipline,
+         talking to the store only over HTTP and events.</p>
+      <div class="stack">raw java 21 · postgres · kafka</div>
+    </a>
+    <a class="card" href="https://obs.b4rruf3t.com">
+      <h2><span class="dot"></span>observatory</h2>
+      <p>Agents you can watch think: the tool graph drawn live, every step and
+         token traced while it runs.</p>
+      <div class="stack">langchain · langgraph · langsmith</div>
+    </a>
+    <a class="card" href="https://gex.b4rruf3t.com">
+      <h2><span class="dot"></span>options flow</h2>
+      <p>The data engine behind the desk: a Rust collector writing dealer
+         positioning into Postgres, minute by minute.</p>
+      <div class="stack">rust · postgres · node</div>
+    </a>
+  </div>
+
+  <footer>
+    Built by <a href="https://github.com/igorfyago" target="_blank">Igor Yago</a> ·
+    AI engineer. Every app above is open source and deployed from its own repo.
+  </footer>
+</main>
+</body>
+</html>

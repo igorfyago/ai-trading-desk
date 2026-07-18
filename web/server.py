@@ -124,6 +124,13 @@ def AUDIO_CONFIG(voice: str) -> dict:
 
 @app.get("/")
 def index():
+    """minitrade: the trading app IS this host now. The agent chat UI moved to
+    /marcus so the cockpit can embed it from the same origin."""
+    return FileResponse(STATIC.parent / "trade" / "index.html")
+
+
+@app.get("/marcus")
+def marcus_ui():
     return FileResponse(STATIC / "index.html")
 
 
@@ -761,5 +768,6 @@ def execute_tool(persona: str, call: ToolCall):
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 # Local dev convenience: the landing portal (served by Caddy in prod) is
 # browsable at /landing so layout work can be verified without a deploy.
-app.mount("/landing", StaticFiles(directory=STATIC.parent / "landing", html=True),
-          name="landing")
+# local dev: preview the apex portal without deploying (Caddy serves it in prod)
+app.mount("/portal", StaticFiles(directory=STATIC.parent / "portal", html=True),
+          name="portal")

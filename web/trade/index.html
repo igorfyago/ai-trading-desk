@@ -1,0 +1,1590 @@
+<!DOCTYPE html>
+<html lang="en" style="color-scheme: dark">
+<head>
+<meta charset="utf-8">
+<meta name="theme-color" content="#0d1117">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>minitrade</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* the house palette · identical to minibank and the rest of the estate */
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --line:#21262d;
+    --text:#e6edf3; --dim:#8b949e;
+    --accent:#58a6ff; --green:#3fb950; --red:#f85149; --amber:#d29922;
+    --violet:#bc8cff;
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:var(--bg); color:var(--text);
+         font:15px/1.65 var(--font, "Inter", system-ui, sans-serif); display:flex;
+         -webkit-font-smoothing:antialiased; }
+  h1,h2,h3 { font-weight:600; letter-spacing:-0.02em; text-wrap:balance; }
+  p { text-wrap:pretty; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+  @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important;}}
+
+  /* nav — a rail: collapsed to icons, expands over the content on hover.
+     Screen real estate belongs to the chart and the agent. */
+  nav { position:fixed; inset:0 auto 0 0; width:58px; z-index:50; overflow:hidden;
+        background:var(--bg); border-right:1px solid var(--line);
+        display:flex; flex-direction:column; padding:34px 9px; gap:2px;
+        transition:width .16s ease, padding .16s ease, box-shadow .16s ease; }
+  nav:hover, nav:focus-within { width:270px; padding:34px 22px;
+        box-shadow:24px 0 60px rgba(0,0,0,.5); }
+  nav h1 { font-size:15px; letter-spacing:.01em; font-weight:600; white-space:nowrap; }
+  nav h1 span { color:var(--accent); }
+  nav p.sub { color:var(--dim); font-size:11.5px; margin:6px 0 26px; font-family:var(--mono);
+              white-space:nowrap; }
+  .navlabel { color:var(--dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.14em;
+              margin:22px 0 8px; font-family:var(--mono); white-space:nowrap; height:14px; }
+  .tab { display:flex; align-items:flex-start; gap:11px; padding:7px 0; color:var(--dim);
+         cursor:pointer; border:0; font-size:14px; text-decoration:none; background:none;
+         font-family:inherit; text-align:left; transition:color .13s; white-space:nowrap; }
+  .tab:hover { color:var(--text); }
+  .tab.active { color:var(--accent); font-weight:500; }
+  .tab.active small { color:var(--dim); font-weight:400; }
+  .tab .ic { display:inline-block; width:24px; min-width:24px; text-align:center;
+             font-size:15px; line-height:1.4; filter:grayscale(35%); }
+  .tab.active .ic { filter:none; }
+  .tab small { display:block; color:var(--dim); font-size:11.5px; font-weight:400; }
+  nav h1, nav p.sub, .navlabel, .tab > span:not(.ic), nav footer, #theme-dots
+    { opacity:0; transition:opacity .14s ease .04s; }
+  nav:hover h1, nav:hover p.sub, nav:hover .navlabel, nav:hover .tab > span:not(.ic),
+  nav:hover footer, nav:hover #theme-dots,
+  nav:focus-within h1, nav:focus-within p.sub, nav:focus-within .navlabel,
+  nav:focus-within .tab > span:not(.ic), nav:focus-within footer, nav:focus-within #theme-dots
+    { opacity:1; }
+  nav footer { margin-top:auto; color:var(--dim); font-size:11.5px; line-height:1.7;
+               white-space:normal; }
+  nav footer a { color:var(--text); text-decoration:underline; text-underline-offset:3px; }
+  .live-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
+              background:var(--green); margin-right:7px; }
+
+  /* the scoreboard — the game's score, visible on EVERY tab */
+  #g-score { position:fixed; top:12px; right:16px; z-index:60; cursor:pointer;
+             font-family:var(--mono); font-size:12.5px; font-weight:500;
+             font-variant-numeric:tabular-nums; padding:7px 15px; border-radius:999px;
+             background:var(--panel2); border:1px solid var(--line); color:var(--dim); }
+  #g-score.pos { color:var(--green); border-color:rgba(62,207,142,.4); }
+  #g-score.neg { color:var(--red); border-color:rgba(244,101,127,.4); }
+
+  /* panes */
+  main { flex:1; min-width:0; display:flex; margin-left:58px; }
+  .pane { flex:1; display:none; min-width:0; }
+  .pane.active { display:flex; }
+  iframe { border:0; width:100%; height:100%; }
+
+  /* overview */
+  #overview { flex-direction:column; overflow-y:auto; padding:min(18vh,190px) 8% 120px; }
+  #overview .tag { color:var(--dim); font-size:12px; letter-spacing:.12em;
+                   text-transform:uppercase; margin-bottom:34px; font-family:var(--mono); }
+  #overview h2 { font-size:clamp(34px,4.6vw,62px); line-height:1.06; max-width:15em; }
+  #overview h2 em { font-style:normal; color:var(--accent); }
+  #overview p.lead { color:var(--dim); max-width:36em; margin:34px 0 70px; font-size:17px; }
+  .cards { display:flex; flex-direction:column; max-width:660px; border-top:1px solid var(--line); }
+  .card { display:flex; justify-content:space-between; align-items:baseline; gap:20px;
+          padding:26px 4px; border-bottom:1px solid var(--line); cursor:pointer;
+          background:none; transition:opacity .13s; }
+  .card:hover { border-bottom-color:rgba(255,255,255,.22); }
+  .card:hover h3 { color:var(--accent); }
+  .card h3 { font-size:16px; font-weight:500; margin:0; transition:color .13s; }
+  .card p { color:var(--dim); font-size:13.5px; margin:4px 0 0; }
+  .card::after { content:"\2192"; color:var(--dim); font-size:15px; }
+  #overview .foot { color:var(--dim); font-size:12px; margin-top:80px; font-family:var(--mono); }
+
+  /* trade pane — the sim: chart owns the left, the agent owns the right */
+  #dash { flex-direction:column; padding:14px 18px 16px; gap:10px; overflow:hidden; }
+  .dtop { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding-right:150px; }
+  .dleft { display:flex; flex-direction:column; gap:8px; min-height:0; min-width:0; }
+  .dright { display:flex; flex-direction:column; gap:10px; min-height:0; min-width:0; }
+  #side-card { flex:var(--sidegrow,1); min-height:120px; display:flex; flex-direction:column;
+               background:var(--panel); border:1px solid var(--line);
+               border-radius:var(--radius,8px); padding:14px 16px; }
+  #side-tabs { flex:none; margin-bottom:10px; }
+  #side-tabs .wchip { padding:3px 11px; font-size:11.5px; }
+  #side-body { flex:1; overflow-y:auto; min-height:0; }
+  #side-body h4 { font-size:11px; text-transform:uppercase; letter-spacing:.12em;
+                  color:var(--dim); margin-bottom:10px; font-family:var(--mono); }
+  /* the open book, one row per position, right under the chart */
+  #pos-strip { flex:none; display:flex; flex-direction:column; gap:6px; }
+  .prow { display:flex; align-items:center; gap:12px; padding:7px 14px;
+          background:var(--panel); border:1px solid var(--line);
+          border-radius:var(--radius,8px); font-family:var(--mono); font-size:12.5px; }
+  .prow .pc { color:var(--text); font-weight:500; }
+  .prow .pnl { margin-left:auto; font-variant-numeric:tabular-nums; font-weight:500; }
+  .prow .pnl.pos { color:var(--green); } .prow .pnl.neg { color:var(--red); }
+  .pbtn { background:none; border:1px solid var(--line); border-radius:6px; cursor:pointer;
+          color:var(--dim); font:inherit; font-size:11px; padding:3px 10px; }
+  .pbtn:hover { color:var(--text); border-color:rgba(255,255,255,.3); }
+  .pbtn.close:hover { color:var(--red); border-color:var(--red); }
+
+  /* positions pane */
+  #positions .plabel { font-size:11px; text-transform:uppercase; letter-spacing:.12em;
+                       color:var(--dim); font-family:var(--mono); margin-bottom:10px; }
+  .ptable { display:flex; flex-direction:column; max-width:980px; }
+  .ptable .prow { border-radius:0; border-bottom:0; }
+  .ptable .prow:first-child { border-radius:var(--radius,8px) var(--radius,8px) 0 0; }
+  .ptable .prow:last-child { border-radius:0 0 var(--radius,8px) var(--radius,8px);
+                             border-bottom:1px solid var(--line); }
+  .watch { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .wchip { background:none; border:1px solid var(--line); border-radius:999px;
+           padding:6px 16px; cursor:pointer; color:var(--text); font:inherit; font-size:13px;
+           font-family:var(--mono); transition:border-color .13s; }
+  .wchip:hover { border-color:rgba(255,255,255,.28); }
+  .wchip.focus { border-color:var(--accent); color:var(--accent); font-weight:500; }
+  .wchip.add { color:var(--dim); border-style:dashed; }
+  .dgrid { display:grid; gap:5px; flex:1; min-height:0;
+           grid-template-columns:minmax(340px,var(--dgc2,1fr)) 8px
+                                 minmax(0,var(--dgc1,1.25fr)) 8px
+                                 var(--dgc3,278px); }
+
+  /* ------------------------------------------------ pane splitters ---- */
+  .pdiv { cursor:col-resize; border-radius:3px; position:relative; z-index:5;
+          transition:background .12s; touch-action:none; }
+  .pdiv:hover, .pdiv.on { background:var(--accent); opacity:.5; }
+  .pdiv-h { cursor:row-resize; height:8px; flex:none; margin:-4px 0; }
+  body.dragging { cursor:col-resize; user-select:none; }
+  body.dragging.drag-h { cursor:row-resize; }
+  body.dragging iframe { pointer-events:none; }
+
+  /* ------------------------------------------------- watchlist rail ---- */
+  #watch-rail { display:flex; flex-direction:column; min-height:0;
+                background:var(--panel); border:1px solid var(--line);
+                border-radius:var(--radius,8px); overflow:hidden; }
+  #wl-head { display:flex; justify-content:space-between; align-items:center;
+             padding:9px 12px 9px 14px; border-bottom:1px solid var(--line);
+             font-family:var(--mono); font-size:11px; text-transform:uppercase;
+             letter-spacing:.12em; color:var(--dim); }
+  #wl-add-btn { background:none; border:1px solid var(--line); border-radius:6px;
+                color:var(--dim); width:22px; height:22px; cursor:pointer;
+                font-size:13px; line-height:1; transition:color .13s,border-color .13s; }
+  #wl-add-btn:hover { color:var(--text); border-color:rgba(255,255,255,.28); }
+  #wl-addrow { padding:8px 10px; border-bottom:1px solid var(--line); }
+  #wl-addrow input { width:100%; background:none; border:1px solid var(--line);
+                     border-radius:6px; padding:6px 10px; color:var(--text);
+                     font:12.5px var(--mono); outline:none; text-transform:uppercase; }
+  #wl-addrow input:focus { border-color:var(--accent); }
+  #wl-cols, .wlrow { display:grid; grid-template-columns:10px 20px minmax(0,1fr) 62px 52px 44px;
+                     gap:6px; align-items:center; padding:0 10px 0 8px; }
+  .wlogo { width:18px; height:18px; border-radius:50%; object-fit:cover;
+           background:var(--panel2); display:block; }
+  /* TradingView session lights: green tape, orange extended, blue overnight */
+  .wldot { display:inline-block; width:7px; height:7px; border-radius:50%;
+           margin-left:6px; vertical-align:1px; background:rgba(255,255,255,.16); }
+  .wldot.rth { background:var(--green); }
+  .wldot.pre, .wldot.post { background:#ffb154; box-shadow:0 0 5px rgba(255,177,84,.55); }
+  .wldot.overnight { background:#4fc3f7; box-shadow:0 0 5px rgba(79,195,247,.55); }
+  .wlrow.held .wlpx { opacity:.78; }
+  #wl-cols { font-family:var(--mono); font-size:10px; text-transform:uppercase;
+             letter-spacing:.08em; color:var(--dim); padding-top:7px; padding-bottom:7px;
+             border-bottom:1px solid var(--line); }
+  #wl-cols .wlc { cursor:pointer; text-align:right; }
+  #wl-cols .wlc:hover { color:var(--text); }
+  #wl-cols .wlc.on { color:var(--accent); }
+  #wl-body { flex:1; overflow-y:auto; min-height:0; overscroll-behavior:contain; }
+  .wlsec { display:flex; align-items:center; gap:7px; padding:8px 10px 5px;
+           font-family:var(--mono); font-size:10.5px; text-transform:uppercase;
+           letter-spacing:.1em; color:var(--dim); cursor:pointer; user-select:none; }
+  .wlsec:hover { color:var(--text); }
+  .wlsec .wlcount { opacity:.55; margin-left:auto; }
+  .wlrow { height:27px; cursor:pointer; position:relative; font-size:12.5px;
+           border-left:2px solid transparent; }
+  .wlrow:hover { background:rgba(255,255,255,.04); }
+  .wlrow.active { background:rgba(255,255,255,.05); border-left-color:var(--accent); }
+  .wlrow.dragover { box-shadow:inset 0 2px 0 var(--accent); }
+  .wlflag { width:6px; height:6px; border-radius:50%; background:transparent; }
+  .wlsym { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* TV-crisp numerals: bigger, weighted, and the exact TV dark-list colors —
+     up/down reads at a glance, positives carry NO plus sign */
+  .wlpx, .wlchg, .wlext { font-family:var(--mono); font-size:12.5px; text-align:right;
+                          font-weight:500; font-variant-numeric:tabular-nums;
+                          letter-spacing:-.01em; }
+  .wlpx { color:var(--text); }
+  .wlchg.pos, .wlext.pos { color:#22ab94; }
+  .wlchg.neg, .wlext.neg { color:#f7525f; }
+  .wlext { color:var(--dim); }
+  .wlrow .wlx { position:absolute; right:6px; top:4px; display:none; width:18px; height:18px;
+                background:var(--bg); border:1px solid var(--line); border-radius:5px;
+                color:var(--dim); cursor:pointer; font-size:11px; line-height:1; }
+  .wlrow:hover .wlx { display:block; }
+  .wlrow .wlx:hover { color:var(--red); border-color:var(--red); }
+  @keyframes wlup { from { background:rgba(62,207,142,.22); } }
+  @keyframes wldn { from { background:rgba(244,101,127,.22); } }
+  .wlrow.up { animation:wlup .7s ease-out; }
+  .wlrow.dn { animation:wldn .7s ease-out; }
+  #wl-menu { position:fixed; z-index:99; background:#191c24; border:1px solid var(--line);
+             border-radius:8px; padding:5px; min-width:150px; font-size:12.5px; }
+  #wl-menu .mi { padding:6px 10px; border-radius:5px; cursor:pointer; display:flex;
+                 align-items:center; gap:8px; }
+  #wl-menu .mi:hover { background:rgba(255,255,255,.06); }
+  #wl-menu .mflags { display:flex; gap:7px; padding:7px 10px; }
+  #wl-menu .mflags span { width:14px; height:14px; border-radius:50%; cursor:pointer;
+                          border:1px solid var(--line); }
+  @media (max-width:1400px){ .dgrid{grid-template-columns:minmax(340px,1fr) minmax(0,1.25fr);}
+                             #watch-rail{display:none;} .pdiv:not(.pdiv-h){display:none;} }
+  #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px);
+             overflow:hidden; flex:1; min-height:340px; }
+  #agent-dock { flex:var(--dockgrow,1.3); min-height:200px; display:flex; flex-direction:column;
+                background:var(--panel); border:1px solid var(--line);
+                border-radius:var(--radius,8px); overflow:hidden; }
+  .dockbar { display:flex; justify-content:space-between; align-items:center; padding:9px 16px;
+             border-bottom:1px solid var(--line); font-family:var(--mono); font-size:11px;
+             text-transform:uppercase; letter-spacing:.12em; color:var(--dim); }
+  .dockbar a { color:var(--accent); text-decoration:none; text-transform:none; letter-spacing:0; }
+  #dock-frame { flex:1; width:100%; border:0; background:transparent; }
+  .marq { overflow:hidden; border:1px solid var(--line); border-radius:999px;
+          background:var(--panel); padding:8px 0; flex:none; }
+  .marq-track { display:inline-flex; white-space:nowrap; will-change:transform;
+                animation:marq 80s linear infinite; }
+  .marq:hover .marq-track { animation-play-state:paused; }
+  .marq-copy { display:inline-flex; gap:44px; padding-right:44px; }
+  .marq a { color:var(--text); text-decoration:none; font-size:12.5px; }
+  .marq a:hover { color:var(--accent); }
+  .marq small { color:var(--dim); font-family:var(--mono); font-size:11px; margin-left:8px; }
+  @keyframes marq { from { transform:translateX(0); } to { transform:translateX(-50%); } }
+  .dcol { display:flex; flex-direction:column; gap:16px; overflow-y:auto; min-height:0; }
+  .dcard { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px); padding:20px; }
+  .dcard h4 { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--dim);
+              margin-bottom:14px; font-family:var(--mono); font-weight:500; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:10px; }
+  .tile { padding:2px 0; }
+  .tile b { display:block; font-size:17px; font-family:var(--mono); font-weight:500;
+            font-variant-numeric:tabular-nums; }
+  .tile span { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.08em;
+               font-family:var(--mono); }
+  .tile b.pos { color:var(--green); } .tile b.neg { color:var(--red); }
+  #d-trade { font-size:13.5px; line-height:1.65; }
+  .nitem { padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .nitem:last-child { border-bottom:0; }
+  .nitem a:hover { color:var(--accent); }
+  .nitem small { color:var(--dim); display:block; font-size:11px; font-family:var(--mono); }
+  .dnote { color:var(--dim); font-size:12.5px; }
+  @media (max-width:980px){ .dgrid{grid-template-columns:1fr;} #tv-wrap{flex-basis:auto;height:340px;} #agent-dock{height:400px;} .pdiv{display:none;} }
+
+  #iv-select { display:none; }   /* the interval combo exists for phones only */
+  /* phone nav: a floating glass chip + the nav itself as a slide-in drawer */
+  #m-nav-btn { display:none; position:fixed; top:10px; left:10px; z-index:80;
+    width:36px; height:36px; align-items:center; justify-content:center;
+    border-radius:10px; background:rgba(19,21,27,.78); backdrop-filter:blur(8px);
+    border:1px solid var(--line); color:var(--text); font-size:15px; cursor:pointer; }
+  #m-nav-backdrop { display:none; position:fixed; inset:0; z-index:65;
+    background:rgba(0,0,0,.45); backdrop-filter:blur(2px); }
+
+  /* ---- phone: the cockpit becomes one scrolling column, chart first.
+          Every rule lives in this block — desktop is untouched. ---- */
+  @media (max-width:700px){
+    /* the rail dies on phones: full-width content, nav lives behind the chip */
+    nav { display:none; }
+    nav.m-open { display:flex; position:fixed; inset:0 auto 0 0;
+      width:min(300px,82vw); padding:26px 22px; z-index:70; overflow-y:auto;
+      box-shadow:24px 0 60px rgba(0,0,0,.6); animation:mnav-in .18s ease; }
+    nav.m-open h1, nav.m-open p.sub, nav.m-open .navlabel,
+    nav.m-open .tab > span:not(.ic), nav.m-open footer, nav.m-open #theme-dots
+      { opacity:1; }
+    main { margin-left:0; }
+    #m-nav-btn { display:flex; }
+    #m-nav-backdrop.on { display:block; }
+    .dtop { margin-left:46px; }        /* the strip clears the menu chip */
+    #dash { overflow-y:auto; overflow-x:hidden; padding:10px 10px 46px; }
+    /* the control strip: interval COMBO + feed + TV link + the P&L chip
+       seated IN the row (it scrolls away with the page, blocks nothing) */
+    .dtop { flex:none; flex-wrap:nowrap; overflow-x:auto; gap:6px; align-items:center;
+            padding:2px 2px 2px 0; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    .dtop::-webkit-scrollbar { display:none; }
+    .dtop .watch { flex-wrap:nowrap; flex:none; gap:6px; margin-left:0 !important; }
+    .dtop .wchip { padding:5px 12px; font-size:12px; white-space:nowrap; }
+    #intervals { display:none; }
+    #iv-select { display:block; flex:none; appearance:none; -webkit-appearance:none;
+      background:var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6'%3E%3Cpath d='M0 0l4 6 4-6z' fill='%239ba3b2'/%3E%3C/svg%3E") no-repeat right 10px center;
+      border:1px solid var(--line); color:var(--text); font:12.5px var(--mono);
+      border-radius:999px; padding:5px 26px 5px 13px; }
+    /* feed = a status LIGHT (tap for detail), TradingView = an icon —
+       the whole strip fits without swiping */
+    #feed-chip { width:14px; height:14px; padding:0 !important; flex:none;
+                 border-radius:50%; font-size:0; background:currentColor;
+                 pointer-events:auto !important; box-shadow:0 0 8px currentColor; }
+    #tv-full { font-size:0; flex:none; width:32px; height:28px; padding:0;
+               display:flex; align-items:center; justify-content:center; }
+    #tv-full::after { content:"↗"; font-size:15px; color:var(--dim); }
+    .dtop #g-score { position:static; flex:none; margin-left:auto;
+                     padding:4px 11px; font-size:11px; }
+    /* the Marcus bar: title truncates, the link never wraps */
+    .dockbar { padding:8px 12px; font-size:10px; letter-spacing:.08em; gap:8px; }
+    .dockbar span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .dockbar a { flex:none; font-size:0; width:26px; text-align:center; }
+    .dockbar a::after { content:"↗"; font-size:14px; color:var(--accent); }
+    .dgrid { display:flex; flex-direction:column; gap:10px; flex:none; min-height:0; }
+    .pdiv { display:none; }
+    .dleft { order:-2; flex:none; }              /* the chart leads on a phone */
+    #tv-wrap { flex:none; height:56vh; min-height:300px; }
+    .dright { flex:none; }
+    #agent-dock { flex:none; height:380px; }
+    #side-card { flex:none; }
+    #side-body { overflow:visible; }             /* the PAGE scrolls, not the card */
+    #watch-rail { display:flex; flex:none; height:340px; order:-1; }  /* tickers ride just under the chart */
+    .tiles { display:flex; overflow-x:auto; gap:14px; padding-bottom:4px;
+             scrollbar-width:none; }
+    .tile { flex:0 0 auto; min-width:84px; }
+  }
+  @keyframes mnav-in { from { transform:translateX(-100%); } }
+
+  /* voice kit */
+  #kit { flex-direction:column; overflow-y:auto; padding:110px 8% 120px; gap:26px; }
+  #kit .khero h2 { font-size:clamp(26px,3vw,40px); max-width:18em; }
+  #kit .khero p { color:var(--dim); max-width:44em; margin-top:18px; font-size:15.5px; }
+  #kit .khero b { color:var(--text); font-weight:500; }
+  .kgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px;
+           max-width:1060px; }
+  .kcalc { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px); padding:22px; }
+  .kcalc h3 { font-size:15px; font-weight:500; margin-bottom:4px; }
+  .kcalc p.sub { color:var(--dim); font-size:12.5px; margin-bottom:16px; }
+  .kcalc label { display:flex; justify-content:space-between; gap:10px; font-size:12.5px;
+                 color:var(--dim); margin:8px 0; align-items:center; }
+  .kcalc input { width:112px; background:rgba(255,255,255,.05); border:1px solid var(--line);
+                 border-radius:6px; color:var(--text); padding:6px 9px; font-family:var(--mono);
+                 font-size:13px; }
+  .kout { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; font-size:13.5px; }
+  .kout b { color:var(--text); font-family:var(--mono); font-weight:500; }
+  .kout .bad { color:var(--red); }
+  .kbooks { max-width:820px; }
+  .kbooks details { border-top:1px solid var(--line); padding:18px 4px; }
+  .kbooks details:last-child { border-bottom:1px solid var(--line); }
+  .kbooks summary { cursor:pointer; font-weight:500; font-size:15px; list-style:none; }
+  .kbooks summary::after { content:"+"; float:right; color:var(--dim); }
+  .kbooks details[open] summary::after { content:"\2212"; }
+  .kbooks summary small { color:var(--dim); font-weight:400; margin-left:10px; font-size:12.5px; }
+  .kbooks .body { color:var(--dim); font-size:14px; line-height:1.75; margin-top:12px; max-width:60em; }
+  .kbooks .body b { color:var(--text); font-weight:500; }
+
+  /* atlas */
+  #atlas { flex-direction:column; }
+  #atlas-grid { display:flex; flex-direction:column; gap:18px; }
+
+  /* ---- top tab bar · the estate's shared chrome (see minibank) ---------- */
+  body { flex-direction:column; }
+  .topbar { flex:none; display:flex; align-items:center; gap:4px; height:46px;
+            padding:0 12px; background:var(--panel); border-bottom:1px solid var(--line);
+            overflow-x:auto; scrollbar-width:none; }
+  .topbar::-webkit-scrollbar { display:none; }
+  .brand { font-weight:700; font-size:15px; letter-spacing:-.01em; margin-right:10px;
+           white-space:nowrap; }
+  .tab-btn { background:none; border:1px solid transparent; border-radius:7px;
+             color:var(--dim); font:inherit; font-size:13px; padding:5px 11px;
+             cursor:pointer; white-space:nowrap; text-decoration:none; }
+  .tab-btn:hover { color:var(--text); background:var(--panel2); }
+  .tab-btn.on { color:var(--text); background:var(--panel2); border-color:var(--line); }
+  .tb-spacer { flex:1; }
+  main { flex:1; min-width:0; display:flex; margin-left:0 !important; }
+  @media (max-width:700px) {
+    .topbar { height:42px; }
+    .brand { font-size:14px; margin-right:6px; }
+    .tab-btn { padding:5px 9px; font-size:12.5px; }
+  }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">minitrade</span>
+    <button class="tab-btn on" data-pane="dash">Trade</button>
+    <button class="tab-btn" data-pane="positions">Positions</button>
+    <button class="tab-btn" data-pane="replay">Replay</button>
+    <button class="tab-btn" data-pane="gex">GEX</button>
+    <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
+    <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
+       target="_blank">GitHub</a>
+    <span class="tb-spacer"></span>
+  </header>
+
+  <div id="g-score" onclick="show('positions')" title="net P&amp;L: realized + open · positions">P&amp;L –</div>
+
+  <main>
+    
+
+    <section class="pane active" id="dash">
+      <div class="dtop">
+        <select id="iv-select" title="chart interval"></select>
+        <div class="watch" style="margin-left:auto">
+          <span id="feed-chip" class="wchip" style="pointer-events:none;display:none"></span>
+          <a id="tv-full" href="#" target="_blank" class="wchip add"
+             style="text-decoration:none">TradingView ↗</a>
+        </div>
+      </div>
+      <div class="dgrid">
+        <div class="dright">
+          <div id="agent-dock">
+            <div class="dockbar"><span>Marcus · AI options desk · live</span>
+              <a href="https://desk.b4rruf3t.com/?agent=marcus" target="_blank">open full desk ↗</a></div>
+            <iframe id="dock-frame" title="Marcus · AI options desk"
+                    data-src="/marcus?agent=marcus&embed=1"
+                    allow="microphone; autoplay; clipboard-write"></iframe>
+          </div>
+          <div class="pdiv pdiv-h" id="div-dock" title="drag to resize · double-click resets"></div>
+          <div id="side-card">
+            <div class="watch" id="side-tabs"></div>
+            <div id="side-body">
+              <div class="scard" data-s="read">
+                <h4>Dealer positioning <span id="d-asof" style="text-transform:none"></span></h4>
+                <div class="tiles" id="d-tiles"><div class="dnote">loading…</div></div>
+                <h4 style="margin-top:16px">The trade (rules engine)</h4>
+                <div id="d-trade" class="dnote">loading…</div>
+                <div id="d-ta-card" style="display:none"><h4 style="margin-top:16px">TA signals · tradingview alerts</h4>
+                  <div id="d-ta"></div></div>
+              </div>
+              <div class="scard" data-s="x" hidden>
+                <h4>X · the desk list
+                  <a href="https://x.com/i/lists/1793289764826669219" target="_blank"
+                     style="color:var(--accent);text-transform:none;letter-spacing:0;float:right">list ↗</a></h4>
+                <div id="d-xpulse" class="dnote">asking Grok…</div>
+              </div>
+              <div class="scard" data-s="news" hidden>
+                <h4>Headlines</h4>
+                <div id="d-news" class="dnote">loading…</div>
+              </div>
+              <div class="scard" data-s="buzz" hidden>
+                <h4>Social buzz · reddit crowd</h4>
+                <div id="d-chat" class="dnote">loading…</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pdiv" id="div-chart" title="drag to resize · double-click resets"></div>
+        <div class="dleft">
+          <div class="watch" id="intervals"></div>
+          <div id="tv-wrap"><div id="tv-chart" style="height:100%"></div></div>
+          <div id="pos-strip"></div>
+        </div>
+        <div class="pdiv" id="div-rail" title="drag to resize · double-click resets"></div>
+        <aside id="watch-rail">
+          <div id="wl-head">
+            <span>Watchlist</span>
+            <button id="wl-add-btn" title="Add symbol">＋</button>
+          </div>
+          <div id="wl-addrow" hidden>
+            <input id="wl-add" placeholder="Add symbol… (Enter)" maxlength="12"
+                   autocomplete="off" spellcheck="false">
+          </div>
+          <div id="wl-cols">
+            <span></span><span></span><span>Symbol</span>
+            <span class="wlc" data-sort="price">Last</span>
+            <span class="wlc" data-sort="chg_pct">Chg%</span>
+            <span class="wlc" data-sort="ext_pct">Ext</span>
+          </div>
+          <div id="wl-body"></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="pane" id="positions">
+      <div style="flex:1;overflow-y:auto;padding:44px 6% 60px">
+        <h2 style="font-size:22px">Positions &amp; P&amp;L</h2>
+        <p style="color:var(--dim);font-size:13px;margin:6px 0 22px">
+          Every trade the desk takes in conversation is tracked here and marked to the
+          live feed. Paper execution.</p>
+        <div class="tiles" id="p-score" style="max-width:720px;margin-bottom:30px"></div>
+        <div class="plabel">Open book</div>
+        <div class="ptable" id="p-open"><div class="dnote">loading…</div></div>
+        <div class="plabel" style="margin-top:34px">History</div>
+        <div class="ptable" id="p-hist"></div>
+      </div>
+    </section>
+
+    <section class="pane" id="replay">
+      <div style="flex:1;overflow-y:auto;padding:34px 5% 60px">
+        <h2 style="font-size:22px">Replay &amp; backtest</h2>
+        <p style="color:var(--dim);font-size:13px;margin:6px 0 18px;max-width:62em">
+          Pick a past moment. The desk re-decides with ONLY what existed then (no live
+          feed, no future bars) and the tape grades the call by the house rules: half
+          off at +50%, no stop, runner to expiry. Marks are model estimates at frozen
+          IV; history begins when the collector began.</p>
+        <div class="watch" style="margin-bottom:14px">
+          <select id="rp-ticker" class="wchip">
+            <option>SPY</option><option>QQQ</option><option>IWM</option>
+          </select>
+          <input id="rp-slider" type="range" min="0" max="0" value="0"
+                 style="flex:1;max-width:430px;accent-color:var(--accent)">
+          <span id="rp-when" style="font-family:var(--mono);font-size:12.5px;color:var(--dim)">–</span>
+          <button id="rp-run" class="wchip">Run this moment</button>
+          <button id="rp-ff" class="wchip" disabled>Fast-forward ⏩</button>
+          <button id="rp-sweep" class="wchip add">Sweep all</button>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,1fr);gap:12px;align-items:start">
+          <div id="rp-chart" style="min-height:440px;background:var(--panel);
+               border:1px solid var(--line);border-radius:var(--radius,8px);overflow:hidden"></div>
+          <div>
+            <div class="dcard"><h4>The desk said <span id="rp-said-when" style="text-transform:none"></span></h4>
+              <div id="rp-said" class="dnote">pick a moment on the slider, then run</div></div>
+            <div class="dcard" style="margin-top:12px"><h4>How it fared</h4>
+              <div id="rp-verdict" class="dnote">–</div></div>
+            <div class="dcard" style="margin-top:12px"><h4>Sweep · every snapshot in range</h4>
+              <div id="rp-sweepout" class="dnote">–</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    
+
+    
+
+    
+
+    <section class="pane" id="gex">
+      <iframe data-src="https://gex.b4rruf3t.com" title="GEX Dashboard"></iframe>
+    </section>
+
+    
+    
+  </main>
+
+<script>
+  function show(name) {
+    document.querySelectorAll(".tab-btn[data-pane]").forEach(t =>
+      t.classList.toggle("on", t.dataset.pane === name));
+    document.querySelectorAll(".pane").forEach(p =>
+      p.classList.toggle("active", p.id === name));
+    const frame = document.querySelector(`#${name} iframe:not(#dock-frame)`);
+    if (frame && !frame.src) frame.src = frame.dataset.src;   // lazy-load
+                                                              // (dock-frame: initDash, origin-aware)
+    if (name === "dash") initDash();
+    if (name === "replay") initReplay();
+    if (name === "positions") { openEventStream(); refreshBook(); refreshScore(); }
+  }
+
+  /* ------------------------------------------------------- dashboard ---- */
+  // Same-origin when served by the desk itself (local dev at /landing);
+  // the public desk API from the apex domain in production.
+  const API = "";
+  const GEX_COVERED = ["SPY", "QQQ", "IWM", "XSP"];
+  let focus = "SPY", dashStarted = false, refreshTimer = null;
+
+  /* ------------------------------------------- watchlist (TV-style rail) ---- */
+  const WL_KEY = "desk-watchlist-v1";
+  const WL_FLAGS = ["#f4657f", "#f5a623", "#3ecf8e", "#7c8aff", "#e8e8e8"];
+  const WL_DEFAULT = (() => {
+    const S = (name, syms, open = true) =>
+      ({ name, open, items: syms.split(" ").map(s => ({ s })) });
+    return { sort: null, sections: [
+      S("INDEX", "SPY QQQ TQQQ ES1! VIX BTCUSD ETHUSD"),
+      S("MAGGY-7 0DTE", "GOOGL SPCX META NVDA AMZN TSLA MSFT AAPL"),
+      S("CORE", "NOW PLTR"),
+      S("SWITCH", "NBIS BE WYFI CIFR RDW HIMS IREN MRVL CEVA RGTI WULF POET BBAI ORCL INTC MU ONDS RUN MSTR FIG NFLX IBM ACN"),
+      S("COMMONS", "ASTS SNDK OKLO CLSK HOOD ASST AMKR RIOT AG OSCR CRWV AMD IAG ZETA COIN RIVN OPEN SOFI GFI LMND VG BA NIO CELH BABA IWM BRK.B XOM"),
+      S("ON DECK", "RKLB JOBY VKTX GTLB UNH COST"),
+      S("RADAR", "MARA ARM ARKG JD"),
+      S("OTHER", "SOXL SMCI MP CRCL COHR RCAT TEM IONQ LITE SBET SPCE CAT VRT TWLO BITX BMNR ANET CBRS DUOL TSLL SLNH OXY IBEX35 US10Y ORR DXC LLY CG BIDU NVO XPEV", false),
+    ] };
+  })();
+  let WL;
+  try { WL = JSON.parse(localStorage.getItem(WL_KEY)) || WL_DEFAULT; }
+  catch { WL = WL_DEFAULT; }
+  const wlSave = () => localStorage.setItem(WL_KEY, JSON.stringify(WL));
+  const wlQuotes = {};                 // sym -> latest /api/watch row
+  let wlLastPx = {}, wlTimer = null, wlDrag = null;
+
+  function wlVisibleSyms() {
+    const out = [];
+    for (const sec of WL.sections) if (sec.open) sec.items.forEach(i => out.push(i.s));
+    if (!out.includes(focus)) out.push(focus);
+    return out;
+  }
+
+  function wlAllSyms() {
+    // EVERY symbol, collapsed sections included: one batched provider call
+    // covers 150, so hidden rows arrive pre-priced before they're expanded
+    const out = [];
+    for (const sec of WL.sections) sec.items.forEach(i => out.push(i.s));
+    if (!out.includes(focus)) out.push(focus);
+    return out.slice(0, 150);
+  }
+
+  let logosWarmed = false;
+  function warmLogos() {
+    // trickle-fetch every logo once; the server caches them on disk forever
+    if (logosWarmed) return;
+    logosWarmed = true;
+    const syms = wlAllSyms();
+    let i = 0;
+    (function step() {
+      for (let k = 0; k < 6 && i < syms.length; k++, i++) {
+        new Image().src = `${API}/api/logo/${encodeURIComponent(syms[i])}`;
+      }
+      if (i < syms.length) setTimeout(step, 350);
+    })();
+  }
+
+  const wlFmt = (v, d = 2) => v == null ? "–"
+    : v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+  function wlRow(item, sec) {
+    const q = wlQuotes[item.s] || {};
+    const row = document.createElement("div");
+    row.className = "wlrow" + (item.s === focus ? " active" : "");
+    row.dataset.sym = item.s;
+    row.draggable = true;
+    const flag = document.createElement("span");
+    flag.className = "wlflag";
+    if (item.flag) flag.style.background = item.flag;
+    const logo = document.createElement("img");
+    logo.className = "wlogo";
+    logo.loading = "lazy";
+    logo.alt = "";
+    logo.src = `${API}/api/logo/${encodeURIComponent(item.s)}`;
+    const sym = document.createElement("span");
+    sym.className = "wlsym";
+    sym.textContent = item.s;
+    const dot = document.createElement("span");
+    dot.className = "wldot " + (q.session || "");
+    dot.title = q.session
+      ? (q.session === "overnight" ? "overnight session · 24h tape" : `${q.session} session`)
+        + (q.held ? " · last known print" : "")
+      : "";
+    sym.appendChild(dot);
+    if (q.held) row.classList.add("held");
+    const px = document.createElement("span");
+    px.className = "wlpx";
+    px.textContent = q.price != null ? wlFmt(q.price, q.price >= 1000 ? 0 : 2) : "–";
+    const chg = document.createElement("span");
+    chg.className = "wlchg " + (q.chg_pct > 0 ? "pos" : q.chg_pct < 0 ? "neg" : "");
+    chg.textContent = q.chg_pct != null ? wlFmt(q.chg_pct) + "%" : "";
+    chg.title = q.chg != null ? `day change ${wlFmt(q.chg)}` : "";
+    const ext = document.createElement("span");
+    ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
+    ext.textContent = q.ext_pct != null ? wlFmt(q.ext_pct) + "%" : "";
+    ext.title = q.ext_pct != null ? `${q.session || "ext"} session move` : "";
+    const x = document.createElement("button");
+    x.className = "wlx";
+    x.textContent = "×";
+    x.title = "Remove";
+    x.onclick = (e) => { e.stopPropagation(); wlRemove(sec, item.s); };
+    row.append(flag, logo, sym, px, chg, ext, x);
+    row.onclick = () => setFocus(item.s);
+    row.oncontextmenu = (e) => { e.preventDefault(); wlMenu(e, sec, item); };
+    row.ondragstart = (e) => { wlDrag = { sec: sec.name, sym: item.s }; e.dataTransfer.effectAllowed = "move"; };
+    row.ondragover = (e) => { e.preventDefault(); row.classList.add("dragover"); };
+    row.ondragleave = () => row.classList.remove("dragover");
+    row.ondrop = (e) => { e.preventDefault(); row.classList.remove("dragover"); wlDrop(sec, item.s); };
+    return row;
+  }
+
+  function wlRender() {
+    const body = document.getElementById("wl-body");
+    body.innerHTML = "";
+    for (const sec of WL.sections) {
+      const h = document.createElement("div");
+      h.className = "wlsec";
+      h.innerHTML = `<span>${sec.open ? "▾" : "▸"}</span>`;
+      const nm = document.createElement("span");
+      nm.textContent = sec.name;
+      const n = document.createElement("span");
+      n.className = "wlcount";
+      n.textContent = sec.items.length;
+      h.append(nm, n);
+      h.onclick = () => { sec.open = !sec.open; wlSave(); wlRender(); wlPoll(); };
+      h.ondragover = (e) => e.preventDefault();
+      h.ondrop = (e) => { e.preventDefault(); wlDrop(sec, null); };
+      body.appendChild(h);
+      if (!sec.open) continue;
+      let items = sec.items;
+      if (WL.sort) {
+        items = [...items].sort((a, b) => {
+          const av = (wlQuotes[a.s] || {})[WL.sort.key], bv = (wlQuotes[b.s] || {})[WL.sort.key];
+          return WL.sort.dir * (((bv ?? -1e18)) - ((av ?? -1e18)));
+        });
+      }
+      items.forEach(i => body.appendChild(wlRow(i, sec)));
+    }
+    document.querySelectorAll("#wl-cols .wlc").forEach(c =>
+      c.classList.toggle("on", WL.sort && WL.sort.key === c.dataset.sort));
+  }
+
+  function wlPatch() {                  // update numbers in place + tick flash
+    document.querySelectorAll("#wl-body .wlrow").forEach(row => {
+      const q = wlQuotes[row.dataset.sym];
+      if (!q || q.price == null) return;
+      const prev = wlLastPx[row.dataset.sym];
+      row.querySelector(".wlpx").textContent = wlFmt(q.price, q.price >= 1000 ? 0 : 2);
+      const chg = row.querySelector(".wlchg");
+      chg.textContent = q.chg_pct != null ? wlFmt(q.chg_pct) + "%" : "";
+      chg.className = "wlchg " + (q.chg_pct > 0 ? "pos" : q.chg_pct < 0 ? "neg" : "");
+      const ext = row.querySelector(".wlext");
+      ext.textContent = q.ext_pct != null ? wlFmt(q.ext_pct) + "%" : "";
+      ext.className = "wlext " + (q.ext_pct > 0 ? "pos" : q.ext_pct < 0 ? "neg" : "");
+      const dot = row.querySelector(".wldot");
+      if (dot) dot.className = "wldot " + (q.session || "");
+      row.classList.toggle("held", !!q.held);
+      if (prev != null && q.price !== prev) {
+        row.classList.remove("up", "dn");
+        void row.offsetWidth;           // restart the animation
+        row.classList.add(q.price > prev ? "up" : "dn");
+      }
+      wlLastPx[row.dataset.sym] = q.price;
+    });
+  }
+
+  async function wlPoll() {
+    if (document.hidden || !document.querySelector("#dash.active")) return;
+    const syms = wlAllSyms();   // collapsed sections stay warm too
+    if (!syms.length) return;
+    try {
+      const d = await fetch(`${API}/api/watch?symbols=${encodeURIComponent(syms.join(","))}`)
+        .then(r => r.json());
+      for (const r of d.rows || []) {
+        // belts to the server's retention: an OLDER print never overwrites a
+        // newer one (ISO ts compares lexicographically), and a row without a
+        // price never overwrites a row that had one
+        const old = wlQuotes[r.sym];
+        if (old && old.ts && r.ts && r.ts < old.ts) continue;
+        wlQuotes[r.sym] = r.price != null ? r : { ...old, ...r };
+      }
+      if (WL.sort) wlRender(); else wlPatch();
+      warmLogos();
+      const fq = wlQuotes[focus];
+      if (deskChart && fq && (!deskChart.symbol || deskChart.symbol() === focus)) {
+        deskChart.setSessionInfo({ close: fq.reg_close, session: fq.session });
+      }
+    } catch { /* provider hiccup: next tick */ }
+  }
+
+  function wlRemove(sec, sym) {
+    sec.items = sec.items.filter(i => i.s !== sym);
+    wlSave(); wlRender();
+  }
+
+  function wlDrop(sec, beforeSym) {
+    if (!wlDrag) return;
+    const from = WL.sections.find(s => s.name === wlDrag.sec);
+    const idx = from.items.findIndex(i => i.s === wlDrag.sym);
+    if (idx < 0) return;
+    const [item] = from.items.splice(idx, 1);
+    if (beforeSym && !(sec.name === wlDrag.sec && beforeSym === item.s)) {
+      const at = sec.items.findIndex(i => i.s === beforeSym);
+      sec.items.splice(at < 0 ? sec.items.length : at, 0, item);
+    } else if (!beforeSym) {
+      sec.items.push(item);
+    } else {
+      from.items.splice(idx, 0, item);   // dropped on itself: put it back
+    }
+    wlDrag = null;
+    wlSave(); wlRender();
+  }
+
+  function wlMenu(e, sec, item) {
+    document.getElementById("wl-menu")?.remove();
+    const m = document.createElement("div");
+    m.id = "wl-menu";
+    m.style.left = Math.min(e.clientX, innerWidth - 170) + "px";
+    m.style.top = Math.min(e.clientY, innerHeight - 140) + "px";
+    const flags = document.createElement("div");
+    flags.className = "mflags";
+    for (const c of WL_FLAGS) {
+      const f = document.createElement("span");
+      f.style.background = c;
+      if (item.flag === c) f.style.outline = "2px solid var(--accent)";
+      f.onclick = () => { item.flag = item.flag === c ? undefined : c; wlSave(); wlRender(); m.remove(); };
+      flags.appendChild(f);
+    }
+    const top = document.createElement("div");
+    top.className = "mi";
+    top.textContent = "Move to top of section";
+    top.onclick = () => {
+      sec.items = [item, ...sec.items.filter(i => i.s !== item.s)];
+      wlSave(); wlRender(); m.remove();
+    };
+    const rm = document.createElement("div");
+    rm.className = "mi";
+    rm.textContent = "Remove " + item.s;
+    rm.onclick = () => { wlRemove(sec, item.s); m.remove(); };
+    m.append(flags, top, rm);
+    document.body.appendChild(m);
+    const close = () => { m.remove(); removeEventListener("click", close); };
+    setTimeout(() => addEventListener("click", close), 0);
+  }
+
+  function wlInitControls() {
+    const btn = document.getElementById("wl-add-btn");
+    const rowEl = document.getElementById("wl-addrow");
+    const input = document.getElementById("wl-add");
+    btn.onclick = () => { rowEl.hidden = !rowEl.hidden; if (!rowEl.hidden) input.focus(); };
+    input.onkeydown = (e) => {
+      if (e.key === "Escape") { rowEl.hidden = true; return; }
+      if (e.key !== "Enter") return;
+      const t = input.value.trim().toUpperCase();
+      if (!/^[A-Z0-9.!^=-]{1,12}$/.test(t)) return;
+      if (WL.sections.some(s => s.items.some(i => i.s === t))) { input.value = ""; return; }
+      const sec = WL.sections.find(s => s.open) || WL.sections[0];
+      sec.items.unshift({ s: t });
+      input.value = "";
+      wlSave(); wlRender(); wlPoll();
+    };
+    document.querySelectorAll("#wl-cols .wlc").forEach(c => {
+      c.onclick = () => {                    // desc -> asc -> manual
+        const key = c.dataset.sort;
+        WL.sort = !WL.sort || WL.sort.key !== key ? { key, dir: 1 }
+          : WL.sort.dir === 1 ? { key, dir: -1 } : null;
+        wlSave(); wlRender();
+      };
+    });
+  }
+
+  function initDash() {
+    if (dashStarted) return;
+    dashStarted = true;
+    const dock = document.getElementById("dock-frame");
+    if (dock && !dock.src) {
+      // same-origin desk in local dev, the public desk in production
+      dock.src = "/marcus?agent=marcus&embed=1";
+    }
+    initPanes();
+    wlInitControls();
+    wlRender();
+    renderSideTabs();
+    setFocus(focus);
+    openEventStream();
+    refreshScore();
+    wlPoll();
+    wlTimer = setInterval(wlPoll, 6000);
+    refreshTimer = setInterval(() => document.querySelector("#dash.active") && loadSummary(), 60000);
+  }
+
+  /* ------------------------------------- draggable pane splitters ---- */
+  function initPanes() {
+    if (initPanes.done) return;
+    initPanes.done = true;
+    const grid = document.querySelector("#dash .dgrid");
+    const dright = document.querySelector("#dash .dright");
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem("desk-panes-v1")) || {}; } catch { }
+    const persist = () => localStorage.setItem("desk-panes-v1", JSON.stringify(saved));
+    const applyCols = () => {
+      if (saved.c1) {
+        grid.style.setProperty("--dgc1", saved.c1 + "fr");
+        grid.style.setProperty("--dgc2", (2 - saved.c1).toFixed(3) + "fr");
+      }
+      if (saved.rail) grid.style.setProperty("--dgc3", saved.rail + "px");
+      if (saved.dock) {
+        dright.style.setProperty("--dockgrow", saved.dock);
+        dright.style.setProperty("--sidegrow", (10 - saved.dock).toFixed(2));
+      }
+    };
+    applyCols();
+
+    const bind = (id, axis, onMove, onReset) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        try { el.setPointerCapture(e.pointerId); } catch { }
+        el.classList.add("on");
+        document.body.classList.add("dragging");
+        if (axis === "y") document.body.classList.add("drag-h");
+        const start = { x: e.clientX, y: e.clientY,
+          l: el.previousElementSibling.getBoundingClientRect(),
+          r: el.nextElementSibling.getBoundingClientRect() };
+        const move = (ev) =>
+          onMove(axis === "y" ? ev.clientY - start.y : ev.clientX - start.x, start);
+        const up = () => {
+          el.classList.remove("on");
+          document.body.classList.remove("dragging", "drag-h");
+          el.removeEventListener("pointermove", move);
+          el.removeEventListener("pointerup", up);
+          persist();
+        };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+      });
+      el.addEventListener("dblclick", () => { onReset(); persist(); });
+    };
+
+    bind("div-chart", "x", (dx, s) => {           // data column <-> chart
+      const w1 = s.l.width + dx, w2 = s.r.width - dx;
+      if (w1 < 340 || w2 < 320) return;
+      saved.c1 = +(2 * w2 / (w1 + w2)).toFixed(3);      // c1 = the CHART's share
+      grid.style.setProperty("--dgc1", saved.c1 + "fr");
+      grid.style.setProperty("--dgc2", (2 - saved.c1).toFixed(3) + "fr");
+    }, () => {
+      delete saved.c1;
+      grid.style.removeProperty("--dgc1");
+      grid.style.removeProperty("--dgc2");
+    });
+
+    bind("div-rail", "x", (dx, s) => {            // data column <-> watchlist
+      saved.rail = Math.round(Math.min(430, Math.max(210, s.r.width - dx)));
+      grid.style.setProperty("--dgc3", saved.rail + "px");
+    }, () => { delete saved.rail; grid.style.removeProperty("--dgc3"); });
+
+    bind("div-dock", "y", (dy, s) => {            // Marcus <-> read/x/news card
+      const h1 = s.l.height + dy, h2 = s.r.height - dy;
+      if (h1 < 200 || h2 < 130) return;
+      saved.dock = +(10 * h1 / (h1 + h2)).toFixed(2);
+      dright.style.setProperty("--dockgrow", saved.dock);
+      dright.style.setProperty("--sidegrow", (10 - saved.dock).toFixed(2));
+    }, () => {
+      delete saved.dock;
+      dright.style.removeProperty("--dockgrow");
+      dright.style.removeProperty("--sidegrow");
+    });
+  }
+
+  /* ---------------------------------------------- replay & backtest ---- */
+  const rp = { moments: [], chart: null, run: null, bars: null };
+  const rpEpoch = (iso) => Math.floor(Date.parse(
+    /[+Z]/.test(iso.slice(10)) ? iso : iso + "Z") / 1000);
+  const rpUsd = (v) => (v >= 0 ? "+" : "") + v.toFixed(0) + "$";
+
+  async function initReplay() {
+    if (initReplay.done) return;
+    initReplay.done = true;
+    document.getElementById("rp-ticker").onchange = rpLoadMoments;
+    const s = document.getElementById("rp-slider");
+    s.oninput = () => {
+      document.getElementById("rp-when").textContent =
+        (rp.moments[s.value] || "–").replace("T", " ").slice(0, 16) + " UTC";
+    };
+    document.getElementById("rp-run").onclick = rpDoRun;
+    document.getElementById("rp-ff").onclick = rpFastForward;
+    document.getElementById("rp-sweep").onclick = rpDoSweep;
+    await rpLoadMoments();
+  }
+
+  async function rpLoadMoments() {
+    const t = document.getElementById("rp-ticker").value;
+    try {
+      const d = await fetch(`${API}/api/replay/moments?ticker=${t}`).then(r => r.json());
+      rp.moments = d.moments || [];
+    } catch { rp.moments = []; }
+    const s = document.getElementById("rp-slider");
+    s.max = Math.max(0, rp.moments.length - 1);
+    s.value = Math.max(0, rp.moments.length - 10);
+    s.oninput();
+  }
+
+  async function rpDoRun() {
+    const t = document.getElementById("rp-ticker").value;
+    const at = rp.moments[document.getElementById("rp-slider").value];
+    if (!at) return;
+    const said = document.getElementById("rp-said");
+    said.innerHTML = `<span class="dnote">deciding with only what existed then…</span>`;
+    document.getElementById("rp-verdict").innerHTML =
+      `<span class="dnote">sealed · fast-forward to grade it</span>`;
+    try {
+      const d = await fetch(`${API}/api/replay/run?ticker=${t}&at=${encodeURIComponent(at)}`)
+        .then(r => r.json());
+      if (d.error) { said.textContent = d.error; return; }
+      rp.run = d;
+      document.getElementById("rp-said-when").textContent =
+        "· snapshot " + (d.decided_from || "").replace("T", " ").slice(5, 16);
+      const cp = (d.execution || {}).contract_plan || {};
+      said.innerHTML = `<b>${d.bias}</b><br><br>${d.plain_english}` +
+        (cp.contract ? `<br><br><span style="font-family:var(--mono)">` +
+          `${cp.contract_ticker || ""} ${cp.contract} · ${cp.plan} · ` +
+          `${cp.contracts_now} contracts</span>` : "");
+      const bars = await fetch(`${API}/api/bars/${t}?interval=15m`).then(r => r.json());
+      rp.bars = (bars && bars.bars) || [];
+      const t0 = rpEpoch(at);
+      if (!rp.chart && window.DeskChart) {
+        rp.chart = DeskChart.create(document.getElementById("rp-chart"),
+          { mode: "mini", intervalSec: 900, symbol: t, heikin: false });
+      }
+      if (rp.chart) {
+        rp.chart.setMarkers([]);
+        rp.chart.setData(rp.bars.filter(b => b.t <= t0), 900, { symbol: t });
+      }
+      document.getElementById("rp-ff").disabled = false;
+    } catch (e) { said.textContent = "replay failed: " + e.message; }
+  }
+
+  function rpFastForward() {
+    if (!rp.run || !rp.chart) return;
+    const t = document.getElementById("rp-ticker").value;
+    const v = rp.run.verdict || {};
+    rp.chart.setData(rp.bars, 900, { symbol: t });
+    const out = document.getElementById("rp-verdict");
+    if (!v.gradable) {
+      out.innerHTML = `<span class="dnote">${v.note || "not gradable"}</span>`;
+      return;
+    }
+    const x = rp.run.execution || {};
+    const ms = [];
+    if (v.entry) ms.push({ time: Math.round(v.entry.t), position: "belowBar",
+      shape: "arrowUp", color: "#3ecf8e",
+      text: "in " + x.strike + (x.kind === "put" ? "p" : "c") });
+    if (v.trim) ms.push({ time: v.trim.t, position: "aboveBar",
+      shape: "circle", color: "#7c8aff", text: "½ off" });
+    if (v.final) ms.push({ time: v.final.t, position: "aboveBar",
+      shape: "arrowDown", color: v.pnl_usd >= 0 ? "#3ecf8e" : "#f4657f",
+      text: rpUsd(v.pnl_usd) });
+    rp.chart.setMarkers(ms);
+    const c = v.pnl_usd >= 0 ? "var(--green)" : "var(--red)";
+    out.innerHTML =
+      `entry ${v.entry.px.toFixed(2)} · ${v.contracts} contracts · ` +
+      `${v.invested_usd.toFixed(0)}$ at risk<br>` +
+      `trim: ${v.trim ? "hit at " + v.trim.px.toFixed(2) : "never hit"}<br>` +
+      `${v.expired ? "expired" : "marked"} at ${v.final.px.toFixed(2)}<br><br>` +
+      `<b style="color:${c};font-size:17px">${rpUsd(v.pnl_usd)} ` +
+      `(${v.pnl_pct >= 0 ? "+" : ""}${v.pnl_pct}%)</b>`;
+  }
+
+  async function rpDoSweep() {
+    const t = document.getElementById("rp-ticker").value;
+    if (rp.moments.length < 2) return;
+    const out = document.getElementById("rp-sweepout");
+    out.innerHTML = `<span class="dnote">re-deciding every snapshot in the range…</span>`;
+    try {
+      const start = rp.moments[0], end = rp.moments[rp.moments.length - 1];
+      const d = await fetch(`${API}/api/replay/sweep?ticker=${t}` +
+        `&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&step=60`)
+        .then(r => r.json());
+      if (!d.n) { out.innerHTML = `<span class="dnote">nothing gradable in range yet</span>`; return; }
+      const rows = d.results.slice(-14).map(r =>
+        `<div class="nitem" style="display:flex;gap:10px;font-family:var(--mono);font-size:11.5px">` +
+        `<span style="color:var(--dim)">${r.decided_from.replace("T", " ").slice(5, 16)}</span>` +
+        `<span>${r.kind === "put" ? "p" : "c"}${r.strike}</span>` +
+        `<span>${r.trimmed ? "½✓" : "–"}</span>` +
+        `<span style="margin-left:auto;color:${r.pnl_usd >= 0 ? "var(--green)" : "var(--red)"}">` +
+        `${rpUsd(r.pnl_usd)}</span></div>`).join("");
+      const tc = d.total_pnl_usd >= 0 ? "var(--green)" : "var(--red)";
+      out.innerHTML =
+        `<div class="tiles" style="margin-bottom:10px">` +
+        `<div class="tile"><b>${d.n}</b><span>decisions</span></div>` +
+        `<div class="tile"><b>${d.win_rate ?? "–"}%</b><span>won</span></div>` +
+        `<div class="tile"><b>${d.trim_rate ?? "–"}%</b><span>trimmed</span></div>` +
+        `<div class="tile"><b style="color:${tc}">${rpUsd(d.total_pnl_usd)}</b><span>total</span></div>` +
+        `</div>` + rows;
+    } catch (e) { out.textContent = "sweep failed: " + e.message; }
+  }
+
+  /* real X posts under the pulse — the actual tweets, media and all */
+  let twttrLoading = null;
+  function ensureTwitterWidgets() {
+    if (window.twttr && window.twttr.widgets) return Promise.resolve();
+    if (!twttrLoading) {
+      twttrLoading = new Promise((res) => {
+        const s = document.createElement("script");
+        s.src = "https://platform.twitter.com/widgets.js";
+        s.async = true;
+        s.onload = res;
+        s.onerror = res;
+        document.head.appendChild(s);
+      });
+    }
+    return twttrLoading;
+  }
+
+  async function loadXEmbeds(t, container) {
+    try {
+      const d = await fetch(`${API}/api/xfeed/${t}`).then(r => r.json());
+      if (t !== focus || !(d.posts || []).length) return;
+      const wrap = document.createElement("div");
+      wrap.className = "xembeds";
+      wrap.innerHTML = d.posts.map(p => p.html).join("");
+      container.appendChild(wrap);
+      await ensureTwitterWidgets();
+      if (window.twttr && window.twttr.widgets) window.twttr.widgets.load(wrap);
+    } catch { /* pulse text alone is fine */ }
+  }
+
+  function setFocus(t) {
+    focus = t;
+    document.querySelectorAll("#wl-body .wlrow").forEach(r =>
+      r.classList.toggle("active", r.dataset.sym === t));
+    mountChart(t);
+    loadSummary();
+    loadXPulse(t);
+    if (dashStarted) openQuoteStream();
+  }
+
+  async function loadXPulse(t) {
+    const body = document.getElementById("d-xpulse");
+    body.innerHTML = `<span class="dnote">asking Grok about $${t} on X…</span>`;
+    try {
+      const d = await fetch(`${API}/api/xpulse/${t}`).then(r => r.json());
+      if (t !== focus) return;
+      if (!d.available) {
+        body.innerHTML = `<span class="dnote">X pulse offline (no xAI key on the server)</span>`;
+        return;
+      }
+      if (!d.pulse) { body.innerHTML = `<span class="dnote">no read on $${t} right now</span>`; return; }
+      const bullets = d.pulse.summary.split("\n").filter(l => l.trim())
+        .map(l => `<div class="nitem">${l.replace(/^[-•]\s*/, "").replace(/</g, "&lt;")}</div>`).join("");
+      const cites = (d.pulse.citations || []).slice(0, 4).map((u, i) =>
+        `<a href="${u}" target="_blank" style="color:var(--accent);font-size:11px;margin-right:8px">[${i + 1}]</a>`).join("");
+      body.innerHTML = bullets + (cites ? `<div style="margin-top:8px">${cites}</div>` : "");
+      loadXEmbeds(t, body);
+    } catch { body.innerHTML = `<span class="dnote">X pulse unreachable</span>`; }
+  }
+
+  /* House chart setup on OUR OWN chart (lightweight-charts + the desk's live feed):
+     VWAP with 1σ/2σ bands (impossible in the old free TV embed), EMA21,
+     SMA100, SMA200, DC96, volume — plus the GEX walls/flip as price lines.
+     The ↗ link still opens the full chart in YOUR TradingView, your layout. */
+  const INTERVALS = [["5m","5m"],["15m","15m"],["45m","45m"],["4h","4h"],["1D","D"]];
+  const IV_SECS = { "5m":300,"15m":900,"45m":2700,"4h":14400,"D":86400 };
+  const IV_TV = { "5m":"5","15m":"15","45m":"45","4h":"240","D":"D" };
+  const IV_OLD = { "5":"5m","15":"15m","45":"45m","240":"4h","1D":"D" }; // old stored values
+  let interval = localStorage.getItem("tv_interval") || "15m";
+  interval = IV_OLD[interval] || (IV_SECS[interval] ? interval : "15m");
+
+  function renderIntervals() {
+    const el = document.getElementById("intervals");
+    el.innerHTML = "";
+    for (const [label, val] of INTERVALS) {
+      const b = document.createElement("button");
+      b.className = "wchip" + (val === interval ? " focus" : "");
+      b.style.padding = "4px 12px";
+      b.textContent = label;
+      b.onclick = () => { interval = val; localStorage.setItem("tv_interval", val); mountChart(focus); };
+      el.appendChild(b);
+    }
+    const sel = document.getElementById("iv-select");   // the phone combo, same state
+    sel.innerHTML = INTERVALS.map(([label, val]) =>
+      `<option value="${val}"${val === interval ? " selected" : ""}>${label}</option>`).join("");
+    sel.onchange = () => { interval = sel.value;
+      localStorage.setItem("tv_interval", interval); mountChart(focus); };
+  }
+
+  // on a phone the P&L chip sits IN the control strip (it scrolled over
+  // content as a fixed overlay); back to its fixed corner on desktop
+  const _mqPhone = matchMedia("(max-width:700px)");
+  function seatScore() {
+    const g = document.getElementById("g-score");
+    if (_mqPhone.matches) document.querySelector(".dtop").appendChild(g);
+    else document.body.appendChild(g);
+  }
+  _mqPhone.addEventListener("change", seatScore);
+  seatScore();
+
+
+  // phone: the feed light is tap-for-detail (a tiny popup with the full feed line)
+  document.querySelector(".dtop").addEventListener("click", (e) => {
+    const chip = e.target.closest("#feed-chip");
+    if (!chip || !_mqPhone.matches) return;
+    const old = document.getElementById("dtop-pop");
+    if (old) { old.remove(); return; }
+    const pop = document.createElement("div");
+    pop.id = "dtop-pop";
+    pop.textContent = `${focus} · ${chip.textContent.replace("●", "").trim()}`;
+    pop.style.cssText = "position:fixed;top:" + (chip.getBoundingClientRect().bottom + 8)
+      + "px;left:12px;z-index:99;background:var(--panel2);border:1px solid var(--line);"
+      + "border-radius:8px;padding:8px 13px;font:12px var(--mono);color:var(--text)";
+    document.body.appendChild(pop);
+    setTimeout(() => pop.remove(), 2600);
+  });
+
+  let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null,
+      tapeChecks = null, callerLevels = null;
+
+  function applyTapeMarkers() {
+    // circle the LATEST bar each reversal check fired on — max one per check
+    if (!deskChart || (deskChart.symbol && deskChart.symbol() !== focus)) return;
+    if (!tapeChecks || tapeChecks.sym !== focus) { deskChart.setMarkers([]); return; }
+    const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const long = tapeChecks.side === "long";
+    deskChart.setMarkers(tapeChecks.checks.filter(c => c.ok && c.t).map(c => ({
+      time: c.t, position: long ? "belowBar" : "aboveBar", shape: "circle",
+      color: cssv(long ? "--green" : "--red"), text: String(c.n),
+    })));
+  }
+
+  function ensureChartLib() {
+    if (window.DeskChart) return Promise.resolve();
+    if (chartLib) return chartLib;
+    const load = (src) => new Promise((ok, no) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = ok; s.onerror = no;
+      document.head.appendChild(s);
+    });
+    chartLib = load(`${API}/static/vendor/lightweight-charts.standalone.production.js?v=520`)
+      .then(() => load(`${API}/static/desk-chart.js?v=16`))
+      .catch((err) => { chartLib = null; throw err; });  // one failed load must not poison every future mount
+    return chartLib;
+  }
+
+  function setFeedChip(info) {
+    const chip = document.getElementById("feed-chip");
+    if (!info || !info.source) { chip.style.display = "none"; return; }
+    const live = !info.delayed;
+    chip.style.display = "";
+    chip.textContent = live ? `● live · ${info.source}` : `● delayed 15m · ${info.source}`;
+    chip.style.color = live ? "var(--green)" : "var(--dim)";
+    chip.style.borderColor = live ? "var(--green)" : "var(--line)";
+  }
+
+  function applyGexLevels() {
+    // one call paints EVERYTHING on the chart: GEX structure + the live book
+    if (!deskChart) return;
+    if (deskChart.symbol && deskChart.symbol() !== focus) return;  // chart still on the old ticker
+    const cssv = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const lv = [];
+    if (gexLevels && gexLevels.sym === focus && GEX_COVERED.includes(focus)) {
+      if (gexLevels.call) lv.push({ price: gexLevels.call, color: cssv("--green"), style: 2, title: "call wall" });
+      if (gexLevels.put) lv.push({ price: gexLevels.put, color: cssv("--red"), style: 2, title: "put wall" });
+      if (gexLevels.flip) lv.push({ price: gexLevels.flip, color: cssv("--accent"), style: 3, title: "flip" });
+    }
+    for (const p of book.positions) {
+      if (p.underlying !== focus && !(p.underlying === "SPY" && focus === "XSP")) continue;
+      if (p.entry_underlying) lv.push({ price: p.entry_underlying, color: cssv("--text"),
+        style: 0, title: `in · ${contractOf(p)}` });
+      if (p.tp50_underlying) lv.push({ price: p.tp50_underlying, color: cssv("--green"),
+        style: 2, title: "trim +50%" });
+    }
+    if (callerLevels && callerLevels.sym === focus) {
+      const cmap = { green: "--green", red: "--red", accent: "--accent", dim: "--dim" };
+      for (const l of callerLevels.levels) {
+        lv.push({ price: l.price, color: cssv(cmap[l.color] || "--accent"),
+                  style: 2, title: l.label });
+      }
+    }
+    // ONE line per price: walls, the book and Marcus's drawn levels overlap
+    // constantly, and the same number twice reads as two different lines
+    const seenLv = new Set();
+    deskChart.setLevels(lv.filter(l => {
+      if (!l || !isFinite(l.price)) return false;
+      const k = Number(l.price).toFixed(2);
+      if (seenLv.has(k)) return false;
+      seenLv.add(k);
+      return true;
+    }));
+  }
+
+  // Marcus draws what he says: the embedded voice panel posts levels the
+  // moment he speaks them, and they land on THIS chart as labeled lines
+  window.addEventListener("message", (e) => {
+    const d = e.data && e.data.deskDrawLevels;
+    if (!d) return;
+    callerLevels = d.clear ? null : { sym: focus, levels: d.levels || [] };
+    applyGexLevels();
+  });
+
+  function openQuoteStream() {
+    if (quotesES) quotesES.close();
+    quotesES = new EventSource(`${API}/api/stream/quotes?symbols=${[...new Set([focus, "SPY"])].join(",")}`);
+    quotesES.onmessage = (e) => {
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type !== "quote") return;
+      if (d.ticker === focus) {
+        setFeedChip(d);
+        const tile = document.getElementById("tile-spot");
+        const tiles = document.getElementById("d-tiles");
+        // the tiles may still belong to the previous ticker while its summary
+        // loads — never write the new ticker's price into the old spot tile
+        if (tile && tiles && tiles.dataset.sym === focus) tile.textContent = d.price;
+        if (deskChart) {
+          const ts = d.ts ? Math.floor(Date.parse(d.ts) / 1000) : 0;
+          deskChart.applyTick(d.price, ts, d.ticker);
+          if (!deskChart.symbol || deskChart.symbol() === focus) {
+            deskChart.setSessionInfo({ close: (wlQuotes[focus] || {}).reg_close,
+                                       session: d.session });
+          }
+        }
+      }
+    };
+  }
+
+  async function mountChart(symbol) {
+    renderIntervals();
+    document.getElementById("tv-full").href =
+      `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${IV_TV[interval] || "240"}`;
+    const seq = ++chartSeq;
+    const wrap = document.getElementById("tv-chart");
+    try {
+      await ensureChartLib();
+      const data = await fetch(`${API}/api/bars/${symbol}?interval=${interval}&limit=600`)
+        .then((r) => (r.ok ? r.json() : null));
+      if (seq !== chartSeq) return;                 // user moved on mid-fetch
+      if (!data || !(data.bars || []).length) throw new Error("no bars");
+      if (!deskChart) {
+        wrap.innerHTML = "";
+        deskChart = DeskChart.create(wrap, { intervalSec: IV_SECS[interval] });
+      }
+      deskChart.setData(data.bars, IV_SECS[interval], {
+        daily: interval === "D", symbol,
+        label: interval === "D" ? "1D" : interval,
+      });
+      setFeedChip(data);
+      applyGexLevels();
+      applyTapeMarkers();
+    } catch {
+      if (seq !== chartSeq) return;
+      if (deskChart) { deskChart.destroy(); deskChart = null; }
+      wrap.innerHTML = `<div class="dnote" style="padding:24px">candle feed unreachable ·
+        <a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}"
+           target="_blank" style="color:var(--accent)">open on TradingView ↗</a></div>`;
+      setFeedChip(null);
+    }
+  }
+
+  async function loadSummary() {
+    const t = focus;
+    const tiles = document.getElementById("d-tiles");
+    if (!GEX_COVERED.includes(t)) {
+      tiles.innerHTML = `<div class="dnote">GEX coverage: ${GEX_COVERED.join(", ")} · chart, news
+        and chatter only for ${t}.</div>`;
+      tiles.dataset.sym = t;
+      document.getElementById("d-trade").innerHTML = `<span class="dnote">n/a for ${t}</span>`;
+      document.getElementById("d-asof").textContent = "";
+      loadFeedsFallback(t);
+      return;
+    }
+    try {
+      const d = await fetch(`${API}/api/summary/${t}`).then(r => r.json());
+      if (t !== focus) return;                       // user moved on mid-fetch
+      const s = d.snapshot, gl = d.gex_live;
+      const regime = (gl && gl.regime_live) || s.regime, pos = regime === "positive_gamma";
+      const spotNow = (d.live_spot && d.live_spot.price) ?? s.spot;
+      gexLevels = {
+        sym: t,   // stale walls must not paint on the next ticker's chart
+        call: d.walls && d.walls.call && d.walls.call.strike,
+        put: d.walls && d.walls.put && d.walls.put.strike,
+        flip: (gl && gl.gamma_flip) || s.gamma_flip,
+      };
+      applyGexLevels();
+      document.getElementById("d-asof").textContent =
+        "· structure " + s.captured_at.slice(11, 16) + " UTC" +
+        (d.live_spot && !d.live_spot.delayed ? " · spot live" : "");
+      // the money direction leads — "SHORT γ" is dealer context, not the trade,
+      // and reading it as "go short" on a calls day cost users the point
+      const xk = (d.trade.execution || {}).kind, bl = (d.trade.bias || "").toLowerCase();
+      const act = xk === "call" || (!xk && bl.startsWith("bull")) ? ["BUY CALLS", "pos"]
+        : xk === "put" || (!xk && bl.startsWith("bear")) ? ["BUY PUTS", "neg"]
+        : ["RANGE", ""];
+      const why = bl.includes("reversal") ? "reversal" : bl.includes("momentum") ? "momentum"
+        : bl.includes("pin") || bl.includes("mean") ? "pinned tape" : "the trade";
+      tiles.innerHTML = `
+        <div class="tile"><b class="${act[1]}">${act[0]}</b><span>${why}</span></div>
+        <div class="tile"><b id="tile-spot">${spotNow}</b><span>spot${d.live_spot && !d.live_spot.delayed ? " · live" : ""}</span></div>
+        <div class="tile"><b class="${pos ? "pos" : "neg"}">${pos ? "LONG γ" : "SHORT γ"}</b><span>dealer regime</span></div>
+        <div class="tile"><b>${gexLevels.flip ? Number(gexLevels.flip).toFixed(0) : "–"}</b><span>flip</span></div>
+        <div class="tile"><b>${s.signal_score ?? "–"}</b><span>signal</span></div>
+        <div class="tile"><b>${(s.atm_iv * 100).toFixed(1)}%</b><span>atm iv</span></div>
+        <div class="tile"><b>${s.vix ?? "–"}</b><span>vix</span></div>`;
+      tiles.dataset.sym = t;
+      const cl = (d.trade.tape || {}).checklist;
+      tapeChecks = cl ? { sym: t, ...cl } : null;
+      const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("en-US",
+        { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "America/New_York" });
+      const conf = d.trade.confluence;
+      const confHtml = !conf ? "" : `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <span class="dnote">THE BOARD · ${conf.side} · ${conf.verdict.replace("_", " ")}</span>
+        ${conf.boxes.map(b => `<div style="margin-top:4px">
+          <span style="color:${b.state === "green" ? "#22ab94" : b.state === "red" ? "#f7525f" : "var(--dim)"}">${b.state === "green" ? "✓" : b.state === "red" ? "✗" : "○"}</span>
+          ${b.name} <span style="color:var(--dim)">· ${b.why}</span></div>`).join("")}
+      </div>`;
+      const anow = (d.trade.tape || {}).action;
+      const lvl = (l, arrow) => !l ? "" : `<div style="margin-top:4px"><span style="color:var(--dim)">${arrow}</span>
+        <b>${l.level}</b> <span style="color:var(--dim)">(${l.dist > 0 ? "+" : ""}${l.dist})</span> · ${l.means}</div>`;
+      const nowHtml = !anow ? "" : `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <span class="dnote">NOW · ${anow.stance.replace("_", " ")}</span>
+        <div style="margin-top:4px">${anow.do_now}</div>${lvl(anow.up, "▲")}${lvl(anow.down, "▼")}
+      </div>`;
+      const clHtml = (!cl ? "" : `<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">
+        <span class="dnote">THE SETUP · ${cl.side} reversal · ${cl.done}/4${cl.stage && cl.stage !== "none" ? " · " + cl.stage : ""}</span>
+        ${cl.checks.map(c => `<div style="margin-top:4px">
+          <span class="${c.ok ? "pos" : ""}"${c.ok ? "" : ' style="color:var(--dim)"'}>${c.ok ? "✓" : "○"}</span>
+          ${c.n}. ${c.label}${c.t ? ` <span style="color:var(--dim)">· ${hhmm(c.t)} ET</span>` : ""}</div>`).join("")}
+      </div>`) + confHtml + nowHtml;
+      document.getElementById("d-trade").innerHTML =
+        `<b>${d.trade.structure}</b> · ${d.trade.bias}<br><br>${d.trade.plain_english}` + clHtml;
+      applyTapeMarkers();
+      renderNews(d.headlines);
+      renderBuzz(d.buzz, d.trending);
+      renderTA(d.ta_signals);
+    } catch {
+      tiles.innerHTML = `<div class="dnote">desk API unreachable</div>`;
+    }
+  }
+
+  function renderTA(sigs) {
+    const card = document.getElementById("d-ta-card");
+    if (!(sigs || []).length) { card.style.display = "none"; return; }
+    card.style.display = "";
+    document.getElementById("d-ta").innerHTML = sigs.map(s =>
+      `<div class="nitem"><b>${s.signal.replace(/</g, "&lt;")}</b>
+       <small>${s.interval || ""} ${s.price ? "@ " + s.price : ""} · ${s.created_at.slice(11, 16)} UTC</small></div>`
+    ).join("");
+  }
+
+  async function loadFeedsFallback(t) {
+    try {
+      const d = await fetch(`${API}/api/summary/SPY`).then(r => r.json());
+      renderNews(d.headlines); renderBuzz(null, d.trending);
+    } catch { /* leave as-is */ }
+  }
+
+  function renderNews(items) {
+    const el = document.getElementById("d-news");
+    if (!(items || []).length) {
+      el.innerHTML = `<span class="dnote">no recent headlines</span>`;
+      return;
+    }
+    el.innerHTML = items.slice(0, 12).map(n =>
+      `<div class="nitem"><a href="${n.link}" target="_blank">${n.title}</a><small>${n.published}</small></div>`
+    ).join("");
+  }
+
+  function renderBuzz(buzz, trending) {
+    let html = "";
+    if (buzz) {
+      const arrow = buzz.rank_change > 0 ? `▲${buzz.rank_change}`
+                  : buzz.rank_change < 0 ? `▼${-buzz.rank_change}` : "–";
+      html += `<div class="tiles" style="margin-bottom:10px">
+        <div class="tile"><b>#${buzz.rank}</b><span>crowd rank</span></div>
+        <div class="tile"><b>${buzz.mentions_24h}</b><span>mentions 24h</span></div>
+        <div class="tile"><b>${arrow}</b><span>vs yesterday</span></div>
+      </div>`;
+    } else {
+      html += `<div class="dnote" style="margin-bottom:8px">${focus} isn't on the crowd's board right now.</div>`;
+    }
+    if ((trending || []).length) {
+      html += `<div class="dnote">Loudest tickers now: ` + trending.map(t =>
+        `<b style="color:var(--text)">${t.ticker}</b> <span style="font-size:11px">(${t.mentions_24h})</span>`
+      ).join(" · ") + `</div>`;
+    }
+    document.getElementById("d-chat").innerHTML = html || `<span class="dnote">social feed unavailable</span>`;
+  }
+
+  /* ---------------------------------------------------------- the game ----
+     P&L is the score. One SSE stream feeds the fixed score chip (every tab),
+     the open-book strip under the chart, the trade lines ON the chart, and
+     the Positions pane with its ADD / SELL / CLOSE ticket. */
+
+  let book = { positions: [], recent: [] };
+  let eventsES = null, lastScore = null, sideTab = "read";
+  const contractOf = (t) => `${t.contract_ticker} ${Number(t.strike)}${t.kind[0]}`;
+  const usd = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(x).toFixed(0);
+
+  function paintScore() {
+    const el = document.getElementById("g-score");
+    if (!lastScore) { el.textContent = "P&L –"; el.className = ""; return; }
+    const unreal = book.positions.reduce((s, p) => s + (p.unreal_usd || 0), 0);
+    const total = (lastScore.realized_usd || 0) + unreal;
+    el.textContent = `P&L ${usd(total)}` +
+      (book.positions.length ? ` · ${book.positions.length} open` : "");
+    el.className = total >= 0 ? "pos" : "neg";
+  }
+
+  async function refreshScore() {
+    try { lastScore = await fetch(`${API}/api/score`).then(r => r.json()); } catch { }
+    paintScore();
+  }
+
+  async function refreshBook() {
+    try {
+      const r = await fetch(`${API}/api/trades`).then(x => x.json());
+      book.positions = r.positions || []; book.recent = r.recent || [];
+    } catch { }
+    paintStrip(); applyGexLevels(); renderPositions(); paintScore();
+  }
+
+  async function act(id, action) {
+    try {
+      const r = await fetch(`${API}/api/trades/${id}/action`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, qty: 1 }),
+      });
+      if (!r.ok) console.warn("action refused:", (await r.json()).detail);
+    } catch { }
+    await refreshBook(); await refreshScore();
+  }
+  window.act = act;   // inline onclick handlers on the position rows
+
+  function rowButtons(p) {
+    return `<button class="pbtn" onclick="act(${p.id},'add')" title="add 1 @ mark">ADD</button>
+      <button class="pbtn" onclick="act(${p.id},'sell')" title="sell 1 @ mark">SELL</button>
+      <button class="pbtn close" onclick="act(${p.id},'close')" title="flatten @ mark">CLOSE</button>`;
+  }
+
+  function posRow(p) {
+    const pnl = p.unreal_usd;
+    const cls = (pnl ?? 0) >= 0 ? "pos" : "neg";
+    const pct = p.unreal_pct != null ? ` (${p.unreal_pct >= 0 ? "+" : ""}${p.unreal_pct}%)` : "";
+    return `<div class="prow">
+      <span class="pc">${contractOf(p)}</span>
+      <span>×${p.contracts_open} @ ${p.entry_px}</span>
+      <span>mark ${p.mark ?? "–"}</span>
+      ${p.tp_hit ? '<span style="color:var(--green)">TRIM ZONE</span>' : ""}
+      <span class="pnl ${cls}">${pnl != null ? usd(pnl) + pct : "–"}</span>
+      ${rowButtons(p)}
+    </div>`;
+  }
+
+  function paintStrip() {
+    const el = document.getElementById("pos-strip");
+    el.innerHTML = book.positions.map(posRow).join("");
+  }
+
+  function renderPositions() {
+    const open = document.getElementById("p-open");
+    if (!open) return;
+    const s = lastScore || {};
+    const unreal = book.positions.reduce((sum, p) => sum + (p.unreal_usd || 0), 0);
+    const total = (s.realized_usd || 0) + unreal;
+    document.getElementById("p-score").innerHTML = `
+      <div class="tile"><b class="${total >= 0 ? "pos" : "neg"}">${usd(total)}</b><span>net p&l</span></div>
+      <div class="tile"><b>${usd(s.realized_usd || 0)}</b><span>realized</span></div>
+      <div class="tile"><b>${usd(unreal)}</b><span>open p&l</span></div>
+      <div class="tile"><b>${book.positions.length}</b><span>open</span></div>
+      <div class="tile"><b>${s.closed_trades ?? 0}</b><span>closed</span></div>
+      <div class="tile"><b>${s.win_rate != null ? s.win_rate + "%" : "–"}</b><span>win rate</span></div>`;
+    open.innerHTML = book.positions.length
+      ? book.positions.map(posRow).join("")
+      : `<div class="dnote" style="padding:10px 2px">flat: ask Marcus for the trade, then tell him
+         "I'm in" (or hit TAKE IT on a quote below).</div>`;
+    const hist = (book.recent || []).filter(t =>
+      t.status === "closed" || t.status === "quoted");
+    document.getElementById("p-hist").innerHTML = hist.length ? hist.map(t => {
+      const r = t.realized_usd || 0;
+      const when = (t.close_at || t.created_at || "").slice(5, 16).replace("T", " ");
+      return `<div class="prow">
+        <span class="pc">${contractOf(t)}</span>
+        <span>${t.status}</span>
+        <span style="color:var(--dim)">${when}</span>
+        ${t.status === "quoted" ? `<button class="pbtn" onclick="act(${t.id},'add')">TAKE IT</button>` : ""}
+        <span class="pnl ${r >= 0 ? "pos" : "neg"}">${t.status === "closed" ? usd(r)
+          : "~" + (t.quoted_px ?? "")}</span>
+      </div>`;
+    }).join("") : `<div class="dnote">no history yet</div>`;
+  }
+
+  function openEventStream() {
+    if (eventsES) return;
+    eventsES = new EventSource(`${API}/api/stream/events`);
+    eventsES.onmessage = (e) => {
+      let d; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "boot") {
+        book.positions = d.positions || []; book.recent = d.recent || [];
+        paintStrip(); applyGexLevels(); renderPositions(); refreshScore();
+      } else if (d.type === "pnl") {
+        book.positions = d.positions || [];
+        paintStrip(); paintScore();
+        if (document.querySelector("#positions.active")) renderPositions();
+      } else if (d.type === "trade") {
+        refreshBook(); refreshScore();
+      }
+    };
+  }
+
+  function renderSideTabs() {
+    const tabs = [["read", "Read"], ["x", "X list"], ["news", "News"], ["buzz", "Buzz"]];
+    const el = document.getElementById("side-tabs");
+    el.innerHTML = "";
+    for (const [k, label] of tabs) {
+      const b = document.createElement("button");
+      b.className = "wchip" + (k === sideTab ? " focus" : "");
+      b.textContent = label;
+      b.onclick = () => {
+        sideTab = k;
+        renderSideTabs();
+        document.querySelectorAll("#side-body .scard").forEach(c => (c.hidden = c.dataset.s !== k));
+      };
+      el.appendChild(b);
+    }
+  }
+
+  show("dash");   // the sim IS the product — land on the trade screen
+</script>
+</body>
+</html>

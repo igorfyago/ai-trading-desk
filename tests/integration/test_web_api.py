@@ -17,10 +17,17 @@ def client():
     return TestClient(app)
 
 
-def test_index_serves_app(client):
+def test_index_serves_minitrade_and_marcus_has_his_own_path(client):
+    """This host IS the trading app now: / is minitrade, and the agent chat UI
+    it embeds lives at /marcus so the cockpit can frame it same-origin."""
     r = client.get("/")
     assert r.status_code == 200
-    assert b"AI TRADING" in r.content
+    assert b"minitrade" in r.content
+    assert b'data-pane="dash"' in r.content        # the trade cockpit is the default
+
+    m = client.get("/marcus")
+    assert m.status_code == 200
+    assert b"AI TRADING" in m.content
 
 
 def test_agent_catalog(client):

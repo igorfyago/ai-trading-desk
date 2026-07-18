@@ -49,3 +49,11 @@ pay.{$BASE_DOMAIN} {
 :80 {
     redir https://desk.{$BASE_DOMAIN}{uri} permanent
 }
+
+# auth.b4rruf3t.com is the estate's front door.
+# TLS terminates here like everywhere else; the estate cookie this service
+# sets (Domain=.b4rruf3t.com, Secure) only travels over HTTPS, which is
+# exactly what this block guarantees.
+auth.{$BASE_DOMAIN} {
+    reverse_proxy sso:8090
+}

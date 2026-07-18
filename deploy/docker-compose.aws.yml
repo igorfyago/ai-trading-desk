@@ -288,6 +288,31 @@ services:
       - "127.0.0.1:8087:8082"
       - "127.0.0.1:8088:8083"
 
+  # ---- sso: one login for the whole estate. Issues the JWTs every other
+  # service on this box validates. The estate cookie (Domain=.b4rruf3t.com)
+  # it sets is what "log in once, recognized everywhere" physically is.
+  sso:
+    build: ../../minibank/sso-service
+    restart: unless-stopped
+    depends_on:
+      minibank-control:
+        condition: service_healthy
+    environment:
+      SSO_PORT: "8090"
+      SSO_ISSUER: https://auth.b4rruf3t.com
+      # The sso database brings itself up on the control plane: ADMIN_URL is
+      # any existing database on the server (the bootstrap creates sso if it
+      # is missing), the real URL is where the schema then lives.
+      SSO_ADMIN_URL: jdbc:postgresql://minibank-control:5432/minibank
+      SSO_DB_URL: jdbc:postgresql://minibank-control:5432/sso
+      SSO_DB_USER: minibank
+      SSO_DB_PASS: minibank
+      # persisted keypair: survives rebuilds, or every deploy is a logout
+      SSO_KEY_FILE: /keys/sso-rsa.key
+      JAVA_TOOL_OPTIONS: "-Xmx96m"
+    volumes:
+      - sso_keys:/keys
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -300,9 +325,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../web/portal:/srv/landing:ro
       - caddy_data:/data
-    depends_on: [desk, gex-api, observatory, minibank]
+    depends_on: [desk, gex-api, observatory, minibank, sso]
 
 volumes:
+  sso_keys:
   pgdata:
   caddy_data:
   deskdata:

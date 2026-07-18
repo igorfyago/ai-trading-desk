@@ -101,7 +101,7 @@ services:
       OBS_MAX_CONCURRENT: ${OBS_MAX_CONCURRENT:-3}
       OBS_SES_FROM: ${OBS_SES_FROM:-}      # unset = alerts degrade to log lines
       OBS_ALERT_TO: ${OBS_ALERT_TO:-igor.yago@gmail.com}
-      AWS_REGION: ${AWS_REGION:-eu-west-1}
+      AWS_REGION: ${AWS_REGION:-us-east-1}   # the box and the account both live here
     volumes:
       - obsdata:/app/data                  # the spend meter must survive a
                                            # rebuild, or every deploy is a

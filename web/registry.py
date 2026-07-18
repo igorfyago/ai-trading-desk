@@ -38,23 +38,9 @@ AGENT_META = [   # category: finance | agency | custom
      "hint": "Run the desk on SPY"},
 ]
 
-from common import tickers as universe
-
-# any watchlist name matches case-insensitively — EXCEPT tickers that collide
-# with English (NOW, BE, RUN...), which need CAPS or a $ prefix to count
-_SAFE = sorted(universe.WATCHLIST - universe.AMBIGUOUS, key=len, reverse=True)
-_AMB = sorted(universe.AMBIGUOUS & universe.WATCHLIST, key=len, reverse=True)
-# (?!\w) instead of \b as the right boundary — \b can't follow "ES1!"
-TICKER_RE = re.compile(r"(?<![\w$])(" + "|".join(map(re.escape, _SAFE)) + r")(?!\w)", re.I)
-_AMB_RE = re.compile(r"(?i:\$(" + "|".join(map(re.escape, _AMB)) + r")(?!\w))|"
-                     r"(?<![\w$])(" + "|".join(map(re.escape, _AMB)) + r")(?!\w)")
-
-
-def extract_tickers(text: str) -> list[str]:
-    found = {m.upper() for m in TICKER_RE.findall(text)}
-    for dollar, caps in _AMB_RE.findall(text):        # $now or literal NOW
-        found.add((dollar or caps).upper())
-    return sorted(found, key=lambda t: (t != "SPY", t))
+# the ticker parser moved to common/tickers.py · it is desk knowledge and
+# Marcus needs it whether or not a chat agent exists
+from common.tickers import TICKER_RE, extract_tickers  # noqa: F401
 
 
 def _live_context(text: str) -> str:

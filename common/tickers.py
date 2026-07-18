@@ -37,3 +37,25 @@ WATCHLIST = {
 # text clearly means the ticker (written in CAPS, or $-prefixed).
 AMBIGUOUS = {"NOW", "BE", "RUN", "OPEN", "CAT", "ARM", "COIN", "AG", "VG",
              "MU", "ALL", "IBM", "COST", "FIG", "JD", "CG", "MP", "BA"}
+
+
+# ---------------------------------------------------------- text -> tickers --
+# Lives here, not in the web layer: reading a ticker out of a sentence is desk
+# knowledge, and Marcus needs it whether or not any chat agent exists.
+import re as _re
+
+# any watchlist name matches case-insensitively · EXCEPT tickers that collide
+# with English (NOW, BE, RUN...), which need CAPS or a $ prefix to count
+_SAFE = sorted(WATCHLIST - AMBIGUOUS, key=len, reverse=True)
+_AMB = sorted(AMBIGUOUS & WATCHLIST, key=len, reverse=True)
+# (?!\w) instead of \b as the right boundary · \b can't follow "ES1!"
+TICKER_RE = _re.compile(r"(?<![\w$])(" + "|".join(map(_re.escape, _SAFE)) + r")(?!\w)", _re.I)
+_AMB_RE = _re.compile(r"(?i:\$(" + "|".join(map(_re.escape, _AMB)) + r")(?!\w))|"
+                      r"(?<![\w$])(" + "|".join(map(_re.escape, _AMB)) + r")(?!\w)")
+
+
+def extract_tickers(text: str) -> list[str]:
+    found = {m.upper() for m in TICKER_RE.findall(text)}
+    for dollar, caps in _AMB_RE.findall(text):        # $now or literal NOW
+        found.add((dollar or caps).upper())
+    return sorted(found, key=lambda t: (t != "SPY", t))

@@ -43,10 +43,10 @@ def test_analyst_graph_topology():
 
 
 def test_registry_metadata_consistent():
-    from web import registry
+    from common import tickers as _tk; from web import registry
 
     ids = [a["id"] for a in registry.AGENT_META]
     assert ids == ["brief", "sql", "repo", "research", "analyst"]
     assert len(set(ids)) == len(ids)
-    assert registry.TICKER_RE.search("run the desk on qqq please").group(1).upper() == "QQQ"
-    assert registry.TICKER_RE.search("no ticker here") is None
+    assert _tk.TICKER_RE.search("run the desk on qqq please").group(1).upper() == "QQQ"
+    assert _tk.TICKER_RE.search("no ticker here") is None

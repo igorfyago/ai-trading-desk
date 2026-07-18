@@ -266,7 +266,7 @@ def test_scrub_kills_phantom_wicks_keeps_real_spikes():
 def test_extract_tickers_universe_and_ambiguity():
     import os
     os.environ.setdefault("QUOTES_PROVIDER", "off")
-    from web import registry
+    from common import tickers as registry
     assert registry.extract_tickers("thoughts on nvda?") == ["NVDA"]
     assert registry.extract_tickers("is now a good time?") == []      # adverb
     assert registry.extract_tickers("how is NOW doing") == ["NOW"]    # ticker

@@ -100,8 +100,18 @@
   #overview .foot { color:var(--dim); font-size:12px; margin-top:80px; font-family:var(--mono); }
 
   /* trade pane — the sim: chart owns the left, the agent owns the right */
-  #dash { flex-direction:column; padding:14px 18px 16px; gap:10px; overflow:hidden; }
-  .dtop { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding-right:150px; }
+  /* 22px matches the top bar exactly, so the P&L pill, the chart column and the
+     watchlist all share one right edge. It was 18px, which is why the pill sat
+     4px inside everything below it: a mismatch small enough to look like bad
+     kerning and large enough to see. */
+  #dash { flex-direction:column; padding:14px 22px 16px; gap:10px; overflow:hidden; }
+  /* The strip used to reserve 150px on the right for a P&L chip pinned to the
+     window corner. The chip now lives in the top bar, so that reservation was
+     just a hole: the feed and TradingView chips stopped 149px short of every
+     other right edge on the page.
+     On desktop the strip has nothing left to show, so it does not take a band
+     at all. It comes back on a phone, where it is where the P&L is seated. */
+  .dtop { display:none; gap:14px; align-items:center; flex-wrap:wrap; }
   .dleft { display:flex; flex-direction:column; gap:8px; min-height:0; min-width:0; }
   .dright { display:flex; flex-direction:column; gap:10px; min-height:0; min-width:0; }
   #side-card { flex:var(--sidegrow,1); min-height:120px; display:flex; flex-direction:column;
@@ -231,6 +241,15 @@
                              #watch-rail{display:none;} .pdiv:not(.pdiv-h){display:none;} }
   /* A hard pixel minimum is fine on a big monitor and is exactly what pushes a
      laptop into a second screen. It yields to the viewport instead. */
+  /* The timeframes and the chart's own chips are ONE row. They were two bands
+     stacked on top of each other: the intervals here and the chips floating in
+     a strip above, which is what made the whole area look like it belonged to
+     two different pages. They are chart controls, so they sit with the chart
+     and share its right edge. */
+  .chartbar { display:flex; align-items:center; gap:10px; flex:none; }
+  .chartbar #intervals { flex:1; min-width:0; }
+  .chartbar .watch { flex:none; margin-left:auto; }
+
   #tv-wrap { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius,8px);
              overflow:hidden; flex:1; min-height:min(340px, 34vh); }
   #agent-dock { flex:var(--dockgrow,1.3); min-height:min(200px, 20vh); display:flex; flex-direction:column;
@@ -297,7 +316,7 @@
     #dash { overflow-y:auto; overflow-x:hidden; padding:10px 10px 46px; }
     /* the control strip: interval COMBO + feed + TV link + the P&L chip
        seated IN the row (it scrolls away with the page, blocks nothing) */
-    .dtop { flex:none; flex-wrap:nowrap; overflow-x:auto; gap:6px; align-items:center;
+    .dtop { display:flex; flex:none; flex-wrap:nowrap; overflow-x:auto; gap:6px; align-items:center;
             padding:2px 2px 2px 0; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
     .dtop::-webkit-scrollbar { display:none; }
     .dtop .watch { flex-wrap:nowrap; flex:none; gap:6px; margin-left:0 !important; }
@@ -442,11 +461,6 @@
     <section class="pane active" id="dash">
       <div class="dtop">
         <select id="iv-select" title="chart interval"></select>
-        <div class="watch" style="margin-left:auto">
-          <span id="feed-chip" class="wchip" style="pointer-events:none;display:none"></span>
-          <a id="tv-full" href="#" target="_blank" class="wchip add"
-             style="text-decoration:none">TradingView ↗</a>
-        </div>
       </div>
       <div class="dgrid">
         <div class="dright">
@@ -488,7 +502,14 @@
         </div>
         <div class="pdiv" id="div-chart" title="drag to resize · double-click resets"></div>
         <div class="dleft">
-          <div class="watch" id="intervals"></div>
+          <div class="chartbar">
+            <div class="watch" id="intervals"></div>
+            <div class="watch">
+              <span id="feed-chip" class="wchip" style="pointer-events:none;display:none"></span>
+              <a id="tv-full" href="#" target="_blank" class="wchip add"
+                 style="text-decoration:none">TradingView ↗</a>
+            </div>
+          </div>
           <div id="tv-wrap"><div id="tv-chart" style="height:100%"></div></div>
           <div id="pos-strip"></div>
         </div>

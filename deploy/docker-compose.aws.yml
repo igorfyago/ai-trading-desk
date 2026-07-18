@@ -171,6 +171,8 @@ services:
         condition: service_healthy
       minibank-kafka:
         condition: service_started
+      minibank-redis:
+        condition: service_started
     environment:
       MINIBANK_SHARD0_URL: jdbc:postgresql://minibank-shard0:5432/minibank
       MINIBANK_SHARD1_URL: jdbc:postgresql://minibank-shard1:5432/minibank
@@ -179,9 +181,15 @@ services:
       MINIBANK_POOL: "10"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}     # Rita, the support agent (read-only, metered)
       FX_URL: http://minibank-fx:8090         # the FX microservice · its own container
+      REDIS_URL: redis://minibank-redis:6379  # read-through cache for prices/market data
       JAVA_TOOL_OPTIONS: "-Xmx256m"
     ports:
       - "127.0.0.1:8085:8080"             # debugging only; caddy proxies internally
+
+  minibank-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
 
   minibank-fx:
     build: ../../minibank/ledger-service

@@ -641,6 +641,43 @@
   try { WL = JSON.parse(localStorage.getItem(WL_KEY)) || WL_DEFAULT; }
   catch { WL = WL_DEFAULT; }
   const wlSave = () => localStorage.setItem(WL_KEY, JSON.stringify(WL));
+
+  // WRITE-THROUGH TO THE BROKER · best effort, never load-bearing.
+  //
+  // localStorage stays the source of truth. This mirrors MEMBERSHIP only —
+  // add and remove — because that is all the broker's (customer_id, symbol)
+  // table can hold; section, order, colour flag and sort mode are desk-only
+  // and hooking them would just produce redundant upserts. So this is NOT
+  // wired into wlSave (which every reorder and collapse calls), only into the
+  // two mutations that change what is on the list.
+  //
+  // The desk's session id, same key app.js mints, so the dashboard and the
+  // full desk agree on who this browser is.
+  const deskSession = (() => {
+    try {
+      let s = localStorage.getItem("desk-session");
+      if (!s) {
+        s = crypto.randomUUID ? crypto.randomUUID()
+          : "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem("desk-session", s);
+      }
+      return s;
+    } catch { return ""; }
+  })();
+
+  // Fire and forget. No await, no user-visible error, no retry: the local
+  // write already happened and the rail already rendered. If the broker is
+  // down this is a swallowed promise and nothing else.
+  const wlSync = (symbol, action) => {
+    if (!deskSession) return;
+    try {
+      fetch(API + "/api/watchlist/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, action, session: deskSession }),
+      }).catch(() => {});
+    } catch { /* no fetch, no network, no problem */ }
+  };
   const wlQuotes = {};                 // sym -> latest /api/watch row
   let wlLastPx = {}, wlTimer = null, wlDrag = null;
 
@@ -825,7 +862,7 @@
 
   function wlRemove(sec, sym) {
     sec.items = sec.items.filter(i => i.s !== sym);
-    wlSave(); wlRender();
+    wlSave(); wlRender(); wlSync(sym, "remove");
   }
 
   function wlDrop(sec, beforeSym) {
@@ -892,7 +929,7 @@
       const sec = WL.sections.find(s => s.open) || WL.sections[0];
       sec.items.unshift({ s: t });
       input.value = "";
-      wlSave(); wlRender(); wlPoll();
+      wlSave(); wlRender(); wlPoll(); wlSync(t, "add");
     };
     document.querySelectorAll("#wl-cols .wlc").forEach(c => {
       c.onclick = () => {                    // desc -> asc -> manual

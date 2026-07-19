@@ -27,6 +27,58 @@ bank.{$BASE_DOMAIN} {
     reverse_proxy minibank:8080
 }
 
+# The broker gets its OWN HOSTNAME, and the reason is worth writing down
+# because the obvious alternative looks cheaper and is wrong.
+#
+# The tempting option is a path prefix on the bank host:
+#
+#     handle_path /broker/* { reverse_proxy minibank-broker:8091 }
+#     handle { reverse_proxy minibank:8080 }
+#
+# handle_path (stripping) is mandatory there, because BrokerApi registers the
+# literal prefix "/portfolio" and substrings it off — a non-stripping handle
+# forwards /broker/portfolio, which matches no createContext at all and 404s
+# before any handler runs. But stripping is exactly what breaks it: the page
+# fetches ABSOLUTE, root-anchored paths (/api/portfolio, /api/orders,
+# /api/watchlist, /health), and a URL path prefix is not part of origin
+# resolution. So fetch("/api/portfolio?customer=10") resolves against
+# https://bank.b4rruf3t.com/, misses /broker/*, falls to the catch-all, and
+# lands on the LEDGER — which registers that exact path itself.
+#
+# That is the dangerous part. It is not a 404. It is a 200 with a completely
+# different schema: the ledger answers {main,savings,card,btc,...} where the
+# page expects {customer,aggregate,holdings}. The page's fetch helper only
+# flags an error on !r.ok, so a 200 sails through, drawHeader reads
+# p.aggregate.marketValue, throws inside an async function, and the loading
+# skeleton shimmers forever with nothing in the console the user will see.
+# Both handlers even take the same ?customer= parameter, so nothing upstream
+# notices the mismatch. /health is worse than cosmetic: it exists to turn the
+# banner red if the venue is ever REAL, and a 404 leaves "Simulated book" on
+# screen — a warning that fails on the wrong side.
+#
+# Fixing that means either rewriting all four call sites onto a prefixed base
+# URL, or per-endpoint carve-outs at the edge, and the carve-outs cannot work:
+# the portfolio page needs the BROKER's /api/portfolio while the bank's own
+# index.html needs the LEDGER's, on what would be the same origin.
+#
+# A subdomain makes all four fetches same-origin against the broker, needs
+# zero code changes, and cannot collide because the ledger is not on this
+# host. Cost is one DNS A-record at the same elastic IP; Let's Encrypt issues
+# on first hit like every other block here.
+#
+# Upstream is minibank-broker:8091 — a separate compose service with no host
+# port mapping, NOT minibank:8091, which is a different container.
+#
+# NOTE, and it is the real one: this makes the broker PUBLIC, and BrokerApi
+# still falls back to ?customer= when no Authorization header is present, so
+# ?customer=11 reads and trades another customer's book. CallerIdentity is
+# wired and permissive by design; the day this hostname is announced, the
+# enforcement decision has to be made. A path prefix would have exposed the
+# same hole — this option just makes the exposure a deliberate act.
+broker.{$BASE_DOMAIN} {
+    reverse_proxy minibank-broker:8091
+}
+
 # One hostname, three services behind it, routed by path. The browser sees a
 # single origin; /api/analytics is answered by a different process with a
 # different database from everything else on this host. Path routing at the

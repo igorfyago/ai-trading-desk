@@ -516,6 +516,76 @@ def trade_action(trade_id: int, body: TradeAction):
     return out
 
 
+# ------------------------------------------------- watchlist write-through
+# The desk's watchlist is localStorage: a preference that dies with a cache
+# clear, on one browser. The broker keeps a real one, per customer, in
+# Postgres. This route is the bridge — the desk stays the source of truth for
+# ORDER, SECTIONS and FLAGS (which the broker's (customer_id, symbol) table
+# cannot represent anyway), and mirrors MEMBERSHIP so a ticker watched here is
+# a ticker the portfolio app knows about.
+#
+# It is a SERVER-SIDE hop on purpose, not a fetch from the page. The desk is
+# served from desk.b4rruf3t.com and the broker now lives on broker.b4rruf3t.com,
+# so a browser call is cross-origin and BrokerApi.send writes only
+# Content-Type — no CORS headers. Proxying through the desk's own backend
+# keeps the browser same-origin and keeps the estate free of a wildcard CORS
+# policy on a service that trades real books.
+#
+# THE CONTRACT WITH THE CALLER IS THAT THIS NEVER MATTERS. Every failure path
+# returns 200 {"synced": false, ...}. A broker that is down, slow, unbuilt or
+# not deployed at all must be invisible to someone using the watchlist, which
+# is a local-first feature that worked before the broker existed and has to
+# keep working after it breaks.
+BROKER_URL = os.getenv("BROKER_URL", "http://minibank-broker:8091")
+BROKER_TIMEOUT = float(os.getenv("BROKER_TIMEOUT", "2.0"))
+
+
+class WatchlistSync(BaseModel):
+    symbol: str
+    action: str = "add"          # "add" | "remove"
+    session: str = ""
+
+
+@app.post("/api/watchlist/sync")
+async def watchlist_sync(body: WatchlistSync, request: Request):
+    """Mirror one watchlist membership change onto the broker. Never fails."""
+    # Identity: the desk's session string, unless a token proves someone
+    # better. Same precedence rule as every other route here — and the broker
+    # applies its own on the far side, so a token that reaches it wins there
+    # too and the customer id we send becomes a hint rather than an
+    # instruction.
+    session = await caller_session(request, body.session)
+    symbol = (body.symbol or "").strip().upper()
+    action = "remove" if body.action == "remove" else "add"
+    if not symbol or not session:
+        return {"synced": False, "reason": "no symbol or session"}
+
+    try:
+        async with httpx.AsyncClient(timeout=BROKER_TIMEOUT) as http:
+            # Which book this session is bound to. No link, no sync: we do
+            # NOT guess a customer id, because guessing one writes into a
+            # stranger's watchlist.
+            link = await http.get(f"{BROKER_URL}/api/link", params={"session": session})
+            if link.status_code != 200:
+                return {"synced": False, "reason": f"link {link.status_code}"}
+            customer = link.json().get("customer")
+            if customer is None:
+                return {"synced": False, "reason": "session not linked"}
+
+            r = await http.post(
+                f"{BROKER_URL}/api/watchlist",
+                json={"customer": customer, "symbol": symbol, "action": action},
+            )
+            if r.status_code != 200:
+                return {"synced": False, "reason": f"watchlist {r.status_code}"}
+    except Exception as e:
+        # Connect refused, DNS miss, timeout, malformed JSON — all the same
+        # answer. The desk is not down because the bank is.
+        return {"synced": False, "reason": type(e).__name__}
+
+    return {"synced": True, "symbol": symbol, "action": action}
+
+
 @app.get("/api/chatlog")
 async def chat_history(request: Request, session: str, limit: int = 60):
     """The shared transcript: one conversation across the dashboard panel and

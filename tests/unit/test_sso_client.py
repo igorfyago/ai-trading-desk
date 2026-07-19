@@ -3,7 +3,7 @@
 Tokens here are minted in-process. There is no PyJWT and no `cryptography` in
 this venv (nor in the Docker image, which installs only [web,postgres]), so the
 test rig hand-rolls RSA keygen and RS256 SIGNING the same way common/sso_client
-hand-rolls verification — and the same way the bank's TokenIssuer.java does it,
+hand-rolls verification · and the same way the bank's TokenIssuer.java does it,
 byte for byte, right down to the unpadded base64url segments and the JWKS's
 leading BigInteger sign byte.
 
@@ -89,7 +89,7 @@ def _b64u(raw: bytes) -> str:
 
 
 def _sign(data: bytes, n: int = KEY_N, d: int = KEY_D) -> bytes:
-    """RSASSA-PKCS1-v1_5 over SHA-256 — the signing half of what the module
+    """RSASSA-PKCS1-v1_5 over SHA-256 · the signing half of what the module
     verifies. Same envelope: 0x00 0x01 <0xFF...> 0x00 || DigestInfo || hash."""
     k = (n.bit_length() + 7) // 8
     digest = hashlib.sha256(data).digest()
@@ -178,7 +178,7 @@ def test_exp_exactly_now_is_still_valid():
 
 
 def test_no_clock_skew_grace():
-    """One second past exp is dead — Java grants no leeway at all."""
+    """One second past exp is dead · Java grants no leeway at all."""
     assert validate(mint(exp=int(time.time()) - 1)) is None
 
 
@@ -192,11 +192,39 @@ def test_nbf_in_the_future_is_ignored():
         payload + "=" * (-len(payload) % 4)).decode()
 
 
-def test_empty_sub_is_accepted():
-    """`if (sub == null)` is a PRESENCE check: "sub":"" is non-null in Java
-    and passes. Harmless downstream, where `identity.sub or session` falls
-    back to the localStorage id anyway."""
-    assert validate(mint(sub="")) == SsoUser("", "Igor Yago", "igor@b4rruf3t.com")
+def test_an_empty_sub_is_not_an_identity():
+    """This used to assert the opposite, pinned as deliberate parity with Java,
+    whose `if (sub == null)` was a PRESENCE check that let "sub":"" through.
+    Java now rejects it, so the parity argument that justified accepting it has
+    gone, and what is left is the reason it was always wrong: downstream code
+    writes `identity.sub or session`, so an empty sub silently degrades an
+    authenticated caller to anonymous. That is the quietest possible way to
+    lose an authorisation."""
+    assert validate(mint(sub="")) is None
+
+
+def test_a_duplicated_claim_is_refused_by_both_clients():
+    """The divergence that mattered most. json.loads keeps the LAST duplicate,
+    the Java client's regex kept the FIRST, so one signed token authenticated
+    two different people depending on which service received it. Neither client
+    picks a winner now: both refuse, which is the only answer they can agree on
+    without coordinating a tie-break rule."""
+    import base64, json as _json
+
+    token = mint()
+    head, payload_b64, sig = token.split(".")
+    payload = _json.loads(base64.urlsafe_b64decode(payload_b64 + "=="))
+    raw = _json.dumps(payload)
+    # a second "sub" appended by hand, exactly what a hostile issuer would emit
+    doubled = raw[:-1] + ', "sub": "usr_admin"}'
+    tampered = base64.urlsafe_b64encode(doubled.encode()).decode().rstrip("=")
+
+    # the signature no longer matches, so prove the REFUSAL is the parser's by
+    # checking the parser directly as well
+    from common import sso_client
+    with pytest.raises(ValueError):
+        sso_client._strict_json(doubled.encode())
+    assert validate(f"{head}.{tampered}.{sig}") is None
 
 
 def test_unpadded_and_padded_base64_both_decode():
@@ -220,7 +248,7 @@ def test_expired_token_is_rejected():
 
 
 def test_missing_exp_is_rejected():
-    """exp is MANDATORY — a token without one is not 'never expires'."""
+    """exp is MANDATORY · a token without one is not 'never expires'."""
     assert validate(mint(drop=("exp",))) is None
 
 
@@ -251,7 +279,7 @@ def test_missing_sub_is_rejected():
 
 
 def test_wrong_issuer_is_rejected():
-    """Exact, case-sensitive equality — no URL parsing, no trailing-slash
+    """Exact, case-sensitive equality · no URL parsing, no trailing-slash
     normalisation, which is why each of these fails."""
     assert validate(mint(iss="https://evil.test")) is None
     assert validate(mint(iss=ISSUER + "/")) is None
@@ -340,7 +368,7 @@ def test_alg_none_is_rejected():
 
 def test_alg_none_with_a_real_signature_is_still_rejected():
     """The alg allowlist, on its own: this token's RS256 signature is genuine
-    and would verify — Java (which never reads alg) would ACCEPT it."""
+    and would verify · Java (which never reads alg) would ACCEPT it."""
     assert validate(mint(alg="none")) is None
 
 
@@ -432,7 +460,7 @@ def test_jwks_is_fetched_once_and_cached():
 
 
 def test_jwks_url_is_the_issuer_plus_well_known():
-    """SsoClient.java line 21 — naive concatenation, no discovery document."""
+    """SsoClient.java line 21 · naive concatenation, no discovery document."""
     assert SsoClient(ISSUER).jwks.url == ISSUER + "/.well-known/jwks.json"
 
 
@@ -512,7 +540,7 @@ def test_unknown_kid_does_not_hammer_the_jwks_endpoint():
 
 def test_jwks_leading_sign_byte_is_read_unsigned():
     """KeyManager base64s BigInteger.toByteArray(), so the modulus arrives with
-    a leading 0x00. `new BigInteger(1, bytes)` ignores it and so must we —
+    a leading 0x00. `new BigInteger(1, bytes)` ignores it and so must we -
     read it signed and every signature check would fail."""
     raw = _java_bigint_bytes(KEY_N)
     assert raw[0] == 0 and len(raw) == KEY_N.bit_length() // 8 + 1
@@ -523,7 +551,7 @@ def test_jwks_leading_sign_byte_is_read_unsigned():
 
 def test_pretty_printed_jwks_still_parses():
     """Java splits the raw body on the literal `{"kty":"RSA"` and would parse
-    ZERO keys out of this. Real JSON parsing here — strictly more tolerant,
+    ZERO keys out of this. Real JSON parsing here · strictly more tolerant,
     and it cannot admit a key Java would have rejected on identity grounds."""
     pretty = json.dumps(json.loads(jwks_body((KID, KEY_N, KEY_E))), indent=2)
     jwks = Jwks("https://auth.test/jwks", transport=httpx.MockTransport(
@@ -547,7 +575,7 @@ def test_non_rsa_jwks_entries_are_skipped():
 # Java 21 against a real KeyManager keypair, paired with that KeyManager's own
 # toJwksJson() output. Everything above this line is Python talking to Python;
 # this is the only test that proves the port agrees with the Java issuer about
-# the wire format — the unpadded segments, the field order, the SHA256withRSA
+# the wire format · the unpadded segments, the field order, the SHA256withRSA
 # signature, and the leading 0x00 sign byte BigInteger.toByteArray() puts on
 # the modulus (visible as the "AN..." prefix on n).
 #
@@ -564,7 +592,7 @@ GOLDEN_JWKS = (
 )
 
 # iss=https://auth.b4rruf3t.com, sub=usr_igor, iat=1784406840, exp=1784407740,
-# aud=["bank.b4rruf3t.com","desk.b4rruf3t.com"] — one login, both apps.
+# aud=["bank.b4rruf3t.com","desk.b4rruf3t.com"] · one login, both apps.
 GOLDEN_TOKEN = (
     "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNzby0xNzg0NDA2ODQw"
     "NDIxIn0.eyJpc3MiOiJodHRwczovL2F1dGguYjRycnVmM3QuY29tIiwic3ViIjoi"
@@ -600,7 +628,7 @@ def test_a_real_java_issued_token_validates(frozen_clock):
 
 
 def test_the_real_token_also_carries_the_banks_audience(frozen_clock):
-    """The same token is what BankAuth validates with "bank.b4rruf3t.com" —
+    """The same token is what BankAuth validates with "bank.b4rruf3t.com" -
     proof the desk isn't quietly accepting a token minted for somewhere else."""
     c = _golden_client()
     assert asyncio.run(c.validate_token(GOLDEN_TOKEN, "bank.b4rruf3t.com")) is not None
@@ -654,7 +682,7 @@ def test_issuer_comes_from_env_with_the_banks_default(monkeypatch):
 
 
 def test_validate_bearer_requires_the_exact_prefix(monkeypatch):
-    """BankAuth checks for "Bearer " then takes substring(7). Same here — and
+    """BankAuth checks for "Bearer " then takes substring(7). Same here · and
     a missing header is None, not an error, so anonymous stays anonymous."""
     monkeypatch.setattr(sso_client, "_default", client())
     monkeypatch.setattr(sso_client, "issuer", lambda: ISSUER)

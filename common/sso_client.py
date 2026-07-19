@@ -1,36 +1,55 @@
-"""SSO token validation for the desk — a port of the estate's Java client.
+"""SSO token validation for the desk · a port of the estate's Java client.
 
 The bank (minibank) already has an SSO service that mints RS256 JWTs and
 publishes its public keys at `<issuer>/.well-known/jwks.json`. This module is
 the desk's half of that handshake: hand a bearer token in, get an SsoUser or
-None back. It NEVER raises for a bad token — a caller must not be able to tell
+None back. It NEVER raises for a bad token · a caller must not be able to tell
 "no token" from "forged token" by watching for exceptions, which is exactly
 what the Java client's blanket `catch (Exception e) { return empty; }` buys.
 
 Ported from (read these before changing anything here):
-    minibank/sso-client/.../client/SsoClient.java   — the check order
-    minibank/sso-client/.../client/Jwks.java        — the fetch + 300s cache
-    minibank/sso-service/.../TokenIssuer.java       — the on-wire token shape
+    minibank/sso-client/.../client/SsoClient.java   · the check order
+    minibank/sso-client/.../client/Jwks.java        · the fetch + 300s cache
+    minibank/sso-service/.../TokenIssuer.java       · the on-wire token shape
 
 No new dependency: httpx is already core (pyproject `dependencies`), and RS256
-VERIFICATION needs no crypto library at all — it is one modular exponentiation
+VERIFICATION needs no crypto library at all · it is one modular exponentiation
 (`pow(sig, e, n)`) plus a byte compare against the PKCS#1 v1.5 envelope. There
 is no PyJWT and no `cryptography` in this venv or in the Docker image, so the
 verify is hand-rolled below against hashlib/base64/int.
 
-FOUR DELIBERATE DIVERGENCES FROM THE JAVA CLIENT (each flagged again at its
-check; all four are either strictly safer or explicitly required by the desk):
-  1. `alg` is enforced to be RS256. Java never reads the header alg at all and
-     is protected only incidentally, by hardcoding SHA256withRSA.
-  2. A string-valued `aud` is accepted (RFC 7519 allows it). Java's regex
-     demands a literal '[' and REJECTS the string form.
-  3. A missing `kid` is tolerated when the JWKS holds exactly one key. Java
-     hard-rejects a token with no kid.
-  4. Fail CLOSED on a JWKS outage: an expired cache entry is never served.
-     Java re-reads its cache after a failed refresh WITHOUT re-checking expiry,
-     so a stale key keeps validating tokens forever while the endpoint is down.
-Everything else below is byte-for-byte the Java behaviour, including the ones
-that look like bugs (zero clock skew, nbf never read, empty sub accepted).
+WHERE THIS AND THE JAVA CLIENT STAND (checked 2026-07-19, keep it checked)
+
+Porting this file WAS the differential test: same token, two clients, and they
+disagreed. Four of those disagreements are now gone, because the Java side was
+fixed to match rather than this side loosened to match it.
+
+  Agreed now, and each was a Java defect until today:
+    alg must be RS256 · Java ignored the header entirely and was protected only
+      incidentally by hardcoding SHA256withRSA.
+    a string-valued aud is accepted per RFC 7519 · Java's regex demanded '['.
+    duplicate claim keys are REFUSED by both · json.loads keeps the LAST, the
+      old Java regex kept the FIRST, so one signed token meant two different
+      people. Neither picks a winner now: refusing is the only answer both can
+      reach without agreeing a tie-break.
+    an empty sub is refused by both · it used to pass here for parity with a
+      Java presence check, and downstream `identity.sub or session` turned it
+      into a silent downgrade to anonymous.
+
+  STILL DIVERGENT, deliberately, and neither one can change WHO a token says
+  you are · they differ only in whether a token is usable at all:
+    kid: this client tolerates a missing kid when the JWKS holds exactly one
+      key; Java hard-rejects. The issuer always emits kid, so this is reachable
+      only by a hand-made token.
+    JWKS outage: this client fails CLOSED, never serving an expired cache
+      entry. Java now serves a stale key for a BOUNDED grace window, an hour,
+      rather than the unlimited window it had. Java trades a little staleness
+      for staying up; this trades availability for freshness. Both are defensible
+      and the difference is visible here on purpose.
+
+If you change either client, run both suites and update this block. A stale
+description of a contract is worse than none, because the next person reconciles
+against the description.
 """
 
 import asyncio
@@ -53,7 +72,7 @@ DESK_AUDIENCE = "desk.b4rruf3t.com"
 # sso-service/Main.java: SSO_ISSUER, defaulting to the live host.
 DEFAULT_ISSUER = "https://auth.b4rruf3t.com"
 
-_CACHE_TTL_S = 300          # Jwks.java CACHE_TTL_SECONDS — 5 minutes, absolute
+_CACHE_TTL_S = 300          # Jwks.java CACHE_TTL_SECONDS · 5 minutes, absolute
 _MIN_REFRESH_INTERVAL_S = 10
 _HTTP_TIMEOUT_S = 5         # Java sets NO timeout; a hung JWKS host hangs it
 
@@ -74,7 +93,7 @@ def _now() -> float:
 
 
 class SsoUser(NamedTuple):
-    """Mirror of `record SsoUser(String sub, String name, String email)` —
+    """Mirror of `record SsoUser(String sub, String name, String email)` -
     same three components in the same order, and nothing else is surfaced:
     no aud, exp, iat, jti, kid, no raw-claims map. name and email are
     nullable; sub is guaranteed present (though it may be the empty string)."""
@@ -91,12 +110,34 @@ class _RsaKey(NamedTuple):
 
 # ----------------------------------------------------------------- codecs ----
 
+
+def _strict_json(raw: bytes) -> dict:
+    """Parse a JWT segment, REFUSING duplicate keys.
+
+    json.loads keeps the LAST duplicate; the Java client's regex kept the
+    FIRST. That is how one signed token authenticated two different people
+    depending on which service you handed it to. Both clients now refuse
+    rather than pick, because refusing is the only answer they can agree on
+    without coordinating a tie-break rule. A legitimate issuer never emits a
+    duplicate claim.
+    """
+    def no_duplicates(pairs):
+        seen = {}
+        for key, value in pairs:
+            if key in seen:
+                raise ValueError(f"duplicate claim: {key}")
+            seen[key] = value
+        return seen
+
+    return json.loads(raw, object_pairs_hook=no_duplicates)
+
+
 def _b64url_decode(segment: str) -> bytes:
     """Java's Base64.getUrlDecoder().decode(), reproduced exactly.
 
     Accepts padded and unpadded input (TokenIssuer emits unpadded via
     getUrlEncoder().withoutPadding()); rejects the standard alphabet's '+' and
-    '/' the way Java does with IllegalArgumentException. Raises on bad input —
+    '/' the way Java does with IllegalArgumentException. Raises on bad input -
     every caller is inside validate_token's blanket except, same as Java.
     """
     if not isinstance(segment, str) or not _B64URL_RE.match(segment):
@@ -109,7 +150,7 @@ def _b64url_decode(segment: str) -> bytes:
 
 
 def _split_dots_java(token: str) -> list[str]:
-    """Java's `String.split("\\.")` — which DROPS TRAILING EMPTY STRINGS.
+    """Java's `String.split("\\.")` · which DROPS TRAILING EMPTY STRINGS.
 
     This is load-bearing and Python's str.split does NOT do it. "h.p." (the
     classic alg=none shape, empty signature) yields 2 parts in Java and is
@@ -125,7 +166,7 @@ def _split_dots_java(token: str) -> list[str]:
 # ------------------------------------------------------------- RS256 verify --
 
 def _rs256_verify(key: _RsaKey, signing_input: bytes, signature: bytes) -> bool:
-    """`Signature.getInstance("SHA256withRSA")` — RSASSA-PKCS1-v1_5 + SHA-256.
+    """`Signature.getInstance("SHA256withRSA")` · RSASSA-PKCS1-v1_5 + SHA-256.
 
     Hardcoded, exactly as in Java: never RSA-PSS, never HMAC. Returns False on
     anything malformed rather than raising, matching sig.verify()'s false.
@@ -192,8 +233,8 @@ class Jwks:
         return None
 
     async def refresh(self) -> None:
-        """Re-read the JWKS. Silently gives up on any failure — Jwks.java's
-        `catch (Exception e) { }` with "Silently fail — validation will return
+        """Re-read the JWKS. Silently gives up on any failure · Jwks.java's
+        `catch (Exception e) { }` with "Silently fail · validation will return
         empty". Nothing is logged and nothing is raised at the caller."""
         async with self._lock:
             now = _now()
@@ -235,7 +276,7 @@ class Jwks:
             if not (isinstance(kid, str) and isinstance(n, str) and isinstance(e, str)):
                 continue
             try:
-                # `new BigInteger(1, bytes)` — UNSIGNED big-endian. KeyManager
+                # `new BigInteger(1, bytes)` · UNSIGNED big-endian. KeyManager
                 # emits BigInteger.toByteArray(), which carries a leading 0x00
                 # sign byte; int.from_bytes(..., "big") tolerates it the same.
                 key = _RsaKey(int.from_bytes(_b64url_decode(n), "big"),
@@ -275,7 +316,7 @@ class SsoClient:
     async def validate_token(self, token: str,
                              expected_audience: str | None = DESK_AUDIENCE
                              ) -> SsoUser | None:
-        """Validate a JWT. The user if valid, None otherwise — and None for
+        """Validate a JWT. The user if valid, None otherwise · and None for
         EVERY failure mode, with no reason code, no logging and no exception,
         which is the whole point of the Java `catch (Exception e)` wrapper.
         Malformed base64, bad UTF-8, a dead JWKS host: all land here as None."""
@@ -286,7 +327,7 @@ class SsoClient:
 
     async def _validate(self, token: str,
                         expected_audience: str | None) -> SsoUser | None:
-        # 1. STRUCTURE — `if (parts.length != 3) return empty;` over a split
+        # 1. STRUCTURE · `if (parts.length != 3) return empty;` over a split
         #    that drops trailing empties (see _split_dots_java).
         parts = _split_dots_java(token)
         if len(parts) != 3:
@@ -295,11 +336,11 @@ class SsoClient:
         # 2. HEADER. Java pulls "kid" with a regex over the raw text; real JSON
         #    parsing here, which additionally rejects a header that is not a
         #    JSON object at all (Java would shrug and read on). Fail closed.
-        header = json.loads(_b64url_decode(parts[0]))
+        header = _strict_json(_b64url_decode(parts[0]))
         if not isinstance(header, dict):
             return None
 
-        # 2a. ALG — divergence 1. Java NEVER reads the header alg: no
+        # 2a. ALG · divergence 1. Java NEVER reads the header alg: no
         #     allowlist, no rejection of "none" or "HS256" per se, contained
         #     only because verification is hardcoded to SHA256withRSA. The
         #     issuer emits {"alg":"RS256"} on every token, so demanding it
@@ -308,14 +349,14 @@ class SsoClient:
         if header.get("alg") != "RS256":
             return None
 
-        # 2b. KID — divergence 3. Java: `if (kid == null) return empty;`. Here
+        # 2b. KID · divergence 3. Java: `if (kid == null) return empty;`. Here
         #     a kid-less token is still resolvable, but ONLY when the JWKS
         #     holds exactly one key (the resolver enforces that, above).
         kid = header.get("kid")
         if kid is not None and not isinstance(kid, str):
             return None
 
-        # 3. KEY LOOKUP — `if (publicKey == null) return empty;`. An unknown
+        # 3. KEY LOOKUP · `if (publicKey == null) return empty;`. An unknown
         #    kid costs one JWKS refresh inside the resolver, so a rotation
         #    heals itself instead of locking everyone out.
         key = self._resolve(kid)
@@ -324,7 +365,7 @@ class SsoClient:
         if key is None:
             return None
 
-        # 4. SIGNATURE — over the ORIGINAL received base64url text of the first
+        # 4. SIGNATURE · over the ORIGINAL received base64url text of the first
         #    two segments joined by a literal ".", encoded UTF-8. The segments
         #    are never re-encoded, so canonicalisation differences are moot.
         #    Verified BEFORE any payload claim is read: the order is deliberate.
@@ -332,11 +373,11 @@ class SsoClient:
                              _b64url_decode(parts[2])):
             return None
 
-        payload = json.loads(_b64url_decode(parts[1]))
+        payload = _strict_json(_b64url_decode(parts[1]))
         if not isinstance(payload, dict):
             return None
 
-        # 5. EXP — MANDATORY, and the comparison is strict `>` on integer epoch
+        # 5. EXP · MANDATORY, and the comparison is strict `>` on integer epoch
         #    seconds against Instant.now(): CLOCK SKEW TOLERANCE IS ZERO, and
         #    exp == now is still VALID. Java's `(\d+)` regex means a
         #    non-integer or negative exp reads as missing, i.e. reject.
@@ -348,25 +389,27 @@ class SsoClient:
         if int(_now()) > exp:
             return None
 
-        # 6. ISS — `if (!issuer.equals(iss)) return empty;`. Exact,
+        # 6. ISS · `if (!issuer.equals(iss)) return empty;`. Exact,
         #    case-sensitive string equality against the configured issuer. No
         #    trailing-slash normalisation, no URL parsing. Missing iss rejects.
         if payload.get("iss") != self.issuer:
             return None
 
-        # 7. AUD — skipped ENTIRELY when expected_audience is None, same as
+        # 7. AUD · skipped ENTIRELY when expected_audience is None, same as
         #    Java's `if (expectedAudience != null && ...)`.
         if expected_audience is not None and not _has_audience(payload, expected_audience):
             return None
 
-        # 8. SUB — presence only. An empty-string sub ("sub":"") is non-null in
-        #    Java and is ACCEPTED as an identity; kept for parity. Callers
-        #    resolving `identity.sub or fallback` are unaffected either way.
+        # 8. SUB. An empty string is not an identity. Java accepted it once,
+        #    because a regex that matched "" returned "" and nothing looked
+        #    further; it now rejects, and this follows. A caller writing
+        #    `identity.sub or fallback` silently becomes anonymous on an empty
+        #    sub, which is the quietest possible way to lose an authorisation.
         sub = payload.get("sub")
-        if not isinstance(sub, str):
+        if not isinstance(sub, str) or not sub:
             return None
 
-        # 9. NAME/EMAIL — both optional, never validated. Java extracts these
+        # 9. NAME/EMAIL · both optional, never validated. Java extracts these
         #    with a first-match regex over the raw payload text and performs NO
         #    JSON unescaping, so a display name containing a quote comes back
         #    truncated there and a name claim can shadow a later email claim.

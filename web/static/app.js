@@ -29,8 +29,8 @@ let voice = { live: false, textOnly: false, responseActive: false, pendingRespon
 let turn = null;
 
 function turnStart() {
-  turn = { user: "", agent: "", userAt: 0, firstWordAt: 0, tools: [],
-           covered: null, bargeIn: false };
+  turn = { user: "", agent: "", userAt: 0, userStoppedAt: 0, firstWordAt: 0,
+           tools: [], covered: null, bargeIn: false };
 }
 
 function turnFlush(ghost) {
@@ -42,7 +42,9 @@ function turnFlush(ghost) {
     navigator.sendBeacon("/calllog", new Blob([JSON.stringify({
       session: sessionId, persona: current?.id || "marcus",
       user: t.user, agent: t.agent,
-      ms_dead_air: t.userAt && t.firstWordAt ? t.firstWordAt - t.userAt : null,
+      // from the caller falling silent, NOT from the transcript landing
+      ms_dead_air: t.userStoppedAt && t.firstWordAt
+        ? t.firstWordAt - t.userStoppedAt : null,
       tools: t.tools, covered: t.covered, barge_in: t.bargeIn,
     })], { type: "application/json" }));
   } catch { /* logging is never worth an exception on a live call */ }
@@ -474,6 +476,15 @@ async function handleVoiceEvent(ev) {
       if (turn && voice.responseActive) turn.bargeIn = true;
       break;
     }
+    case "input_audio_buffer.speech_stopped": {
+      // THE moment the caller starts waiting, and the only honest start for
+      // dead air. Measuring from transcription.completed logged NEGATIVE waits
+      // (-2441ms), because transcription lands well after Marcus has already
+      // begun answering: that clock times the transcriber, not the silence.
+      if (!turn) turnStart();
+      turn.userStoppedAt = Date.now();
+      break;
+    }
     case "response.created": {
       voice.responseActive = true;
       voice.responseStartedAt = Date.now();   // whose sentence is on the air
@@ -493,6 +504,10 @@ async function handleVoiceEvent(ev) {
       voice.lastAgentDelta = Date.now();      // barge-in repair: was he talking?
       if (!turn) turnStart();
       if (!turn.firstWordAt) turn.firstWordAt = Date.now();   // silence ends HERE
+      // a fresh bubble mid-turn means a SECOND response (tool follow-up, or a
+      // resume after a cutoff). Keep them separable instead of gluing the log
+      // into "...if it's there.SPY is in a momentum tape..."
+      if (!voice.agentLine && turn.agent) turn.agent += "\n";
       turn.agent += ev.delta;
       if (!voice.agentLine) {
         const b = bubble(`${current.name} (voice)`, "agent");

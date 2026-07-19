@@ -24,6 +24,17 @@ obs.{$BASE_DOMAIN} {
 }
 
 bank.{$BASE_DOMAIN} {
+    # The issuer API is a SERVICE-TO-SERVICE interface, and it was answering the
+    # public internet with no credential of any kind: POST /issuer/v1/authorizations
+    # from anywhere returned "need instrument, authorization_id, amount", a
+    # validation error rather than a refusal, which is an invitation to supply
+    # them. minipay reaches it as http://minibank:8080 over the compose network,
+    # so it has never needed to be published at all.
+    #
+    # 404 rather than 403: a 403 confirms the route exists, and the first thing
+    # anyone does with a confirmed route is look for the way in.
+    @issuer path /issuer/*
+    respond @issuer 404
     reverse_proxy minibank:8080
 }
 

@@ -10,7 +10,7 @@ Three personas on the **OpenAI Realtime API** (`gpt-realtime-2.1`, true speech-t
 | **Quinn — AI Quoting Agent** (BrightBuild Renovations) | `sage` | the sales-ops agent: turns a fuzzy project description into a priced estimate via a deterministic rate engine, saves the quote for follow-up |
 | **Marcus — AI Options Desk** | `cedar` | the specialist: tells you the **exact trade** — structure, strikes, expiry, invalidation, sizing — for the current GEX regime |
 
-Riley and Quinn are deliberately **generalist** (this is what most voice-agent client work looks like); Marcus is the desk's own. The key design rule for Marcus: **the LLM never picks strikes.** A rules engine ([common/signals.py](../../common/signals.py)) maps regime → structure deterministically (short gamma + below flip → put debit spread into the wall; long gamma → sell the walls / iron condor), prices the legs with Black-Scholes, and the model only *narrates* it — decide-in-code, explain-in-model.
+Riley and Quinn are deliberately **generalist** (this is what most voice-agent client work looks like); Marcus is the desk's own. The key design rule for Marcus: **the LLM never picks strikes.** A rules engine ([common/signals.py](../../common/signals.py)) maps regime → structure deterministically (short gamma + below flip → long put; long gamma → fade the range from its edge, still one long contract), prices the contract with Black-Scholes, and the model only *narrates* it — decide-in-code, explain-in-model.
 
 There's also a fourth, dynamic persona: the **voice bridge** (`/session/bridge/{agent}`), which gives any *text* agent a voice. Its only tool is `ask_agent`; the Realtime model handles the conversation and delegates the thinking to the LangChain/LangGraph agent on the server — including reading the Desk Analyst's memo aloud and taking your approve/revise/reject **by voice**.
 
@@ -32,7 +32,7 @@ sequenceDiagram
     S->>S: rules engine picks the trade, BS prices the legs
     S-->>B: {output}
     B->>O: function_call_output + response.create
-    O-->>B: "we're short-gamma, spot's under the flip — put debit spread,<br/>long the 606s, short the 603s… demo data, not advice."
+    O-->>B: "we're short-gamma, spot's under the flip — long the 606 puts…<br/>demo data, not advice."
 ```
 
 ## Try it (web app → mic button)

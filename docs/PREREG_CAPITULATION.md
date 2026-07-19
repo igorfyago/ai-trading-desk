@@ -87,3 +87,44 @@ version of this idea went through train/test with a null control and produced
 and its in-sample number was better (+12.6 vs +2.2, n=119), but the base rate
 for finding real edge this way is low, and one clean confirmation would not
 change that on its own.
+
+---
+
+# RESULT: FAIL
+
+Run 2026-07-19, `scripts/confirm_capitulation.py`. Recorded as run; the rule
+above was not edited.
+
+| set | events | mean | CI | hit | baseline | edge |
+|---|---|---|---|---|---|---|
+| A - IWM 2022-2026 | 113 | +4.7 bps | [-10.0, +20.0] | 53.1% | +1.9 | **+2.8** |
+| B - SPY+QQQ pre-2022-06 | 87 | -8.4 bps | [-24.4, +7.0] | 46.0% | +1.1 | **-9.4** |
+
+Set A fails the CI and the edge bar; it is statistically indistinguishable from
+doing nothing. Set B fails three of four and is negative outright. Two
+independent untouched samples, neither supporting the rule.
+
+The in-sample +12.6 bps was selection: many combinations were measured across
+2022-2026 and the best was reported. That is exactly the failure mode the
+holdout exists to catch, and it caught it.
+
+**Not traded. Not tuned.** Searching these two sets for a variant that clears
+the bar would burn them the same way 2022-2026 was burned, and any pass found
+that way would carry no information. They stay spent on this one question.
+
+## What stands after the fail
+
+- The precedence fix in `common/signals.py` is unaffected - it was never
+  downstream of this search.
+- The harness is the durable output: null control, day-clustering, baseline
+  comparison, pass bars fixed in advance. Every number produced before those
+  existed was inflated.
+
+## The limitation that outlives the result
+
+`day_shape` requires 20 session bars before it evaluates anything, so the
+engine is blind until roughly 13:00 ET. The stated strategy fires premarket
+and in the morning. Every number here, this failure included, comes from
+afternoon tape only - so the setup as actually traded has still never been
+measured. Fixing that blindness is a precondition for testing it, not a
+response to this result.

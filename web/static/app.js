@@ -20,6 +20,34 @@ let busy = false;
 let voice = { live: false, textOnly: false, responseActive: false, pendingResponse: false,
             pc: null, dc: null, mic: null, agentLine: null,
               audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
+/* ------------------------------------------------------ the call log ----
+   One record per logical turn (caller spoke -> tools ran -> Marcus answered),
+   POSTed for offline review by `python -m common.calllog review`. The clock
+   is the point: dead air is what makes a turn feel wrong, and you cannot fix
+   what you never measured. sendBeacon so a logging hiccup can never cost the
+   caller a word, and so a turn still lands if the tab closes mid-call. */
+let turn = null;
+
+function turnStart() {
+  turn = { user: "", agent: "", userAt: 0, firstWordAt: 0, tools: [],
+           covered: null, bargeIn: false };
+}
+
+function turnFlush(ghost) {
+  const t = turn;
+  turn = null;
+  if (!t || ghost) return;              // a scrubbed reply is noise, not evidence
+  if (!t.user && !t.agent) return;
+  try {
+    navigator.sendBeacon("/calllog", new Blob([JSON.stringify({
+      session: sessionId, persona: current?.id || "marcus",
+      user: t.user, agent: t.agent,
+      ms_dead_air: t.userAt && t.firstWordAt ? t.firstWordAt - t.userAt : null,
+      tools: t.tools, covered: t.covered, barge_in: t.bargeIn,
+    })], { type: "application/json" }));
+  } catch { /* logging is never worth an exception on a live call */ }
+}
+
 const VOICE_IDLE_MS = 3 * 60 * 1000;   // auto-hangup: an open mic left alone is
                                        // background-noise triggers + token burn
 setInterval(() => {
@@ -428,6 +456,9 @@ async function handleVoiceEvent(ev) {
     }
     case "input_audio_buffer.speech_started": {
       voice.speechStartedAt = Date.now();     // a turn began (real or the room)
+      // talking over Marcus mid-sentence is the single loudest signal that a
+      // turn was too long or too slow, so it rides along with that turn
+      if (turn && voice.responseActive) turn.bargeIn = true;
       break;
     }
     case "response.created": {
@@ -447,6 +478,9 @@ async function handleVoiceEvent(ev) {
     case "response.output_audio_transcript.delta": {
       voice.lastActivity = Date.now();        // agent mid-speech keeps the line open
       voice.lastAgentDelta = Date.now();      // barge-in repair: was he talking?
+      if (!turn) turnStart();
+      if (!turn.firstWordAt) turn.firstWordAt = Date.now();   // silence ends HERE
+      turn.agent += ev.delta;
       if (!voice.agentLine) {
         const b = bubble(`${current.name} (voice)`, "agent");
         voice.agentLine = b.querySelector(".md");
@@ -474,6 +508,9 @@ async function handleVoiceEvent(ev) {
       }
       voice.lastActivity = Date.now();        // ONLY real speech keeps the line open
       voice.expectReply = true;               // the caller asked — never mute the answer
+      if (!turn) turnStart();
+      turn.user = words;
+      turn.userAt = Date.now();               // the clock on dead air starts here
       liftMuteGuard();
       const b = bubble("You (voice)", "user");
       b.querySelector(".md").textContent = words;
@@ -490,6 +527,7 @@ async function handleVoiceEvent(ev) {
       const items = ev.response?.output || [];
       if (voice.scrubNext || ev.response?.status === "cancelled") {
         voice.scrubNext = false;              // ghost reply: erase it from context
+        turnFlush(true);                      // and from the log: it never happened
         for (const item of items) {
           if (item.id) {
             try {
@@ -504,8 +542,11 @@ async function handleVoiceEvent(ev) {
       // to fire two responses and the second cut the first off mid-word
       const calls = items.filter((i) => i.type === "function_call");
       for (const item of calls) await runVoiceTool(item);
+      // a turn is not over while another response is still owed: both of these
+      // branches keep talking, and splitting there would log half an answer
       if (calls.length) requestResponse();
       else if (voice.pendingResponse) { voice.pendingResponse = false; requestResponse(); }
+      else turnFlush(false);                  // spoken and done: this turn is evidence
       break;
     }
   }
@@ -514,6 +555,10 @@ async function handleVoiceEvent(ev) {
 async function runVoiceTool(item) {
   const b = [...document.querySelectorAll(".bubble.agent")].pop();
   if (b) chip(b, "tool", `🔧 ${item.name}`);
+  const toolStartedAt = Date.now();
+  // did he talk through the wait, or leave the caller in silence? measured at
+  // the FIRST tool only: that is the gap the COVER THE WAIT rule has to fill
+  if (turn && turn.covered === null) turn.covered = !!turn.firstWordAt;
   let output;
   if (item.name === "draw_levels") {
     // chart-side tool: the line must appear the moment Marcus says the number
@@ -528,6 +573,7 @@ async function runVoiceTool(item) {
     }).then((r) => r.json());
     output = res.output;
   }
+  if (turn) turn.tools.push({ name: item.name, ms: Date.now() - toolStartedAt });
   if (item.name === "trade_recommendation") tradeStickyFromPayload(output);
   // submit the result ONLY: the caller creates one response for the whole
   // batch, so two tools in a turn can never race two replies

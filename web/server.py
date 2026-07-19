@@ -717,6 +717,38 @@ async def execute_tool(persona: str, call: ToolCall, request: Request):
                                session=session)}
 
 
+class VoiceTurn(BaseModel):
+    """One logical turn: the caller spoke, tools ran, Marcus answered."""
+    session: str = "voice"
+    persona: str = "marcus"
+    user: str = ""
+    agent: str = ""
+    ms_dead_air: int | None = None
+    tools: list[dict] = []
+    covered: bool | None = None
+    barge_in: bool = False
+
+
+@app.post("/calllog")
+async def write_calllog(turn: VoiceTurn):
+    """Record a voice turn for offline persona review.
+
+    WRITE ONLY, on purpose. These are whole conversations and the desk is
+    public, so there is no GET beside this: read the log on the box with
+    `python -m common.calllog review`. The persona revision is stamped here
+    rather than sent by the browser, so a turn can never be attributed to a
+    prompt it did not come from.
+    """
+    from common.calllog import log_turn, persona_rev
+
+    p = PERSONAS.get(turn.persona)
+    rec = turn.model_dump()
+    rec["surface"] = "web"
+    rec["rev"] = persona_rev(p["instructions"]) if p else ""
+    log_turn(rec)
+    return {"ok": True}
+
+
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 # Local dev convenience: preview the apex portal without deploying. Caddy serves
 # it in production. Mounted at /portal, not /landing, which no route has ever

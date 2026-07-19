@@ -15,6 +15,7 @@ Everything degrades gracefully when unset — the desk just has no phone line.
 import json
 import os
 import threading
+import time
 
 import httpx
 
@@ -58,18 +59,40 @@ def accept_call(call_id: str) -> bool:
     return resp.status_code == 200
 
 
+def _new_turn() -> dict:
+    return {"user": "", "agent": "", "user_at": 0.0, "first_word_at": 0.0,
+            "tools": [], "covered": None, "barge_in": False, "speaking": False}
+
+
+def _flush_turn(turn: dict, call_id: str, rev: str, log_turn) -> None:
+    """One logical turn, once it has actually been answered."""
+    if not turn["user"] and not turn["agent"]:
+        return
+    dead = None
+    if turn["user_at"] and turn["first_word_at"]:
+        dead = int((turn["first_word_at"] - turn["user_at"]) * 1000)
+    log_turn({"surface": "phone", "session": call_id, "persona": PHONE_PERSONA,
+              "rev": rev, "user": turn["user"], "agent": turn["agent"],
+              "ms_dead_air": dead, "tools": turn["tools"],
+              "covered": turn["covered"], "barge_in": turn["barge_in"]})
+
+
 def run_call_loop(call_id: str) -> None:
     """Attach to the accepted call and execute Riley's tools until hangup."""
     import websocket  # websocket-client
 
     from personas import PERSONAS, run_tool
 
+    from common.calllog import log_turn, persona_rev
+
     p = PERSONAS[PHONE_PERSONA]
+    rev = persona_rev(p["instructions"])
     ws = websocket.create_connection(
         f"wss://api.openai.com/v1/realtime?call_id={call_id}",
         header=[f"Authorization: Bearer {os.environ['OPENAI_API_KEY']}"],
         timeout=310,
     )
+    turn = _new_turn()
     try:
         ws.send(json.dumps({"type": "session.update", "session": {
             "type": "realtime",
@@ -80,18 +103,46 @@ def run_call_loop(call_id: str) -> None:
 
         while True:
             event = json.loads(ws.recv())
-            if event.get("type") == "response.done":
-                for item in (event.get("response", {}).get("output") or []):
-                    if item.get("type") == "function_call":
-                        output = run_tool(PHONE_PERSONA, item["name"],
-                                          json.loads(item.get("arguments") or "{}"))
-                        ws.send(json.dumps({"type": "conversation.item.create", "item": {
-                            "type": "function_call_output",
-                            "call_id": item["call_id"], "output": output}}))
-                        ws.send(json.dumps({"type": "response.create"}))
+            etype = event.get("type")
+
+            # the log tap: this socket already carries every event, it was just
+            # throwing them away. Phone is the surface that matters most for
+            # dead air, because a caller with no screen reads silence as a
+            # dropped line.
+            if etype == "input_audio_buffer.speech_started" and turn["speaking"]:
+                turn["barge_in"] = True
+            elif etype == "conversation.item.input_audio_transcription.completed":
+                turn["user"] = (event.get("transcript") or "").strip()
+                turn["user_at"] = time.time()
+            elif etype == "response.output_audio_transcript.delta":
+                turn["speaking"] = True
+                if not turn["first_word_at"]:
+                    turn["first_word_at"] = time.time()
+                turn["agent"] += event.get("delta") or ""
+
+            if etype == "response.done":
+                turn["speaking"] = False
+                calls = [i for i in (event.get("response", {}).get("output") or [])
+                         if i.get("type") == "function_call"]
+                for item in calls:
+                    if turn["covered"] is None:
+                        turn["covered"] = bool(turn["first_word_at"])
+                    t0 = time.time()
+                    output = run_tool(PHONE_PERSONA, item["name"],
+                                      json.loads(item.get("arguments") or "{}"))
+                    turn["tools"].append({"name": item["name"],
+                                          "ms": int((time.time() - t0) * 1000)})
+                    ws.send(json.dumps({"type": "conversation.item.create", "item": {
+                        "type": "function_call_output",
+                        "call_id": item["call_id"], "output": output}}))
+                    ws.send(json.dumps({"type": "response.create"}))
+                if not calls:
+                    _flush_turn(turn, call_id, rev, log_turn)   # answer landed
+                    turn = _new_turn()
     except Exception:
         pass  # caller hung up / socket closed — the call is simply over
     finally:
+        _flush_turn(turn, call_id, rev, log_turn)  # a hangup mid-turn is evidence too
         try:
             ws.close()
         except Exception:

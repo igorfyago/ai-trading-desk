@@ -5,6 +5,8 @@ __pycache__/
 venv/
 data/*.db
 data/chroma/
+# raw call transcripts: never in a public repo
+data/calls/
 *.egg-info/
 .idea/
 .vscode/

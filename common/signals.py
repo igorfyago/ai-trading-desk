@@ -172,11 +172,16 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                      + ("long from the low end." if bullish
                         else "short from the high end."))
 
-    # Precedence: a TRIGGERED tape reversal takes the trade; else a REVERSAL
-    # DAY (capitulation + double bottom/top through VWAP) flips the lean;
-    # else the structure trade stands. The desk trades the next 2-3 hours.
+    # Precedence: a takeable REVERSAL DAY takes the trade - it is the only
+    # branch with an out-of-sample record. Failing that, a TRIGGERED tape
+    # reversal, then a gap run, then the structure lean. The desk trades the
+    # next 2-3 hours.
     ds = (tape or {}).get("day_shape")
-    if tape and tape.get("stage") == "triggered" and tape.get("bias"):
+    # same precedence fix as _execution_plan: the branch with an out-of-sample
+    # record is not allowed to be preempted by the two branches without one
+    _validated = bool(ds and ds.get("takeable", True))
+    if (tape and not _validated
+            and tape.get("stage") == "triggered" and tape.get("bias")):
         t_kind = "call" if tape["bias"] == "long" else "put"
         tag = "tape reversal triggered"
         bias = f"{'bullish' if t_kind == 'call' else 'bearish'} reversal - tape triggered"
@@ -184,7 +189,8 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = ("The house tape read fired: " + tape["plain"] +
                      " A triggered reversal takes the trade over the structure lean.")
-    elif (grun := (tape or {}).get("gap_run")) and grun.get("fired"):
+    elif (not _validated and (grun := (tape or {}).get("gap_run"))
+          and grun.get("fired")):
         # thicks rule, then volume profiles: wicks based at the band, a thick
         # candle crossed the trigger into a THIN book - it travels fast
         g_kind = "call" if grun["side"] == "long" else "put"
@@ -304,9 +310,17 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     regime = snap["regime"]
     ticker = snap["ticker"]
     flip_ok = flip is not None
-    trig = tape if (tape and tape.get("stage") == "triggered"
-                    and tape.get("bias")) else None
     dshape = (tape or {}).get("day_shape") if tape else None
+    # THE VALIDATED SETUP OUTRANKS THE UNVALIDATED ONES. A takeable day shape
+    # is the only branch here with a positive out-of-sample record. The
+    # standalone trigger graded 38.5% hit / negative EV, and the gap run has
+    # never been tested at all - yet both used to take the trade ahead of it,
+    # purely by sitting earlier in the chain. They are demoted, not deleted:
+    # they still run when there is no day shape to preempt.
+    _validated = bool(dshape and dshape.get("takeable", True))
+    trig = tape if (tape and not _validated
+                    and tape.get("stage") == "triggered"
+                    and tape.get("bias")) else None
     est = False
     if dshape and not dshape.get("takeable", True):
         # outside the entry window the shape still VETOES counter-trend: the
@@ -318,7 +332,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         if not opposes:
             dshape = None
     grun = (tape or {}).get("gap_run") if tape else None
-    if grun and not grun.get("fired"):
+    if grun and (not grun.get("fired") or _validated):
         grun = None                       # loaded rides as the conditional, not the plan
     if trig:
         bullish = trig["bias"] == "long"
@@ -387,6 +401,12 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     elif dshape:
         prof = tape.get("profile") or {}
         target = prof.get("wall_above") if bullish else prof.get("wall_below")
+        if target is None and tape:
+            # A trigger demoted behind the day shape lost the SIDE vote, not
+            # its read of where the tape was headed. When the profile offers
+            # no wall this way, keep that target instead of quoting none:
+            # demoting a signal should cost it precedence, not information.
+            target = tape.get("target")
     else:
         target = None
 

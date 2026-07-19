@@ -47,6 +47,90 @@
   footer { color:var(--dim); font-size:12.5px; margin-top:64px;
            border-top:1px solid var(--line); padding-top:20px; }
   footer a { color:var(--accent); text-decoration:none; }
+
+  /* ---- estate map ------------------------------------------------------- */
+  .wide { position:relative; left:50%; transform:translateX(-50%);
+          width:min(1300px,calc(100vw - 40px)); }
+  .estate { margin-top:18px; background:var(--panel); border:1px solid var(--line);
+            border-radius:12px; padding:16px 18px 18px; }
+  .ebar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px;
+          border:1px solid var(--line); background:var(--panel2); color:var(--dim);
+          font:11px/1 var(--mono); letter-spacing:.05em; padding:8px 14px; cursor:pointer;
+          text-transform:uppercase; transition:border-color .14s, color .14s; }
+  .pill:hover { border-color:var(--accent); color:var(--text); }
+  .pill[aria-pressed="true"] { border-color:var(--accent); color:var(--text); }
+  .ebar .where { font:11px var(--mono); color:var(--dim); letter-spacing:.05em;
+                 margin-left:auto; text-transform:uppercase; }
+  .esvgwrap { overflow:hidden; }
+  .esvg { width:100%; height:auto; display:block; }
+
+  .svc { cursor:pointer; }
+  .svcbox { fill:var(--panel2); stroke:var(--line); stroke-width:1; transition:stroke .14s; }
+  .svc:hover .svcbox, .svc:focus .svcbox, .svc.on .svcbox { stroke:var(--accent); }
+  .svc:focus { outline:none; }
+  .svcname { fill:var(--text); font:600 15px "Inter",system-ui,sans-serif; }
+  .svcwhat { fill:var(--dim); font:11.5px "Inter",system-ui,sans-serif; }
+  .svcstore, .svccount { fill:var(--dim); font:10px var(--mono); }
+  .elab { font:10px var(--mono); }
+  .ehit { stroke:transparent; stroke-width:14; fill:none; cursor:pointer; }
+  .edg:hover .elab { fill:var(--text); }
+  .nd { cursor:pointer; }
+  .ndbox { fill:var(--panel2); stroke:var(--line); stroke-width:1; transition:stroke .14s; }
+  .nd:hover .ndbox, .nd:focus .ndbox, .nd.on .ndbox { stroke:var(--accent); }
+  .nd:focus { outline:none; }
+  .ndname { fill:var(--text); font:600 13px "Inter",system-ui,sans-serif; }
+  .ndid { fill:var(--dim); font:10px var(--mono); }
+  .ndtag { font:9px var(--mono); letter-spacing:.08em; }
+  .ndtag.new { fill:var(--green); } .ndtag.existing { fill:var(--dim); }
+  .dttl { fill:var(--dim); font:11px var(--mono); letter-spacing:.12em; }
+
+  .elegend { display:flex; flex-wrap:wrap; gap:8px 20px; margin-top:14px;
+             padding-top:13px; border-top:1px solid var(--line); }
+  .lg { display:inline-flex; align-items:center; gap:8px; color:var(--dim); font-size:12px; }
+  .einfo { margin-top:13px; border-top:1px solid var(--line); padding-top:13px; min-height:82px; }
+  .einfo h4 { font-size:13.5px; font-weight:600; display:flex; align-items:baseline; gap:9px; }
+  .einfo h4 em { font-style:normal; font:10px var(--mono); color:var(--dim);
+                 letter-spacing:.06em; text-transform:uppercase; }
+  .einfo p { color:var(--dim); font-size:13px; margin-top:7px; max-width:104ch; }
+  .ecross { margin-top:14px; padding-top:13px; border-top:1px solid var(--line); }
+  .ecross .elh { font:10px var(--mono); letter-spacing:.12em; text-transform:uppercase;
+                 color:var(--dim); margin-bottom:8px; }
+  .xr { display:flex; gap:10px; align-items:flex-start; font-size:12.5px;
+        color:var(--dim); padding:5px 0; }
+  .xr b { color:var(--text); font-weight:600; font-family:var(--mono); font-size:11px;
+          white-space:nowrap; }
+  .kbar { width:16px; height:2px; flex:none; margin-top:9px; border-radius:2px; }
+
+  .elist { display:none; }
+  .elx { border:1px solid var(--line); border-radius:10px; background:var(--panel);
+         padding:12px 14px; margin-bottom:10px; }
+  .elx summary { cursor:pointer; font-size:14.5px; font-weight:600; }
+  .elx summary span { font:10px var(--mono); color:var(--dim); margin-left:6px; }
+  .elx p { color:var(--dim); font-size:13px; margin-top:8px; }
+  .elx p.mono { font:10.5px var(--mono); letter-spacing:.02em; margin-top:6px; }
+  .elx .elh { font:10px var(--mono); letter-spacing:.12em; text-transform:uppercase;
+              color:var(--dim); margin-top:14px; padding-top:9px;
+              border-top:1px solid var(--line); }
+  .eln { margin-top:10px; }
+  .eln b { font-size:13px; } .eln span { font:10px var(--mono); color:var(--dim); margin-left:6px; }
+  .eln p { margin-top:3px; }
+  .enote { color:var(--dim); font-size:13px; margin-top:12px; max-width:88ch; }
+  .enote b { color:var(--text); font-weight:600; }
+
+  /* between the phone breakpoint and the width the map needs, hold the map at a
+     legible floor and let it scroll inside its own box, never the page. */
+  @media (min-width:701px) and (max-width:1059px) {
+    .esvgwrap { overflow-x:auto; }
+    .esvg { width:1040px; max-width:none; }
+  }
+  /* 44 nodes cannot work on a phone. Same table, rendered as a list instead. */
+  @media (max-width:700px) {
+    .wide { position:static; left:auto; transform:none; width:auto; }
+    .estate { padding:0; background:none; border:0; }
+    .ebar, .esvgwrap, .elegend, .einfo, .ecross { display:none; }
+    .elist { display:block; }
+  }
 </style>
 </head>
 <body>
@@ -101,10 +185,347 @@
     </a>
   </div>
 
+  <div class="sec">The estate, as one system</div>
+  <div class="wide">
+    <p class="enote" style="margin-top:14px">Seven services, ten boxes, 44 processes and stores.
+       Every line is something that actually runs, and the ones that are wrong are drawn
+       wrong on purpose: a service reaching into another service's database is red, and a
+       link that was designed and never wired is a ghost. Click a box to open it up.</p>
+    <section class="estate">
+      <div class="ebar">
+        <button class="pill" id="e-back" aria-pressed="true">Estate</button>
+        <span class="where" id="e-where">level 0 · one box per service</span>
+      </div>
+      <div class="esvgwrap" id="e-canvas"></div>
+      <div class="elegend" id="e-legend"></div>
+      <div class="einfo" id="e-info"></div>
+      <div class="ecross" id="e-cross"></div>
+      <div class="elist" id="e-list"></div>
+      <noscript><p class="enote">The estate map needs JavaScript. The service list below
+        carries the same information.</p></noscript>
+    </section>
+    <p class="enote" style="margin-top:16px"><b>Why nothing moves.</b> A map like this
+       usually animates a request travelling across it. This one does not, because it
+       would be a lie: there is no trace id anywhere in the estate that survives a service
+       boundary. The bank's x-ray works only because one ledger transaction id happens to
+       be reused verbatim on every shard, which is a property of that service, not a
+       mechanism. Until every Kafka payload carries an envelope with a trace id and every
+       cross-service call forwards a header, a journey cannot be followed across these
+       boxes, so none is drawn.</p>
+  </div>
+
   <footer>
     Built by <a href="https://github.com/igorfyago" target="_blank">Igor Yago</a> ·
     AI engineer. Every app above is open source and deployed from its own repo.
   </footer>
 </main>
+
+<script type="application/json" id="estate-data">{"services":[{"id":"edge","label":"edge","what":["One TLS front door, one browser","client shared by every app."],"store":"caddy 2 · vhost routed · no store","x":40,"y":24,"w":240,"h":104,"nodes":2},{"id":"minimart","label":"minimart","what":["Storefront: orders, reservations","and ledger legs in one commit."],"store":"pg minimart","x":40,"y":190,"w":240,"h":104,"nodes":6},{"id":"minipay","label":"minipay","what":["Acquirer: payment intents,","capture and clearing."],"store":"pg minipay","x":320,"y":190,"w":240,"h":104,"nodes":2},{"id":"sso-service","label":"sso-service","what":["Issues RS256 tokens. Exactly one","service in the estate checks them."],"store":"pg sso · users + sessions","x":600,"y":190,"w":240,"h":104,"nodes":3},{"id":"external","label":"external","what":["OpenAI plus eight third-party","market data hosts, one box."],"store":"no store · third party","x":880,"y":190,"w":240,"h":104,"nodes":2},{"id":"minianalytics","label":"minianalytics","what":["MRR projection rebuilt from the","subscription event stream."],"store":"pg minimart_analytics","x":40,"y":356,"w":240,"h":104,"nodes":3},{"id":"minibank","label":"minibank","what":["Sharded double-entry ledger, plus","the card issuer and the broker."],"store":"pg x4 · redis · kafka","x":320,"y":356,"w":240,"h":104,"nodes":19},{"id":"ai-trading-desk","label":"ai-trading-desk","what":["Options desk: FastAPI, agents,","SSE streams and a voice agent."],"store":"sqlite desk.db","x":600,"y":356,"w":240,"h":104,"nodes":3},{"id":"platform","label":"platform","what":["Prometheus and Grafana. Scrapes","minibank, and nothing else."],"store":"prometheus tsdb","x":40,"y":522,"w":240,"h":104,"nodes":2},{"id":"options-flow-analytics","label":"options-flow-analytics","what":["Rust collector writing dealer","positioning, minute by minute."],"store":"pg options · foreign owned","x":600,"y":522,"w":240,"h":104,"nodes":2}],"serviceEdges":[{"id":"s1","from":"edge","to":"minimart","kind":"http","label":"HTTPS","labelAt":[108,162],"anchor":"start","route":[[100,128],[100,190]],"detail":[{"from":"caddy","to":"mart","carries":"HTTP to :8081 for mart.b4rruf3t.com."}]},{"id":"s2","from":"edge","to":"minipay","kind":"http","label":"HTTPS","labelAt":[428,168],"anchor":"start","route":[[160,128],[160,142],[420,142],[420,190]],"detail":[{"from":"caddy","to":"pay","carries":"HTTP to :8082 for pay.b4rruf3t.com."}]},{"id":"s3","from":"edge","to":"sso-service","kind":"http","label":"HTTPS","labelAt":[668,112],"anchor":"start","route":[[280,60],[660,60],[660,190]],"detail":[{"from":"caddy","to":"sso","carries":"HTTP reverse_proxy sso:8090 for auth.b4rruf3t.com."}]},{"id":"s4","from":"edge","to":"ai-trading-desk","kind":"http","label":"HTTPS","labelAt":[868,112],"anchor":"start","route":[[280,44],[860,44],[860,326],[760,326],[760,356]],"detail":[{"from":"caddy","to":"desk","carries":"HTTP to :8000 for desk.b4rruf3t.com."}]},{"id":"s5","from":"edge","to":"minibank","kind":"http","label":"HTTPS","labelAt":[300,231],"anchor":"middle","route":[[240,128],[240,172],[300,172],[300,336],[400,336],[400,356]],"detail":[{"from":"caddy","to":"api","carries":"EXISTING. HTTP to ledger :8080 for bank.b4rruf3t.com."}]},{"id":"s6","from":"ai-trading-desk","to":"edge","kind":"http","label":"SSE","labelAt":[580,246],"anchor":"middle","route":[[600,440],[580,440],[580,182],[200,182],[200,128]],"detail":[{"from":"deskbus","to":"browser","carries":"SSE text/event-stream on /api/stream/quotes and /api/stream/events. Terminates at this app's own browser tab and nowhere else."}]},{"id":"s7","from":"minimart","to":"minipay","kind":"http","label":"HTTP","labelAt":[300,214],"anchor":"middle","route":[[280,220],[320,220]],"detail":[{"from":"mart","to":"pay","carries":"HTTP: POST /v1/payment_intents with Idempotency-Key order:\u003cid\u003e, then /capture or /cancel, plus GET /v1/payment_intents/{pi} and GET /v1/list from the Reconciler. No credential is ever sent."}]},{"id":"s8","from":"minipay","to":"minimart","kind":"hazard","label":"! DDL","labelAt":[300,258],"anchor":"middle","route":[[320,264],[280,264]],"detail":[{"from":"pay","to":"martdb","carries":"JDBC ADMIN connection at boot: PayDb.ADMIN_URL defaults to the MERCHANT's database, only to run CREATE DATABASE. Dashed. Same shape for analytics -\u003e martdb."}]},{"id":"s9","from":"minimart","to":"minianalytics","kind":"kafka","label":"minimart.subscriptions.v1","labelAt":[128,322],"anchor":"start","route":[[120,294],[120,356]],"detail":[{"from":"martsubs","to":"anacons","carries":"Kafka, group analytics, enable.auto.commit=false, dedup on the event_key header."}]},{"id":"s10","from":"minianalytics","to":"minimart","kind":"hazard","label":"! DDL","labelAt":[208,345],"anchor":"start","route":[[200,356],[200,294]],"detail":[{"from":"analytics","to":"martdb","carries":"JDBC ADMIN connection, CREATE DATABASE only. Dashed."}]},{"id":"s11","from":"minipay","to":"minibank","kind":"http","label":"POST /issuer/v1","labelAt":[448,326],"anchor":"start","route":[[440,294],[440,356]],"detail":[{"from":"pay","to":"issuer","carries":"HTTP, CROSS-REPO, the four-party card model: POST /issuer/v1/authorizations, /{ref}/capture, /{ref}/void, and POST /issuer/v1/clearing. MINIBANK_ISSUER_URL. This is the single most important new edge on the map: it is the one that makes the estate an estate."}]},{"id":"s12","from":"sso-service","to":"minibank","kind":"hazard","label":"! DDL","labelAt":[570,311],"anchor":"middle","route":[[640,294],[640,316],[500,316],[500,356]],"detail":[{"from":"sso","to":"directory","carries":"JDBC ADMIN connection. SSO_ADMIN_URL points at the BANK's database and issues CREATE DATABASE. Draw red/dashed: this is a cross-boundary DDL edge, and the compose comment claims it does not exist."}]},{"id":"s13","from":"minibank","to":"sso-service","kind":"ghost","label":"not wired","labelAt":[640,342],"anchor":"middle","route":[[540,356],[540,346],[740,346],[740,294]],"detail":[{"from":"api","to":"jwks","carries":"DOES NOT EXIST. Draw as a ghost edge with a hazard style and the caption 'seam declared, never wired': HttpApi.identity is never called, so SsoIdentity stays ANONYMOUS."}]},{"id":"s14","from":"ai-trading-desk","to":"sso-service","kind":"http","label":"GET jwks","labelAt":[666,326],"anchor":"start","route":[[660,356],[660,294]],"detail":[{"from":"desk","to":"jwks","carries":"HTTPS GET /.well-known/jwks.json. The ONLY consumer of the SSO contract anywhere in the estate."}]},{"id":"s15","from":"ai-trading-desk","to":"minibank","kind":"besteffort","label":"best effort","labelAt":[556,488],"anchor":"middle","route":[[620,460],[620,492],[420,492],[420,460]],"detail":[{"from":"desk","to":"broker","carries":"HTTP: GET {BROKER_URL}/api/link?session=, then POST /api/watchlist. Every failure path returns 200 synced:false, so draw it as a best-effort edge, visually distinct from the money edges."}]},{"id":"s16","from":"ai-trading-desk","to":"options-flow-analytics","kind":"hazard","label":"! SELECT","labelAt":[688,496],"anchor":"start","route":[[680,460],[680,522]],"detail":[{"from":"desk","to":"gexpg","carries":"DIRECT SQL against another repo's table (SELECT ... FROM gex_dex_snapshots). Hardcoded column names. The boundary-violating edge of the desk, exactly as sso-\u003edirectory is for SSO."}]},{"id":"s17","from":"options-flow-analytics","to":"ai-trading-desk","kind":"ghost","label":"unused","labelAt":[766,486],"anchor":"start","route":[[760,522],[760,460]],"detail":[{"from":"gexapi","to":"desk","carries":"DOES NOT EXIST. The owner-sanctioned HTTP read path runs in the same compose file and the desk never calls it. Available, not called."}]},{"id":"s18","from":"ai-trading-desk","to":"external","kind":"https","label":"HTTPS","labelAt":[844,372],"anchor":"start","route":[[840,380],[868,380],[868,282],[880,282]],"detail":[{"from":"desk","to":"openai","carries":"HTTPS: realtime client_secrets and calls/{id}/accept."},{"from":"desk","to":"ext_mkt","carries":"HTTPS: Alpaca, Yahoo chart, Yahoo RSS, CBOE, apewisdom, x.ai Grok, twitter oEmbed."}]},{"id":"s19","from":"external","to":"ai-trading-desk","kind":"https","label":"webhook","labelAt":[858,318],"anchor":"start","route":[[880,262],[852,262],[852,404],[840,404]],"detail":[{"from":"openai","to":"desk","carries":"INBOUND webhook POST /webhook/openai, HMAC-verified. The estate's only inbound third-party edge, plus POST /webhook/tradingview on a shared token."}]},{"id":"s20","from":"minibank","to":"external","kind":"https","label":"HTTPS","labelAt":[492,600],"anchor":"start","route":[[480,460],[480,660],[1000,660],[1000,294]],"detail":[{"from":"pricefeed","to":"ext_mkt","carries":"HTTPS: CoinGecko simple/price + market_chart, Yahoo v8 chart. Hardcoded, no env var."},{"from":"fx","to":"ext_mkt","carries":"HTTPS GET api.frankfurter.dev/v1/latest."},{"from":"rita","to":"openai","carries":"HTTPS POST /v1/chat/completions, key OPENAI_API_KEY."}]},{"id":"s21","from":"platform","to":"minibank","kind":"http","label":"GET /metrics","labelAt":[288,552],"anchor":"start","route":[[280,560],[360,560],[360,460]],"detail":[{"from":"prometheus","to":"api","carries":"EXISTING. Scrape GET /metrics. Note on the map that mart, pay, analytics, sso and desk expose NO /metrics, so the scrape fan-out is one edge, not six."}]}],"nodes":[{"id":"browser","service":"edge","label":"Browser","represents":"EXISTING. The PWA. Now shared across the estate: same client hits bank, mart, pay, desk, auth vhosts."},{"id":"caddy","service":"edge","label":"Caddy 2","represents":"EXISTING. One TLS front door, vhost-routed: bank./mart./pay./desk./auth./gex./obs.b4rruf3t.com. The only node every service touches."},{"id":"sso","service":"sso-service","label":"SSO :8090","represents":"dev.b4rruf3t.sso.Main, own JVM, own Dockerfile. Routes /v1/users, /v1/tokens, /v1/tokens/refresh|revoke, /v1/users/me, /.well-known/jwks.json."},{"id":"ssodb","service":"sso-service","label":"pg sso","represents":"Database `sso` on the shared minibank-control Postgres server. Tables users + sessions only. Flyway classpath:db/migration."},{"id":"jwks","service":"sso-service","label":"JWKS","represents":"GET /.well-known/jwks.json, single RS256 key, kid=sso-\u003c6 bytes of modulus\u003e. The only estate-wide contract surface, and it currently has ZERO in-repo consumers."},{"id":"api","service":"minibank","label":"API + Router","represents":"EXISTING. ledger JVM HTTP server, 25 contexts, virtual thread per request, token bucket."},{"id":"directory","service":"minibank","label":"Directory","represents":"EXISTING. minibank_directory on pg-control. NOTE: also the physical home of the issuer's card_instruments/card_authorizations tables."},{"id":"issuer","service":"minibank","label":"Issuer","represents":"NEW. /issuer/v1/instruments|authorizations|clearing. A package in the ledger JVM, not a process. Its writes go to the DIRECTORY database via a method named openForRead()."},{"id":"shard0","service":"minibank","label":"eu · PostgreSQL","represents":"EXISTING. MINIBANK_SHARD0_URL, region eu, ledger + outbox tables."},{"id":"shard1","service":"minibank","label":"uk · PostgreSQL","represents":"EXISTING. MINIBANK_SHARD1_URL, region uk, ledger + outbox tables."},{"id":"intransit","service":"minibank","label":"in flight","represents":"EXISTING. State pill, not a process: the in_transit clearing account. A balance the money sits in, never a hop it travels through."},{"id":"kafka","service":"minibank","label":"topic payments","represents":"EXISTING. The payments topic on the minibank broker. The topic, not the broker: the bank's own flow map depends on that distinction."},{"id":"korders","service":"minibank","label":"topic orders","represents":"NEW. Kafka topic `orders` on the same broker. Produced by the broker process, consumed by the ledger (group broker-settlement)."},{"id":"ksettle","service":"minibank","label":"topic settlements","represents":"NEW. Kafka topic `settlements`. Produced by the ledger (trade.settled/trade.rejected), consumed ONLY by the broker process, so it is the one topic that goes dark if the broker Deployment is absent."},{"id":"applier","service":"minibank","label":"Applier","represents":"EXISTING. Consumer group shard-applier."},{"id":"notif","service":"minibank","label":"Notifications","represents":"EXISTING. Consumer group notifications + minibank_notifications DB."},{"id":"settle","service":"minibank","label":"Settlement","represents":"NEW. Consumer group broker-settlement inside the ledger JVM; Settlement.handle -\u003e Products.settleFill."},{"id":"broker","service":"minibank","label":"Broker :8091","represents":"NEW. dev.minibank.broker.BrokerService. Separate k8s Deployment, SAME image, different command. Own HTTP (/health, /api/link, /api/watchlist)."},{"id":"brokerdb","service":"minibank","label":"minibank_broker","represents":"NEW. Fifth database, on pg-control, opened only by dev.minibank.broker classes. Has its own outbox table relayed by the shared OutboxRelay."},{"id":"brokercons","service":"minibank","label":"broker-orders","represents":"NEW. Consumer group broker-orders inside the broker process, reading `settlements`, calling markSettled/compensate."},{"id":"redis","service":"minibank","label":"Redis","represents":"EXISTING."},{"id":"fx","service":"minibank","label":"FX :8090","represents":"EXISTING. Conditionally the same JVM: embedded when FX_URL is unset, in which case this edge is a loopback the map should render dashed."},{"id":"pricefeed","service":"minibank","label":"PriceFeed","represents":"EXISTING."},{"id":"rita","service":"minibank","label":"Rita","represents":"EXISTING support agent."},{"id":"mart","service":"minimart","label":"Mart :8081","represents":"NEW. dev.minimart MartApi. Merchant. 16 HTTP contexts incl. /api/checkout, /api/reconcile."},{"id":"martdb","service":"minimart","label":"pg minimart","represents":"NEW. Database `minimart` on the minimart Postgres (host 5436). Owns ledger, orders, reservations, outbox, handled_events."},{"id":"martrelay","service":"minimart","label":"OutboxRelay","represents":"NEW. The only KafkaProducer in the minimart repo. Bound to Db.open() i.e. the merchant DB only. Off entirely when MINIMART_KAFKA is blank."},{"id":"martorders","service":"minimart","label":"minimart.orders.v1","represents":"NEW. Topic. Its only consumer is Replenishment, inside the same service, so this is a service talking to itself over Kafka."},{"id":"martsubs","service":"minimart","label":"minimart.subscriptions.v1","represents":"NEW. Topic. The one genuinely cross-service topic in the minimart repo."},{"id":"replen","service":"minimart","label":"replenishment","represents":"NEW. Consumer group `replenishment`, writes back into martdb."},{"id":"pay","service":"minipay","label":"Pay :8082","represents":"NEW. dev.minipay PayApi. Acquirer/PSP. 9 contexts. Writes unauthenticated by default (Enforcement.on() false when unset)."},{"id":"paydb","service":"minipay","label":"pg minipay","represents":"NEW. Database `minipay`. Contains a fully-migrated outbox table that NO code reads or writes."},{"id":"analytics","service":"minianalytics","label":"Analytics :8083","represents":"NEW. dev.minianalytics AnalyticsApi. /api/analytics/mrr|movements|waterfall|health."},{"id":"anadb","service":"minianalytics","label":"pg minimart_analytics","represents":"NEW. Database `minimart_analytics`. Projection + its own handled_events."},{"id":"anacons","service":"minianalytics","label":"analytics group","represents":"NEW. Consumer group `analytics` on minimart.subscriptions.v1, manual commitSync, dedup on the event_key header."},{"id":"desk","service":"ai-trading-desk","label":"Desk :8000","represents":"NEW. FastAPI web.server:app, one uvicorn process, 25 routes + 2 SSE streams."},{"id":"deskdb","service":"ai-trading-desk","label":"desk.db","represents":"NEW. SQLite on a docker volume. Schema is re-executed on EVERY connection open, in the request path."},{"id":"deskbus","service":"ai-trading-desk","label":"in-process bus","represents":"NEW, and it never leaves the desk process: common/bus.py is a per-process asyncio queue fanout, not estate infrastructure. Events published while the server is down are silently dropped."},{"id":"gexpg","service":"options-flow-analytics","label":"pg options","represents":"NEW, foreign-owned. Table gex_dex_snapshots, written by the Rust collector. The desk SELECTs from it directly with the collector's own connection string."},{"id":"gexapi","service":"options-flow-analytics","label":"gex-api","represents":"NEW. The HTTP alternative that already runs in the same compose file and that the desk does not call. Available, not called."},{"id":"prometheus","service":"platform","label":"Prometheus","represents":"EXISTING. Scrapes minibank /metrics only today."},{"id":"grafana","service":"platform","label":"Grafana","represents":"EXISTING."},{"id":"openai","service":"external","label":"OpenAI","represents":"NEW. api.openai.com. Two independent callers: Rita (chat/completions) and the desk (realtime client_secrets + calls accept)."},{"id":"ext_mkt","service":"external","label":"market data","represents":"NEW, COLLAPSED. One node standing for CoinGecko, Yahoo chart, Yahoo RSS, CBOE, Alpaca, apewisdom, x.ai, Frankfurter. Eight boxes of third-party HTTP, collapsed into one."}],"edges":[{"from":"browser","to":"caddy","carries":"HTTPS. EXISTING edge, unchanged.","kind":"http"},{"from":"caddy","to":"sso","carries":"HTTP reverse_proxy sso:8090 for auth.b4rruf3t.com.","kind":"http"},{"from":"caddy","to":"api","carries":"EXISTING. HTTP to ledger :8080 for bank.b4rruf3t.com.","kind":"http"},{"from":"caddy","to":"mart","carries":"HTTP to :8081 for mart.b4rruf3t.com.","kind":"http"},{"from":"caddy","to":"pay","carries":"HTTP to :8082 for pay.b4rruf3t.com.","kind":"http"},{"from":"caddy","to":"desk","carries":"HTTP to :8000 for desk.b4rruf3t.com.","kind":"http"},{"from":"sso","to":"ssodb","carries":"JDBC, one connection per call, no pool. INSERT/SELECT on users + sessions, all auto-commit.","kind":"jdbc"},{"from":"sso","to":"jwks","carries":"Serves the RS256 public key document. Internal, drawn to make the dead contract visible.","kind":"http"},{"from":"sso","to":"directory","carries":"JDBC ADMIN connection. SSO_ADMIN_URL points at the BANK's database and issues CREATE DATABASE. A cross-boundary DDL edge, and the compose comment claims it does not exist.","kind":"hazard"},{"from":"desk","to":"jwks","carries":"HTTPS GET /.well-known/jwks.json. The ONLY consumer of the SSO contract anywhere in the estate.","kind":"http"},{"from":"api","to":"jwks","carries":"DOES NOT EXIST. The seam is declared and never wired. HttpApi.identity is never called, so SsoIdentity stays ANONYMOUS.","kind":"ghost"},{"from":"api","to":"directory","carries":"EXISTING. JDBC, customer -\u003e region lookup.","kind":"jdbc"},{"from":"api","to":"issuer","carries":"In-process call from /issuer/v1/* routes. Same JVM.","kind":"http"},{"from":"issuer","to":"directory","carries":"JDBC WRITES (INSERT/UPDATE on card_instruments, card_authorizations) against the directory database, through openForRead(). These are writes, not reads.","kind":"jdbc"},{"from":"api","to":"shard0","carries":"EXISTING. JDBC, the eu ledger transaction.","kind":"jdbc"},{"from":"api","to":"shard1","carries":"EXISTING. JDBC, the uk ledger transaction.","kind":"jdbc"},{"from":"api","to":"notif","carries":"JDBC DIRECT READ of minibank_notifications from HttpApi. Contradicts the in-code claim that Kafka is the only connection. The bank's own map does not admit this edge exists.","kind":"hazard"},{"from":"shard0","to":"kafka","carries":"EXISTING. OutboxRelay send: payment.completed, transfer.departed, transfer.bounced, trade.executed, mortgage.approved.","kind":"kafka"},{"from":"shard1","to":"kafka","carries":"EXISTING. Same, uk relay.","kind":"kafka"},{"from":"kafka","to":"applier","carries":"EXISTING. Consumer group shard-applier.","kind":"kafka"},{"from":"kafka","to":"notif","carries":"EXISTING. Consumer group notifications.","kind":"kafka"},{"from":"applier","to":"shard0","carries":"EXISTING. arrive/refund local commit.","kind":"jdbc"},{"from":"applier","to":"shard1","carries":"EXISTING.","kind":"jdbc"},{"from":"shard0","to":"ksettle","carries":"Kafka: trade.settled / trade.rejected via the eu outbox relay.","kind":"kafka"},{"from":"shard1","to":"ksettle","carries":"Kafka: same, uk.","kind":"kafka"},{"from":"ksettle","to":"brokercons","carries":"Kafka, consumer group broker-orders. If the broker Deployment is absent this edge is the one that silently backs up and every rejected fill's compensation never runs.","kind":"kafka"},{"from":"brokercons","to":"brokerdb","carries":"JDBC. markSettled / compensate.","kind":"jdbc"},{"from":"broker","to":"brokerdb","carries":"JDBC. Order + fill rows and the broker outbox, one commit.","kind":"jdbc"},{"from":"brokerdb","to":"korders","carries":"Kafka via the SHARED OutboxRelay class pointed at BrokerDb::open. order.filled.","kind":"kafka"},{"from":"korders","to":"settle","carries":"Kafka, consumer group broker-settlement, inside the ledger JVM.","kind":"kafka"},{"from":"settle","to":"shard0","carries":"JDBC. settleFill: cash + asset legs and the settlements outbox row in one commit.","kind":"jdbc"},{"from":"settle","to":"shard1","carries":"JDBC. Same, uk.","kind":"jdbc"},{"from":"api","to":"redis","carries":"EXISTING. Read-through cache, fails open.","kind":"jdbc"},{"from":"api","to":"fx","carries":"EXISTING. HTTP GET /rate, 500ms timeout. Dashed when FX_URL is unset (same JVM over loopback).","kind":"conditional"},{"from":"api","to":"pricefeed","carries":"EXISTING. In-process mark refresh.","kind":"http"},{"from":"pricefeed","to":"ext_mkt","carries":"HTTPS: CoinGecko simple/price + market_chart, Yahoo v8 chart. Hardcoded, no env var.","kind":"https"},{"from":"fx","to":"ext_mkt","carries":"HTTPS GET api.frankfurter.dev/v1/latest.","kind":"https"},{"from":"api","to":"rita","carries":"EXISTING. /api/support.","kind":"http"},{"from":"rita","to":"openai","carries":"HTTPS POST /v1/chat/completions, key OPENAI_API_KEY.","kind":"https"},{"from":"mart","to":"martdb","carries":"JDBC. Orders.submit: ledger legs + orders + reservations + outbox row, ONE commit.","kind":"jdbc"},{"from":"martdb","to":"martrelay","carries":"Polling read of unpublished outbox rows.","kind":"http"},{"from":"martrelay","to":"martorders","carries":"Kafka produce, acks=all, idempotence, event_key header.","kind":"kafka"},{"from":"martrelay","to":"martsubs","carries":"Kafka produce, same relay, different topic column.","kind":"kafka"},{"from":"martorders","to":"replen","carries":"Kafka, group replenishment. Honestly: the same service, back to itself.","kind":"kafka"},{"from":"replen","to":"martdb","carries":"JDBC. receiveStock write.","kind":"jdbc"},{"from":"martsubs","to":"anacons","carries":"Kafka, group analytics, enable.auto.commit=false, dedup on the event_key header.","kind":"kafka"},{"from":"anacons","to":"anadb","carries":"JDBC. Projection movement + handled_events claim in the same transaction.","kind":"jdbc"},{"from":"analytics","to":"anadb","carries":"JDBC read for MRR / movements / waterfall / health.","kind":"jdbc"},{"from":"mart","to":"pay","carries":"HTTP: POST /v1/payment_intents with Idempotency-Key order:\u003cid\u003e, then /capture or /cancel, plus GET /v1/payment_intents/{pi} and GET /v1/list from the Reconciler. No credential is ever sent.","kind":"http"},{"from":"pay","to":"paydb","carries":"JDBC. Intents, customers, payment methods, clearing, settlements.","kind":"jdbc"},{"from":"pay","to":"martdb","carries":"JDBC ADMIN connection at boot: PayDb.ADMIN_URL defaults to the MERCHANT's database, only to run CREATE DATABASE. Dashed. Same shape for analytics -\u003e martdb.","kind":"hazard"},{"from":"analytics","to":"martdb","carries":"JDBC ADMIN connection, CREATE DATABASE only. Dashed.","kind":"hazard"},{"from":"pay","to":"issuer","carries":"HTTP, CROSS-REPO, the four-party card model: POST /issuer/v1/authorizations, /{ref}/capture, /{ref}/void, and POST /issuer/v1/clearing. MINIBANK_ISSUER_URL. This is the single most important new edge on the map: it is the one that makes the estate an estate.","kind":"http"},{"from":"desk","to":"broker","carries":"HTTP: GET {BROKER_URL}/api/link?session=, then POST /api/watchlist. Every failure path returns 200 synced:false, so this is a best-effort edge, and nothing like the money edges.","kind":"besteffort"},{"from":"desk","to":"deskdb","carries":"SQLite write: trades, chat_log, ta_signals, callbacks, appointments, quotes.","kind":"jdbc"},{"from":"deskdb","to":"deskbus","carries":"NOT a real edge in the durable sense. Emit happens AFTER conn.commit(), outside any transaction, dropped if no loop is running. Not durable, and local to one process.","kind":"besteffort"},{"from":"deskbus","to":"browser","carries":"SSE text/event-stream on /api/stream/quotes and /api/stream/events. Terminates at this app's own browser tab and nowhere else.","kind":"http"},{"from":"desk","to":"gexpg","carries":"DIRECT SQL against another repo's table (SELECT ... FROM gex_dex_snapshots). Hardcoded column names. The boundary-violating edge of the desk, exactly as sso-\u003edirectory is for SSO.","kind":"hazard"},{"from":"gexapi","to":"gexpg","carries":"The owner-sanctioned HTTP read path, running and unused. The desk bypasses it and reads the table directly.","kind":"jdbc"},{"from":"desk","to":"openai","carries":"HTTPS: realtime client_secrets and calls/{id}/accept.","kind":"https"},{"from":"desk","to":"ext_mkt","carries":"HTTPS: Alpaca, Yahoo chart, Yahoo RSS, CBOE, apewisdom, x.ai Grok, twitter oEmbed.","kind":"https"},{"from":"openai","to":"desk","carries":"INBOUND webhook POST /webhook/openai, HMAC-verified. The estate's only inbound third-party edge, plus POST /webhook/tradingview on a shared token.","kind":"https"},{"from":"prometheus","to":"api","carries":"EXISTING. Scrape GET /metrics. Note on the map that mart, pay, analytics, sso and desk expose NO /metrics, so the scrape fan-out is one edge, not six.","kind":"http"},{"from":"prometheus","to":"grafana","carries":"EXISTING.","kind":"http"},{"from":"gexapi","to":"desk","kind":"ghost","derived":true,"carries":"DOES NOT EXIST. The owner-sanctioned HTTP read path runs in the same compose file and the desk never calls it. Available, not called."}]}</script>
+<script>
+(function () {
+  var raw = document.getElementById('estate-data');
+  var canvas = document.getElementById('e-canvas');
+  if (!raw || !canvas) return;
+  var D = JSON.parse(raw.textContent);
+
+  var NBY = {}, SBY = {};
+  D.nodes.forEach(function (n) { NBY[n.id] = n; });
+  D.services.forEach(function (s) { SBY[s.id] = s; });
+
+  var KIND = {
+    http:        { c:'var(--accent)', d:'',    w:1.6, m:'a-acc', t:'HTTP call, synchronous' },
+    https:       { c:'var(--accent)', d:'',    w:1.6, m:'a-acc', t:'HTTPS to a third party' },
+    kafka:       { c:'var(--violet)', d:'',    w:1.9, m:'a-vio', t:'Kafka topic, asynchronous' },
+    jdbc:        { c:'var(--green)',  d:'',    w:1.6, m:'a-grn', t:'JDBC to its own datastore' },
+    conditional: { c:'var(--dim)',    d:'6 4', w:1.4, m:'a-dim', t:'conditional, or a loopback into itself' },
+    besteffort:  { c:'var(--amber)',  d:'2 4', w:1.8, m:'a-amb', t:'best effort, the failure path is swallowed' },
+    hazard:      { c:'var(--red)',    d:'7 4', w:2.0, m:'a-red', t:'boundary violation, reaches into another service store' },
+    ghost:       { c:'var(--dim)',    d:'3 5', w:1.4, o:0.5, m:'a-gho', t:'declared and never wired, this link does not exist' }
+  };
+  var LEGEND = ['http','kafka','jdbc','conditional','besteffort','hazard','ghost'];
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function marker(id, color, open) {
+    return '<marker id="' + id + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6"' +
+      ' markerHeight="6" orient="auto-start-reverse">' +
+      (open ? '<path d="M0.5 1 L9 5 L0.5 9" fill="none" stroke="' + color + '" stroke-width="1.5"/>'
+            : '<path d="M0 1 L9 5 L0 9 z" fill="' + color + '"/>') + '</marker>';
+  }
+  var DEFS = '<defs>' + marker('a-acc','var(--accent)') + marker('a-vio','var(--violet)') +
+    marker('a-grn','var(--green)') + marker('a-dim','var(--dim)') + marker('a-amb','var(--amber)') +
+    marker('a-red','var(--red)') + marker('a-gho','var(--dim)', true) + '</defs>';
+
+  /* ---- level 0 ---------------------------------------------------------- */
+  function label(txt, x, y, anchor, k) {
+    var w = txt.length * 5.6 + 8;
+    var rx = anchor === 'middle' ? x - w / 2 : x - 4;
+    return '<rect x="' + rx.toFixed(1) + '" y="' + (y - 9) + '" width="' + w.toFixed(1) +
+      '" height="13" rx="3" fill="var(--panel)" opacity="0.94"/>' +
+      '<text class="elab" x="' + x + '" y="' + y + '" text-anchor="' +
+      (anchor === 'middle' ? 'middle' : 'start') + '" fill="' + k.c + '"' +
+      (k.o ? ' opacity="' + k.o + '"' : '') + '>' + esc(txt) + '</text>';
+  }
+  function svcEdge(e) {
+    var k = KIND[e.kind];
+    var pts = e.route.map(function (p) { return p[0] + ',' + p[1]; }).join(' ');
+    return '<g class="edg" data-edge="' + e.id + '">' +
+      '<polyline points="' + pts + '" fill="none" stroke="' + k.c + '" stroke-width="' + k.w + '"' +
+      (k.d ? ' stroke-dasharray="' + k.d + '"' : '') + (k.o ? ' opacity="' + k.o + '"' : '') +
+      ' stroke-linejoin="round" marker-end="url(#' + k.m + ')"/>' +
+      '<polyline points="' + pts + '" class="ehit"/>' +
+      label(e.label, e.labelAt[0], e.labelAt[1], e.anchor, k) + '</g>';
+  }
+  function svcBox(v) {
+    var s = '<g class="svc" data-svc="' + v.id + '" tabindex="0" role="button" aria-label="' +
+      esc(v.label) + ', open its internals">' +
+      '<rect class="svcbox" x="' + v.x + '" y="' + v.y + '" width="' + v.w + '" height="' + v.h + '" rx="10"/>' +
+      '<text class="svcname" x="' + (v.x + 14) + '" y="' + (v.y + 28) + '">' + esc(v.label) + '</text>';
+    v.what.forEach(function (l, i) {
+      s += '<text class="svcwhat" x="' + (v.x + 14) + '" y="' + (v.y + 51 + i * 15) + '">' + esc(l) + '</text>';
+    });
+    s += '<text class="svcstore" x="' + (v.x + 14) + '" y="' + (v.y + 91) + '">' + esc(v.store) + '</text>' +
+      '<text class="svccount" x="' + (v.x + v.w - 14) + '" y="' + (v.y + 91) + '" text-anchor="end">' +
+      v.nodes + ' nodes</text></g>';
+    return s;
+  }
+  function renderEstate() {
+    var s = '<svg class="esvg" viewBox="0 0 1160 700" role="img" ' +
+      'aria-label="Estate architecture map, ten services">' + DEFS;
+    D.serviceEdges.forEach(function (e) { s += svcEdge(e); });
+    D.services.forEach(function (v) { s += svcBox(v); });
+    return s + '</svg>';
+  }
+
+  /* ---- level 1, laid out from the same table ---------------------------- */
+  var CW = 196, CH = 68, HG = 22, VG = 52, DW = 1120, PER_ROW = 5;
+  function detailLayout(sid) {
+    var ids = [], set = {};
+    D.nodes.forEach(function (n) { if (n.service === sid) { ids.push(n.id); set[n.id] = 1; } });
+    var inner = D.edges.filter(function (e) { return set[e.from] && set[e.to]; });
+    var adj = {}, indeg = {};
+    ids.forEach(function (i) { adj[i] = []; indeg[i] = 0; });
+    inner.forEach(function (e) { if (e.from !== e.to) { adj[e.from].push(e.to); indeg[e.to]++; } });
+    var rank = {}, q = ids.filter(function (i) { return indeg[i] === 0; });
+    if (!q.length) q = [ids[0]];
+    q.forEach(function (i) { rank[i] = 0; });
+    for (var h = 0; h < q.length; h++) {
+      var u = q[h];
+      for (var j = 0; j < adj[u].length; j++) {
+        var v = adj[u][j];
+        if (!(v in rank)) { rank[v] = rank[u] + 1; q.push(v); }
+      }
+    }
+    var mx = 0;
+    Object.keys(rank).forEach(function (k) { if (rank[k] > mx) mx = rank[k]; });
+    ids.forEach(function (i) { if (!(i in rank)) rank[i] = mx + 1; });
+    var byRank = {};
+    ids.forEach(function (i) { (byRank[rank[i]] = byRank[rank[i]] || []).push(i); });
+    var rows = [];
+    Object.keys(byRank).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      var g = byRank[r];
+      for (var k = 0; k < g.length; k += PER_ROW) rows.push(g.slice(k, k + PER_ROW));
+    });
+    var cells = {};
+    rows.forEach(function (row, ri) {
+      var rw = row.length * CW + (row.length - 1) * HG;
+      var x0 = (DW - rw) / 2;
+      row.forEach(function (id, ci) {
+        cells[id] = { id: id, x: x0 + ci * (CW + HG), y: 54 + ri * (CH + VG), w: CW, h: CH };
+      });
+    });
+    return { cells: cells, rows: rows, inner: inner, w: DW, h: 54 + rows.length * (CH + VG) - VG + 26 };
+  }
+  function innerEdge(e, L) {
+    var a = L.cells[e.from], b = L.cells[e.to];
+    if (!a || !b || a === b) return '';
+    var k = KIND[e.kind] || KIND.http;
+    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2, d;
+    if (b.y > a.y) {
+      d = 'M' + acx + ',' + (a.y + a.h) + ' C' + acx + ',' + (a.y + a.h + 30) +
+          ' ' + bcx + ',' + (b.y - 30) + ' ' + bcx + ',' + b.y;
+    } else if (b.y < a.y) {
+      d = 'M' + acx + ',' + a.y + ' C' + acx + ',' + (a.y - 30) +
+          ' ' + bcx + ',' + (b.y + b.h + 30) + ' ' + bcx + ',' + (b.y + b.h);
+    } else {
+      var my = a.y + a.h / 2, right = bcx > acx;
+      var sx = right ? a.x + a.w : a.x, tx = right ? b.x : b.x + b.w, off = right ? 28 : -28;
+      d = 'M' + sx + ',' + my + ' C' + (sx + off) + ',' + (my - 24) +
+          ' ' + (tx - off) + ',' + (my - 24) + ' ' + tx + ',' + my;
+    }
+    return '<g class="edg" data-edge="' + e.from + '|' + e.to + '">' +
+      '<path d="' + d + '" fill="none" stroke="' + k.c + '" stroke-width="' + k.w + '"' +
+      (k.d ? ' stroke-dasharray="' + k.d + '"' : '') + (k.o ? ' opacity="' + k.o + '"' : '') +
+      ' marker-end="url(#' + k.m + ')"/>' +
+      '<path d="' + d + '" class="ehit"/></g>';
+  }
+  function nodeCell(n, c) {
+    var tag = /^EXISTING/.test(n.represents) ? 'existing'
+            : /^NEW/.test(n.represents) ? 'new' : '';
+    return '<g class="nd" data-node="' + n.id + '" tabindex="0" role="button" aria-label="' +
+      esc(n.label) + '">' +
+      '<rect class="ndbox" x="' + c.x + '" y="' + c.y + '" width="' + c.w + '" height="' + c.h + '" rx="8"/>' +
+      '<text class="ndname" x="' + (c.x + 12) + '" y="' + (c.y + 27) + '">' + esc(n.label) + '</text>' +
+      (tag ? '<text class="ndtag ' + tag + '" x="' + (c.x + c.w - 12) + '" y="' + (c.y + 26) +
+             '" text-anchor="end">' + tag.toUpperCase() + '</text>' : '') +
+      '<text class="ndid" x="' + (c.x + 12) + '" y="' + (c.y + 49) + '">' + esc(n.id) + '</text></g>';
+  }
+  function renderDetail(sid) {
+    var L = detailLayout(sid);
+    var s = '<svg class="esvg" viewBox="0 0 ' + L.w + ' ' + L.h + '" role="img" aria-label="' +
+      esc(sid) + ' internals">' + DEFS +
+      '<text class="dttl" x="2" y="20">' + esc(sid).toUpperCase() + ' · INSIDE THE BOX</text>';
+    L.inner.forEach(function (e) { s += innerEdge(e, L); });
+    Object.keys(L.cells).forEach(function (id) { s += nodeCell(NBY[id], L.cells[id]); });
+    return s + '</svg>';
+  }
+
+  /* ---- panels ----------------------------------------------------------- */
+  function bar(kind) {
+    var k = KIND[kind] || KIND.http;
+    return '<span class="kbar" style="background:' + k.c + (k.o ? ';opacity:' + k.o : '') + '"></span>';
+  }
+  function crossPanel(sid) {
+    var out = D.serviceEdges.filter(function (e) { return e.from === sid; });
+    var inn = D.serviceEdges.filter(function (e) { return e.to === sid; });
+    var h = '';
+    function block(title, list, dirKey) {
+      if (!list.length) return '';
+      var s = '<div class="elh">' + title + '</div>';
+      list.forEach(function (e) {
+        e.detail.forEach(function (d) {
+          s += '<div class="xr">' + bar(e.kind) + '<b>' + esc(e[dirKey]) + '</b><span>' +
+            esc(d.from) + ' &#8594; ' + esc(d.to) + ' · ' + esc(d.carries) + '</span></div>';
+        });
+      });
+      return s;
+    }
+    h += block('crosses out of ' + sid, out, 'to');
+    h += block('crosses into ' + sid, inn, 'from');
+    return h;
+  }
+  function info(title, tag, body) {
+    document.getElementById('e-info').innerHTML =
+      '<h4>' + esc(title) + (tag ? '<em>' + esc(tag) + '</em>' : '') + '</h4><p>' + esc(body) + '</p>';
+  }
+  var DEFAULT_INFO = ['The estate map', 'level 0',
+    'One box per service. Click a box to open its internals, click any line to read what ' +
+    'actually flows down it. Red lines are boundary violations, ghost lines are links that ' +
+    'were designed and never wired.'];
+
+  function renderLegend() {
+    return LEGEND.map(function (kk) {
+      var k = KIND[kk];
+      return '<span class="lg"><svg width="36" height="10" aria-hidden="true">' +
+        '<line x1="1" y1="5" x2="35" y2="5" stroke="' + k.c + '" stroke-width="' + k.w + '"' +
+        (k.d ? ' stroke-dasharray="' + k.d + '"' : '') + (k.o ? ' opacity="' + k.o + '"' : '') +
+        '/></svg>' + esc(k.t) + '</span>';
+    }).join('');
+  }
+
+  /* ---- mobile fallback, same table, no diagram -------------------------- */
+  function renderList() {
+    var h = '';
+    D.services.forEach(function (v) {
+      h += '<details class="elx"><summary>' + esc(v.label) +
+        '<span>' + v.nodes + ' nodes</span></summary>' +
+        '<p>' + esc(v.what.join(' ')) + '</p>' +
+        '<p class="mono">' + esc(v.store) + '</p>';
+      var out = D.serviceEdges.filter(function (e) { return e.from === v.id; });
+      var inn = D.serviceEdges.filter(function (e) { return e.to === v.id; });
+      if (out.length) {
+        h += '<div class="elh">calls out</div>';
+        out.forEach(function (e) {
+          h += '<div class="xr">' + bar(e.kind) + '<b>' + esc(e.to) + '</b><span>' +
+            esc(KIND[e.kind].t) + ' · ' + esc(e.detail.map(function (d) { return d.carries; }).join(' ')) +
+            '</span></div>';
+        });
+      }
+      if (inn.length) {
+        h += '<div class="elh">called by</div>';
+        inn.forEach(function (e) {
+          h += '<div class="xr">' + bar(e.kind) + '<b>' + esc(e.from) + '</b><span>' +
+            esc(KIND[e.kind].t) + '</span></div>';
+        });
+      }
+      h += '<div class="elh">inside</div>';
+      D.nodes.forEach(function (n) {
+        if (n.service !== v.id) return;
+        h += '<div class="eln"><b>' + esc(n.label) + '</b><span>' + esc(n.id) + '</span><p>' +
+          esc(n.represents) + '</p></div>';
+      });
+      h += '</details>';
+    });
+    return h;
+  }
+
+  /* ---- wiring ----------------------------------------------------------- */
+  var mode = null;
+  var backBtn = document.getElementById('e-back');
+  var where = document.getElementById('e-where');
+  var crossEl = document.getElementById('e-cross');
+
+  function show(sid) {
+    mode = sid;
+    if (!sid) {
+      canvas.innerHTML = renderEstate();
+      where.textContent = 'level 0 · one box per service';
+      crossEl.innerHTML = '';
+      backBtn.setAttribute('aria-pressed', 'true');
+      backBtn.textContent = 'Estate';
+      info(DEFAULT_INFO[0], DEFAULT_INFO[1], DEFAULT_INFO[2]);
+    } else {
+      var v = SBY[sid];
+      canvas.innerHTML = renderDetail(sid);
+      where.textContent = 'level 1 · ' + sid + ' · ' + v.nodes + ' nodes · click the pill to collapse';
+      crossEl.innerHTML = crossPanel(sid);
+      backBtn.setAttribute('aria-pressed', 'false');
+      backBtn.textContent = '← back to the estate';
+      info(v.label, 'service · ' + v.nodes + ' nodes', v.what.join(' ') + ' Store: ' + v.store + '.');
+    }
+  }
+
+  canvas.addEventListener('click', function (ev) {
+    var g = ev.target.closest ? ev.target.closest('[data-svc],[data-node],[data-edge]') : null;
+    if (!g) return;
+    if (g.hasAttribute('data-svc')) {
+      var sid = g.getAttribute('data-svc');
+      show(mode === sid ? null : sid);
+    } else if (g.hasAttribute('data-node')) {
+      var n = NBY[g.getAttribute('data-node')];
+      Array.prototype.forEach.call(canvas.querySelectorAll('.nd.on'), function (x) { x.classList.remove('on'); });
+      g.classList.add('on');
+      info(n.label, n.id + ' · ' + n.service, n.represents);
+    } else {
+      var key = g.getAttribute('data-edge'), e;
+      if (key.indexOf('|') < 0) {
+        e = D.serviceEdges.filter(function (x) { return x.id === key; })[0];
+        if (e) info(e.from + ' → ' + e.to, KIND[e.kind].t,
+          e.detail.map(function (d) { return d.from + ' → ' + d.to + ': ' + d.carries; }).join('  '));
+      } else {
+        var p = key.split('|');
+        e = D.edges.filter(function (x) { return x.from === p[0] && x.to === p[1]; })[0];
+        if (e) info(NBY[e.from].label + ' → ' + NBY[e.to].label, KIND[e.kind].t, e.carries);
+      }
+    }
+  });
+  canvas.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      if (ev.target.closest && ev.target.closest('[data-svc],[data-node]')) {
+        ev.preventDefault();
+        ev.target.closest('[data-svc],[data-node]').dispatchEvent(
+          new MouseEvent('click', { bubbles: true }));
+      }
+    }
+  });
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && mode) show(null); });
+  backBtn.addEventListener('click', function () { show(null); });
+
+  document.getElementById('e-legend').innerHTML = renderLegend();
+  document.getElementById('e-list').innerHTML = renderList();
+  show(null);
+})();
+</script>
 </body>
 </html>

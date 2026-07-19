@@ -93,6 +93,26 @@ def test_every_strike_is_spoken_in_both_tickers(monkeypatch):
     assert cp["contract_strike"] - cp["analysis_strike"] == signals.XSP_OFFSET
 
 
+def test_copy_trade_is_the_order_and_nothing_else(monkeypatch):
+    """What the caller copies into a broker, composed in code so no model can
+    pad it. Facts only: contract, price, size, trim, the add level."""
+    _force(monkeypatch, "negative_gamma", -40)
+    r = signals.recommend_trade("SPY")
+    line = r["copy_trade"]
+    assert len(line.split()) <= 40, f"copy_trade got wordy: {line}"
+    assert line.startswith(("Buy ", "Nothing on yet"))
+    assert line.endswith(".")
+    # the order names both tickers, because the caller thinks in one and
+    # fills in the other
+    cp = r["execution"]["contract_plan"]
+    if cp.get("contracts_now"):
+        assert f"{cp['contract_strike']:g}" in line
+        assert f"{cp['analysis_ticker']} {cp['analysis_strike']:g}" in line
+    # and carries none of the narration
+    for noise in ("GEX says", "dealers", "thesis", "regime"):
+        assert noise not in line
+
+
 def test_every_recommendation_carries_risk_fields(monkeypatch):
     _force(monkeypatch, "negative_gamma", -40)
     r = signals.recommend_trade("QQQ")

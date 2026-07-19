@@ -248,6 +248,8 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         "execution": execution,
         "confluence": confluence,
         "plain_english": plain,
+        # the order alone, for the caller who is copying it into a broker
+        "copy_trade": _copy_trade_line(execution),
         "levels_note": snap.get("levels_note"),
         "horizon": "the next 2-3 hours",
         "tape": None if tape is None else {
@@ -635,6 +637,44 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         "sizing_why": why,
         "doctrine": "size for zero: the whole premium is the risk, no stop",
     }
+
+
+def _copy_trade_line(x: dict) -> str:
+    """The order, and NOTHING else, composed in code so no model can pad it.
+
+    This is what a caller copy-trades: what to buy, at what price, how much,
+    where the trim is, and the exact level that earns the second lot. No
+    headline, no rationale, no jargon, no hedging - those are available if
+    asked, and asking is cheap. A model handed the raw payload re-composes
+    this from scratch every call and pads it out; a model handed this line
+    can only read it.
+    """
+    cp = x.get("contract_plan") or {}
+    kl = "p" if x["kind"] == "put" else "c"
+    what = f"{cp.get('contract_ticker')} {cp.get('contract_strike'):g}{kl}" if cp \
+        else f"{x['strike']:g}{kl}"
+    # the price belongs to the CONTRACT, so the equivalence comes after it:
+    # "XSP 744p, that's SPY 742, at 1.34" invites hearing 1.34 as the SPY level
+    also = (f", that's {cp.get('analysis_ticker')} {cp.get('analysis_strike'):g}"
+            if cp.get("analysis_strike") is not None else "")
+
+    if cp.get("plan") == "plan" or not cp.get("contracts_now"):
+        # nothing to fill yet: the condition IS the whole instruction
+        return f"Nothing on yet. {_sentence(cp.get('add_trigger') or 'wait for the setup')}"
+
+    bits = [f"Buy {what} at {x['entry_option_price_est']:.2f}{also}",
+            f"${cp.get('now_usd'):g}, {cp.get('contracts_now')} contracts"]
+    if x.get("tp50_option_price"):
+        bits.append(f"sell half at {x['tp50_option_price']:.2f}")
+    if cp.get("later_usd"):
+        bits.append(str(cp.get("add_trigger")))
+    return " ".join(_sentence(b) for b in bits)
+
+
+def _sentence(s: str) -> str:
+    """One clause, spoken: leading capital, closing full stop."""
+    s = s.strip().rstrip(".")
+    return (s[:1].upper() + s[1:] + ".") if s else ""
 
 
 def _plain_english_exec(ticker: str, x: dict) -> str:

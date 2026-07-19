@@ -23,44 +23,74 @@ def _force(monkeypatch, regime, score, spot_vs_flip="below"):
     monkeypatch.setattr(signals.market, "latest_snapshot", fake)
 
 
-def test_short_gamma_below_flip_is_put_debit_spread(monkeypatch):
+def test_short_gamma_below_flip_is_a_long_put(monkeypatch):
     _force(monkeypatch, "negative_gamma", -40, spot_vs_flip="below")
     r = signals.recommend_trade("SPY")
-    assert r["structure"] == "put debit spread"
-    buy, sell = r["legs"]
-    assert (buy["side"], sell["side"]) == ("buy", "sell")
-    assert buy["kind"] == sell["kind"] == "put"
-    assert buy["strike"] > sell["strike"]
-    assert buy["indicative_price"] > sell["indicative_price"]  # debit
+    assert r["structure"] == "long put"
+    (leg,) = r["legs"]
+    assert (leg["side"], leg["kind"]) == ("buy", "put")
 
 
-def test_short_gamma_above_flip_is_call_debit_spread(monkeypatch):
+def test_short_gamma_above_flip_is_a_long_call(monkeypatch):
     _force(monkeypatch, "negative_gamma", 40, spot_vs_flip="above")
     r = signals.recommend_trade("SPY")
-    assert r["structure"] == "call debit spread"
-    buy, sell = r["legs"]
-    assert buy["kind"] == sell["kind"] == "call"
-    assert buy["strike"] < sell["strike"]
+    assert r["structure"] == "long call"
+    (leg,) = r["legs"]
+    assert (leg["side"], leg["kind"]) == ("buy", "call")
 
 
-@pytest.mark.parametrize("score,structure,n_legs", [
-    (50, "put credit spread", 2),
-    (-50, "call credit spread", 2),
-    (0, "iron condor", 4),
-])
-def test_long_gamma_branches(monkeypatch, score, structure, n_legs):
+@pytest.mark.parametrize("score,kind", [(50, "call"), (-50, "put"), (0, "call")])
+def test_long_gamma_fades_the_range_with_one_contract(monkeypatch, score, kind):
+    """Pinned tape: the score picks the side and the desk fades the range from
+    its edge. It does NOT sell premium at the walls - it never did, whatever
+    the old structure name claimed."""
     _force(monkeypatch, "positive_gamma", score)
     r = signals.recommend_trade("SPY")
-    assert r["structure"] == structure
-    assert len(r["legs"]) == n_legs
+    (leg,) = r["legs"]
+    assert (leg["side"], leg["kind"]) == ("buy", kind)
 
 
-def test_credit_spread_collects_premium(monkeypatch):
-    _force(monkeypatch, "positive_gamma", 50)
+@pytest.mark.parametrize("regime,score", [
+    ("negative_gamma", -40), ("negative_gamma", 40),
+    ("positive_gamma", 50), ("positive_gamma", -50), ("positive_gamma", 0),
+])
+def test_the_desk_never_sells_an_option(monkeypatch, regime, score):
+    """ONE DIRECTION, ALWAYS. Sizing is budget/premium, the management rule is
+    'sell half at +50%' and the doctrine is hold-to-zero: a spread or a condor
+    cannot be sized, trimmed or held that way, so quoting one was describing a
+    trade the desk would never place."""
+    _force(monkeypatch, regime, score)
     r = signals.recommend_trade("SPY")
-    sell = next(leg for leg in r["legs"] if leg["side"] == "sell")
-    buy = next(leg for leg in r["legs"] if leg["side"] == "buy")
-    assert sell["indicative_price"] >= buy["indicative_price"]
+    assert len(r["legs"]) == 1
+    assert r["legs"][0]["side"] == "buy"
+    assert r["structure"].startswith("long ")
+
+
+@pytest.mark.parametrize("regime,score", [("negative_gamma", -40), ("positive_gamma", 50)])
+def test_legs_cannot_drift_from_execution(monkeypatch, regime, score):
+    """The payload used to announce 'put debit spread' beside a single 744p:
+    two answers to 'what am I buying' in one response. execution is the only
+    authority now, and the structure has to agree with it."""
+    _force(monkeypatch, regime, score)
+    r = signals.recommend_trade("SPY")
+    (leg,), ex = r["legs"], r["execution"]
+    assert leg["kind"] == ex["kind"]
+    assert leg["strike"] == ex["strike"]
+    assert ex["kind"] in r["structure"]
+
+
+def test_every_strike_is_spoken_in_both_tickers(monkeypatch):
+    """The desk analyses SPY and fills XSP, so a strike quoted in one alone is
+    half a fact. 'XSP 744p' has to arrive as 'XSP 744p (= SPY 742)' or the
+    caller is left converting in their head mid-call."""
+    _force(monkeypatch, "negative_gamma", -40)
+    cp = signals.recommend_trade("SPY")["execution"]["contract_plan"]
+    assert cp["contract_ticker"] == "XSP"
+    spoken = cp["contract_spoken"]
+    assert spoken.startswith(f"XSP {cp['contract_strike']:g}")
+    assert f"SPY {cp['analysis_strike']:g}" in spoken
+    # and the two strikes really are the house offset apart, not a typo
+    assert cp["contract_strike"] - cp["analysis_strike"] == signals.XSP_OFFSET
 
 
 def test_every_recommendation_carries_risk_fields(monkeypatch):

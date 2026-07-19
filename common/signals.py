@@ -5,14 +5,20 @@ snapshot into ONE exact, rule-based options structure; the voice/chat agents
 only narrate it. Splitting "decide" (code, testable) from "explain" (model)
 is the core design decision — the same split a real desk would demand.
 
+ONE DIRECTION, ALWAYS. The desk buys a single option and never spreads: the
+sizing is buying math (budget / premium), the management rule is "sell half at
++50%", and the doctrine is hold-to-zero with no stop. Spreads and condors
+cannot be sized, trimmed or held that way, so a payload that named one was
+describing a trade the desk would never place.
+
 Rules (v1, intentionally simple and inspectable):
-  negative gamma  → dealers amplify moves → trade momentum, defined risk:
-      spot below flip → PUT DEBIT SPREAD  (long ATM, short at the put wall)
-      spot above flip → CALL DEBIT SPREAD (long ATM, short at the call wall)
-  positive gamma  → dealers dampen moves → trade the range:
-      strong bullish score → PUT CREDIT SPREAD below the put wall
-      strong bearish score → CALL CREDIT SPREAD above the call wall
-      neutral score        → IRON CONDOR with shorts at both walls
+  negative gamma  → dealers amplify moves → trade momentum:
+      spot below flip → LONG PUT      spot above flip → LONG CALL
+  positive gamma  → dealers dampen moves → fade the range from its edge:
+      score >= 0 → LONG CALL from the low end
+      score <  0 → LONG PUT from the high end
+  the tape (triggered reversal, gap run, reversal day) overrides the structure
+  lean and picks the side; the contract is still one long option.
 """
 
 import json
@@ -123,19 +129,19 @@ def recommend_trade(ticker: str, as_of: str | None = None,
     except Exception:
         tape = None
 
+    # `tag` is the context the structure/tape lean carries into the name. The
+    # SIDE and the CONTRACT are never decided here: execution owns both, and
+    # legs are derived from it below so the two can never drift apart again.
+    tag = None
     if snap["regime"] == "negative_gamma":
         flip_ok = flip is not None
         bullish = (spot >= flip) if flip_ok else (score >= 0)
         if not bullish:
-            name, bias = "put debit spread", "bearish momentum"
-            legs = [_leg(snap, atm, "put", "buy", dte),
-                    _leg(snap, min(put_wall, atm - step), "put", "sell", dte)]
+            bias = "bearish momentum"
             invalidation = (f"spot reclaims the gamma flip at {flip}" if flip_ok
                             else f"a reclaim of the call wall at {call_wall}")
         else:
-            name, bias = "call debit spread", "bullish momentum"
-            legs = [_leg(snap, atm, "call", "buy", dte),
-                    _leg(snap, max(call_wall, atm + step), "call", "sell", dte)]
+            bias = "bullish momentum"
             invalidation = (f"spot loses the gamma flip at {flip}" if flip_ok
                             else f"a loss of the put wall at {put_wall}")
         if flip_ok:
@@ -151,26 +157,20 @@ def recommend_trade(ticker: str, as_of: str | None = None,
                          f"carries no direction), so the side comes from the desk signal "
                          f"({score:+.0f}). Target: the {'call' if bullish else 'put'} wall.")
     else:
-        if score > 25:
-            name, bias = "put credit spread", "bullish range"
-            legs = [_leg(snap, put_wall, "put", "sell", dte),
-                    _leg(snap, put_wall - step, "put", "buy", dte)]
-            invalidation = f"a close below the put wall at {put_wall}"
-        elif score < -25:
-            name, bias = "call credit spread", "bearish range"
-            legs = [_leg(snap, call_wall, "call", "sell", dte),
-                    _leg(snap, call_wall + step, "call", "buy", dte)]
-            invalidation = f"a close above the call wall at {call_wall}"
-        else:
-            name, bias = "iron condor", "neutral range"
-            legs = [_leg(snap, put_wall, "put", "sell", dte),
-                    _leg(snap, put_wall - step, "put", "buy", dte),
-                    _leg(snap, call_wall, "call", "sell", dte),
-                    _leg(snap, call_wall + step, "call", "buy", dte)]
-            invalidation = f"a close outside {put_wall}–{call_wall}"
+        # execution's rule mirrored exactly (score picks the side): the desk
+        # FADES the range from its edge with one long contract. The old
+        # branches sold premium at the walls, which the buying sizing, the
+        # +50% trim and hold-to-zero could never have executed.
+        bullish = score >= 0
+        bias = ("bullish range - long from the low end" if bullish
+                else "bearish range - short from the high end")
+        invalidation = (f"a close below the put wall at {put_wall}" if bullish
+                        else f"a close above the call wall at {call_wall}")
         rationale = (f"Dealers are LONG gamma (net GEX {snap['net_gex_total']:+,.0f}); their "
-                     f"hedging pins price between the walls ({put_wall} / {call_wall}). "
-                     f"Sell premium at the walls dealers defend. Signal score {score:+.0f}.")
+                     f"hedging pins price between the walls ({put_wall} / {call_wall}), "
+                     f"so moves fade. Signal score {score:+.0f} leans "
+                     + ("long from the low end." if bullish
+                        else "short from the high end."))
 
     # Precedence: a TRIGGERED tape reversal takes the trade; else a REVERSAL
     # DAY (capitulation + double bottom/top through VWAP) flips the lean;
@@ -178,9 +178,8 @@ def recommend_trade(ticker: str, as_of: str | None = None,
     ds = (tape or {}).get("day_shape")
     if tape and tape.get("stage") == "triggered" and tape.get("bias"):
         t_kind = "call" if tape["bias"] == "long" else "put"
-        name = f"long {t_kind} (tape reversal triggered)"
+        tag = "tape reversal triggered"
         bias = f"{'bullish' if t_kind == 'call' else 'bearish'} reversal - tape triggered"
-        legs = [_leg(snap, atm, t_kind, "buy", dte)]
         invalidation = (f"a 15m close back {'below' if t_kind == 'call' else 'above'} "
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = ("The house tape read fired: " + tape["plain"] +
@@ -189,9 +188,8 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         # thicks rule, then volume profiles: wicks based at the band, a thick
         # candle crossed the trigger into a THIN book - it travels fast
         g_kind = "call" if grun["side"] == "long" else "put"
-        name = f"long {g_kind} (gap run)"
+        tag = "gap run"
         bias = f"{'bullish' if g_kind == 'call' else 'bearish'} momentum - gap run"
-        legs = [_leg(snap, atm, g_kind, "buy", dte)]
         invalidation = (f"a 15m close back {'below' if g_kind == 'call' else 'above'} "
                         f"the trigger at {grun['trigger']}")
         rationale = (f"Gap run: wicks based {'between -1σ and VWAP' if g_kind == 'call' else 'between VWAP and +1σ'}, "
@@ -202,10 +200,9 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         # graded pre-12:45/stale-capitulation entries flat-to-negative, so those
         # stay context and the structure trade stands until the window opens
         d_kind = "call" if ds["shape"].startswith("bull") else "put"
-        name = f"long {d_kind} (reversal day)"
+        tag = "reversal day"
         bias = (f"{'bullish' if d_kind == 'call' else 'bearish'} - reversal day "
                 f"(capitulation + double {'bottom' if d_kind == 'call' else 'top'})")
-        legs = [_leg(snap, atm, d_kind, "buy", dte)]
         invalidation = (f"a 15m close back {'below' if d_kind == 'call' else 'above'} "
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = (f"Reversal day: capitulation ({ds['capitulation_x']}x volume) at the "
@@ -218,10 +215,9 @@ def recommend_trade(ticker: str, as_of: str | None = None,
         # NEVER fades a capitulation day. Late chases graded flat-to-negative
         # too (docs/BACKTEST.md) - so the call is the day's side, pullback-only.
         d_kind = "call" if ds["shape"].startswith("bull") else "put"
-        name = f"long {d_kind} (reversal day - pullback only)"
+        tag = "reversal day - pullback only"
         bias = (f"{'bullish' if d_kind == 'call' else 'bearish'} - reversal day "
                 "(pullback only, no chase)")
-        legs = [_leg(snap, atm, d_kind, "buy", dte)]
         invalidation = (f"a 15m close back {'below' if d_kind == 'call' else 'above'} "
                         f"the session VWAP at {tape['vwap']:.2f}")
         rationale = ("Reversal day on the tape - the desk never fades it, and the "
@@ -230,10 +226,12 @@ def recommend_trade(ticker: str, as_of: str | None = None,
 
     execution = _execution_plan(snap, spot, flip, put_wall, call_wall, score,
                                 dte, atm, step, em, tape=tape)
-    if snap["ticker"] == "XSP":
-        # house rule: XSP fills are ugly on spreads - single direction only
-        name = f"long {execution['kind']} (XSP: single-leg only, no spreads)"
-        legs = [_leg(snap, execution["strike"], execution["kind"], "buy", dte)]
+    # ONE OPTION, ALWAYS, for every ticker. execution is the single authority
+    # on side and strike, so deriving the legs from it is the only way they
+    # cannot drift: the payload used to announce "put debit spread" beside a
+    # single 744p, and the sizing underneath was buying math either way.
+    legs = [_leg(snap, execution["strike"], execution["kind"], "buy", dte)]
+    name = f"long {execution['kind']}" + (f" ({tag})" if tag else "")
     confluence = _confluence(execution["kind"], snap, flip, score, tape)
     execution["contract_plan"] = _contract_and_sizing(
         execution, snap["ticker"], snap["regime"], score,
@@ -610,10 +608,22 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
                    f"{_at(execution.get('context_level'), 'the far wall')}")
         why = "pinned tape - mean-reversion entries earn the add, they don't get it upfront"
 
+    # ALWAYS SPOKEN AS A PAIR. The contract strike is NOT the level the caller
+    # thinks in: XSP 744p is the SPY 742 level, and quoting one without the
+    # other derails whole calls ("2.42 for the XSP 744 put doesn't tell me the
+    # SPY equivalent"). The desk analyses in one ticker and fills in another,
+    # so every strike it says has to carry both or it is only half a fact.
+    contract_spoken = f"{contract_ticker} {contract_strike:g}{kind_letter}"
+    if contract_ticker != spoken:
+        contract_spoken += f" (= {spoken} {execution['strike']:g})"
+
     return {
         "contract_ticker": contract_ticker,
         "contract": f"{contract_strike:g}{kind_letter}",
         "contract_strike": contract_strike,
+        "contract_spoken": contract_spoken,
+        "analysis_strike": execution["strike"],
+        "analysis_ticker": spoken,
         "moneyness": "ATM",
         "conversion_note": conversion_note,
         "budget_usd": budget,
@@ -632,8 +642,11 @@ def _plain_english_exec(ticker: str, x: dict) -> str:
     the exact contract, trim, sizing, risk. Digits, never spelled-out numbers."""
     cp = x.get("contract_plan", {})
     kl = "c" if x["kind"] == "call" else "p"
-    contract = (f"{cp.get('contract_ticker', ticker)} {cp.get('contract', '')}"
-                if cp else f"{ticker} {round(x['strike']):g}{kl}")
+    # the paired form, so the script itself never says a strike in one ticker
+    # while the caller is thinking in the other
+    contract = (cp.get("contract_spoken")
+                or f"{cp.get('contract_ticker', ticker)} {cp.get('contract', '')}"
+                ) if cp else f"{ticker} {round(x['strike']):g}{kl}"
     sizing_bit = (
         f"Clip ${cp.get('budget_usd', 2000):g}: "
         + (f"all of it now ({cp.get('contracts_now')}x) - {cp.get('sizing_why')}. "

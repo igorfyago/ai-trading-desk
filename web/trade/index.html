@@ -159,15 +159,24 @@
              padding:9px 12px 9px 14px; border-bottom:1px solid var(--line);
              font-family:var(--mono); font-size:11px; text-transform:uppercase;
              letter-spacing:.12em; color:var(--dim); }
+  #wl-head .wl-btns { display:flex; gap:6px; align-items:center; }
   #wl-add-btn { background:none; border:1px solid var(--line); border-radius:6px;
                 color:var(--dim); width:22px; height:22px; cursor:pointer;
                 font-size:13px; line-height:1; transition:color .13s,border-color .13s; }
-  #wl-add-btn:hover { color:var(--text); border-color:rgba(255,255,255,.28); }
-  #wl-addrow { padding:8px 10px; border-bottom:1px solid var(--line); }
-  #wl-addrow input { width:100%; background:none; border:1px solid var(--line);
+  #wl-add-btn:hover, #wl-link-btn:hover { color:var(--text); border-color:rgba(255,255,255,.28); }
+  /* same border, radius, colours and transition as the ＋ button · it is the
+     same control in the same header, only wider because it carries a word */
+  #wl-link-btn { background:none; border:1px solid var(--line); border-radius:6px;
+                 color:var(--dim); height:22px; padding:0 7px; cursor:pointer;
+                 font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase;
+                 transition:color .13s,border-color .13s; }
+  #wl-link-btn.on { color:var(--accent); border-color:var(--accent); }
+  #wl-addrow, #wl-linkrow { padding:8px 10px; border-bottom:1px solid var(--line); }
+  #wl-addrow input, #wl-linkrow input {
+                     width:100%; background:none; border:1px solid var(--line);
                      border-radius:6px; padding:6px 10px; color:var(--text);
                      font:12.5px var(--mono); outline:none; text-transform:uppercase; }
-  #wl-addrow input:focus { border-color:var(--accent); }
+  #wl-addrow input:focus, #wl-linkrow input:focus { border-color:var(--accent); }
   #wl-cols, .wlrow { display:grid; grid-template-columns:10px 20px minmax(0,1fr) 62px 52px 44px;
                      gap:6px; align-items:center; padding:0 10px 0 8px;
                      /* rows carry a 2px active-row indicator and box-sizing is
@@ -520,11 +529,18 @@
         <aside id="watch-rail">
           <div id="wl-head">
             <span>Watchlist</span>
-            <button id="wl-add-btn" title="Add symbol">＋</button>
+            <span class="wl-btns">
+              <button id="wl-link-btn" hidden>link</button>
+              <button id="wl-add-btn" title="Add symbol">＋</button>
+            </span>
           </div>
           <div id="wl-addrow" hidden>
             <input id="wl-add" placeholder="Add symbol… (Enter)" maxlength="12"
                    autocomplete="off" spellcheck="false">
+          </div>
+          <div id="wl-linkrow" hidden>
+            <input id="wl-link" placeholder="Bank customer number… (Enter)" maxlength="6"
+                   inputmode="numeric" autocomplete="off" spellcheck="false">
           </div>
           <div id="wl-cols">
             <span></span><span></span><span>Symbol</span>
@@ -599,6 +615,10 @@
     
   </main>
 
+<!-- the watchlist's set arithmetic, where `node --test tests/js` can reach it.
+     Plain <script>, no bundler: it has to be loaded before the inline script
+     below runs, and a synchronous tag is the whole mechanism. -->
+<script src="/static/watchlist.js?v=1"></script>
 <script>
   function show(name) {
     document.querySelectorAll(".tab-btn[data-pane]").forEach(t =>
@@ -678,6 +698,160 @@
       }).catch(() => {});
     } catch { /* no fetch, no network, no problem */ }
   };
+  // ---------------------------------------------- the SHARED list ----
+  //
+  // MEMBERSHIP MOVED. It is the broker's now, per bank customer, in Postgres,
+  // because a watchlist is user state and two apps cannot share user state
+  // through one app's localStorage. What stays here is everything the
+  // broker's (customer_id, symbol) table cannot hold and has no business
+  // holding: sections, order, colour flags, sort mode, collapse state.
+  //
+  // localStorage is therefore no longer the authority · it is a CACHE plus a
+  // layout. That is what keeps the degradation honest: if the broker is
+  // unreachable, unlinked, unbuilt or was never deployed, nothing below runs
+  // and the rail behaves exactly as it did before any of this existed,
+  // rendering from the same key it always did.
+  //
+  // Same server-side hop as wlSync, for the same reason: the desk and the
+  // broker are different origins and the cure for that would be CORS on a
+  // service that trades real books.
+  // WHICH BOOKS THIS BROWSER HAS ALREADY HANDED ITS CACHE TO · a set of
+  // customer ids, not a single boolean.
+  //
+  // v1 was one global "1". It was set on the first successful bootstrap
+  // whatever customer that was for, and the link button's own tooltip invites
+  // you to change customers. So the SECOND link could never import: the
+  // server's guard is `not rows and local and not migrated`, migrated was
+  // already true, so no import ran, the shared list came back empty, and
+  // wlBootstrap then ran adopt(WL, []) followed by wlSave(). adopt with an
+  // empty shared list drops every symbol from every section by rule 1 and
+  // keeps the now-empty sections by design · so eight curated sections, their
+  // order and their colour flags were written to localStorage as empty, and
+  // reload could not bring them back. Relinking to the original customer
+  // restored membership only, and with no local section still holding them
+  // every symbol landed in one inbox.
+  //
+  // Keyed per customer, the second link is just a first link for that book:
+  // the guard is false, the import runs, and adopt reconciles a full list
+  // into the layout that is already there.
+  //
+  // The key is versioned rather than migrated in place. A browser carrying
+  // the v1 flag reads an empty set here and is treated as un-migrated for
+  // every customer, which is the safe direction: the server's OWN guard ("is
+  // the shared list empty") still stops a stale cache from resurrecting
+  // symbols someone deliberately removed, and that is exactly the failure the
+  // two guards are layered against.
+  const WL_SHARED_KEY = "desk-watchlist-shared-v2";
+  const wlMigratedFor = () => {
+    try {
+      const v = JSON.parse(localStorage.getItem(WL_SHARED_KEY) || "[]");
+      return Array.isArray(v) ? v.map(Number).filter(Number.isInteger) : [];
+    } catch { return []; }
+  };
+  const wlMarkMigrated = (customer) => {
+    if (!Number.isInteger(customer)) return;
+    try {
+      const s = wlMigratedFor();
+      if (!s.includes(customer)) localStorage.setItem(WL_SHARED_KEY, JSON.stringify(s.concat(customer)));
+    } catch {}
+  };
+  let wlShare = { available: false, linked: false, customer: null };
+
+  async function wlBootstrap() {
+    if (!deskSession || typeof WLIB === "undefined") return;
+    let d;
+    try {
+      d = await fetch(API + "/api/watchlist/bootstrap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session: deskSession,
+          local: WLIB.symbolsOf(WL),
+          // BOTH guards, and the server applies its own. This one stops a
+          // browser holding a stale cache from resurrecting symbols another
+          // browser deliberately removed; the server's "is the shared list
+          // empty" stops a browser that merely lost this flag from doing the
+          // same. Neither is sufficient alone.
+          // the SET of books this browser has handed its cache to · the
+          // server checks membership for the customer this session resolves
+          // to, so linking a second customer is not silently treated as
+          // already-migrated. See WL_SHARED_KEY.
+          migrated: wlMigratedFor(),
+        }),
+      }).then(r => r.json());
+    } catch {
+      return;                    // the rail already rendered from cache
+    }
+    wlShare = { available: !!d.available, linked: !!d.linked, customer: d.customer ?? null };
+    wlLinkPaint();
+    if (!wlShare.available || !wlShare.linked) return;
+
+    // this browser now lives in the shared world FOR THIS CUSTOMER · never
+    // re-import its cache into this book. Another book is another decision.
+    wlMarkMigrated(Number(wlShare.customer));
+    WL.sections = WLIB.adopt(WL, (d.symbols || []).map(r => r.symbol));
+    wlSave(); wlRender(); wlPoll();
+  }
+
+  function wlLinkPaint() {
+    const b = document.getElementById("wl-link-btn");
+    if (!b) return;
+    b.hidden = !wlShare.available && !wlShare.linked;
+    b.textContent = wlShare.linked ? "#" + wlShare.customer : "link";
+    b.title = wlShare.linked
+      ? "Shared with bank customer " + wlShare.customer + " · click to change"
+      : "Not shared · click to name a bank customer";
+    b.classList.toggle("on", wlShare.linked);
+  }
+
+  // A CLAIM, NOT A LOGIN, and the UI says so by being a number rather than a
+  // password box. It is the identity this estate actually has today: the
+  // bank's own picker is a customer id and the broker's portfolio page opens
+  // at ?customer=. Inventing a sign-in here would be inventing auth.
+  async function wlLink(customer) {
+    if (!deskSession || !Number.isFinite(customer)) return false;
+    try {
+      const d = await fetch(API + "/api/watchlist/link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: deskSession, customer }),
+      }).then(r => r.json());
+      if (!d.linked) return false;
+    } catch { return false; }
+    await wlBootstrap();
+    return true;
+  }
+
+  /**
+   * OFFER a link that a URL asked for · the deep link's landing.
+   *
+   * It opens the control the user would have opened themselves, with the
+   * number already in it, and stops. Enter binds; Escape does not. The
+   * difference between this and calling wlLink() is the difference between a
+   * suggestion and an instruction, and the party making the suggestion is
+   * whoever wrote the link, who is not necessarily the person reading it.
+   *
+   * The button is revealed even when the broker reported nothing to link to
+   * yet, because the row is about to be shown and a floating input with no
+   * affordance above it reads as a glitch.
+   */
+  function wlProposeLink(customer) {
+    const row = document.getElementById("wl-linkrow");
+    const input = document.getElementById("wl-link");
+    const btn = document.getElementById("wl-link-btn");
+    if (!row || !input) return;
+    if (btn) btn.hidden = false;
+    row.hidden = false;
+    input.value = String(customer);
+    input.title = wlShare.linked
+      ? "This link asks to move sharing to bank customer " + customer
+        + ", replacing #" + wlShare.customer + " · press Enter to accept"
+      : "This link asks to share your watchlist with bank customer " + customer
+        + " · press Enter to accept";
+    input.focus();
+    input.select();
+  }
+
   const wlQuotes = {};                 // sym -> latest /api/watch row
   let wlLastPx = {}, wlTimer = null, wlDrag = null;
 
@@ -931,6 +1105,22 @@
       input.value = "";
       wlSave(); wlRender(); wlPoll(); wlSync(t, "add");
     };
+    const linkBtn = document.getElementById("wl-link-btn");
+    const linkRow = document.getElementById("wl-linkrow");
+    const linkIn = document.getElementById("wl-link");
+    linkBtn.onclick = () => {
+      linkRow.hidden = !linkRow.hidden;
+      if (!linkRow.hidden) { linkIn.value = wlShare.customer ?? ""; linkIn.focus(); }
+    };
+    linkIn.onkeydown = async (e) => {
+      if (e.key === "Escape") { linkRow.hidden = true; return; }
+      if (e.key !== "Enter") return;
+      const n = Number(linkIn.value.trim());
+      if (!Number.isInteger(n) || n <= 0) return;
+      linkRow.hidden = true;
+      await wlLink(n);
+    };
+
     document.querySelectorAll("#wl-cols .wlc").forEach(c => {
       c.onclick = () => {                    // desc -> asc -> manual
         const key = c.dataset.sort;
@@ -957,6 +1147,33 @@
     openEventStream();
     refreshScore();
     wlPoll();
+    // AFTER the first render, never before it. The rail paints from the local
+    // layout immediately and the shared list reconciles into it when it
+    // arrives · so a slow or absent broker costs a repaint, not a blank rail.
+    //
+    // ?customer=N PROPOSES A LINK. IT DOES NOT PERFORM ONE.
+    //
+    // It used to call wlLink(wanted) directly, before bootstrap and without
+    // looking at whether this browser was already bound to a book. wlLink
+    // POSTs to /api/watchlist/link, the desk forwards the integer verbatim,
+    // and the broker's Accounts.link is an UPSERT on desk_session · so it
+    // overwrote an existing binding without having to win any race. Opening a
+    // crafted /trade?customer=12 therefore read customer 12's whole watchlist
+    // into the victim's rail, overwrote their layout through the adopt-and-
+    // save path, and redirected every subsequent add and remove into customer
+    // 12's list. One click, no gesture, no confirmation, and no session string
+    // needed by whoever built the link.
+    //
+    // A link decides WHOSE BOOK this browser acts on. That is a decision, and
+    // a decision needs a person. So the deep link now prefills the control
+    // that already exists for it and waits for Enter · the bank's one-hop
+    // arrival keeps its convenience (nobody types the number) and stops being
+    // an instruction a stranger can issue on the customer's behalf.
+    const wanted = Number(new URLSearchParams(location.search).get("customer"));
+    wlBootstrap().then(() => {
+      if (Number.isInteger(wanted) && wanted > 0 && wanted !== Number(wlShare.customer))
+        wlProposeLink(wanted);
+    });
     wlTimer = setInterval(wlPoll, 6000);
     refreshTimer = setInterval(() => document.querySelector("#dash.active") && loadSummary(), 60000);
   }

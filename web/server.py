@@ -546,6 +546,153 @@ class WatchlistSync(BaseModel):
     session: str = ""
 
 
+class WatchlistLink(BaseModel):
+    session: str = ""
+    customer: int | None = None
+
+
+class WatchlistBootstrap(BaseModel):
+    session: str = ""
+    local: list[str] = []        # what this browser has been keeping
+    # ...and WHICH BOOKS it has already handed that over to.
+    #
+    # This was a bare bool, and a bool cannot express the thing the guard
+    # needs to know. A browser that has migrated into customer 7 has not
+    # migrated into customer 12, but one global flag said it had, so linking a
+    # second customer skipped the import, returned an empty shared list, and
+    # the client adopted that emptiness over its own rail. The list form asks
+    # the question per customer. bool is still accepted so an older page that
+    # has not reloaded keeps its previous meaning instead of silently becoming
+    # un-migrated for every book at once.
+    migrated: bool | list[int] = False
+
+
+async def _linked_customer(http, session: str):
+    """Which book this session is bound to, or None.
+
+    Broken out because three routes need it and each one of them must make
+    the SAME refusal: no link, no write. Guessing a customer id here writes
+    into a stranger's watchlist, and the id is a bare integer, so the guess
+    that works is `+1`.
+    """
+    link = await http.get(f"{BROKER_URL}/api/link", params={"session": session})
+    if link.status_code != 200:
+        raise RuntimeError(f"link {link.status_code}")
+    return link.json().get("customer")
+
+
+@app.post("/api/watchlist/link")
+async def watchlist_link(body: WatchlistLink, request: Request):
+    """Bind this browser to a bank customer.
+
+    THIS IS A CLAIM, NOT AUTHENTICATION, and it is worth saying so out loud
+    rather than in a commit message. Anyone who knows a session string can
+    bind it to any customer id, exactly as anyone can already open the
+    broker's own portfolio page at ?customer=11. That is the identity the
+    estate actually has today, and inventing a login here would be inventing
+    auth rather than using what exists.
+
+    What it buys is the seam. Every query on the far side already speaks
+    customer_id, so when SSO does supply a real identity the change is that
+    caller_session starts returning a validated `sub` instead of a browser
+    UUID — this route keeps its shape and the broker's CallerIdentity
+    overrules whatever we send.
+    """
+    session = await caller_session(request, body.session)
+    if not session or body.customer is None:
+        return {"linked": False, "reason": "no session or customer"}
+    try:
+        async with httpx.AsyncClient(timeout=BROKER_TIMEOUT) as http:
+            r = await http.post(f"{BROKER_URL}/api/link",
+                                json={"session": session, "customer": body.customer})
+            if r.status_code != 200:
+                return {"linked": False, "reason": f"link {r.status_code}"}
+    except Exception as e:
+        return {"linked": False, "reason": type(e).__name__}
+    return {"linked": True, "customer": body.customer}
+
+
+@app.post("/api/watchlist/bootstrap")
+async def watchlist_bootstrap(body: WatchlistBootstrap, request: Request):
+    """The shared watchlist on first paint, and the one-time migration.
+
+    MEMBERSHIP LIVES ON THE BROKER; ORDER, SECTIONS AND COLOUR FLAGS STAY
+    HERE. The broker's table is (customer_id, symbol) and cannot hold the
+    rest, and a merge of two authorities would need a conflict rule that does
+    not exist: union-merging a delete resurrects it forever, and the fix for
+    that is tombstones, which is a CRDT built for a feature whose whole value
+    is "the same tickers show up in both apps".
+
+    WHEN THE MIGRATION RUNS — both guards, because each one alone is wrong:
+
+      the broker's list is empty   · without this, a browser whose flag was
+                                     lost to a cache clear re-imports a stale
+                                     cached list over the shared one
+      this browser has not run it  · without this, a browser that still has
+                                     yesterday's cache resurrects every symbol
+                                     another browser deliberately removed
+
+    It is additive on the far side (ON CONFLICT DO NOTHING) so running it
+    twice is a no-op rather than a duplicate, which is what makes the failure
+    mode of getting the guards wrong "nothing happens" instead of "the list
+    doubles".
+
+    DEGRADATION IS THE CONTRACT, same as /sync. available=False is every
+    failure there is — broker down, unbuilt, never deployed — and the caller's
+    instruction on reading it is to change nothing at all.
+    """
+    session = await caller_session(request, body.session)
+    if not session:
+        return {"available": False, "linked": False, "symbols": [], "imported": 0}
+
+    local = [s.strip().upper() for s in (body.local or []) if s and s.strip()]
+
+    try:
+        async with httpx.AsyncClient(timeout=BROKER_TIMEOUT) as http:
+            customer = await _linked_customer(http, session)
+            if customer is None:
+                # reachable, but this browser has claimed no book. The rail
+                # goes on working out of localStorage exactly as it did
+                # before any of this existed.
+                return {"available": True, "linked": False, "symbols": [], "imported": 0}
+
+            shared = await http.get(f"{BROKER_URL}/api/watchlist",
+                                    params={"customer": customer})
+            if shared.status_code != 200:
+                return {"available": False, "linked": True, "symbols": [], "imported": 0,
+                        "reason": f"watchlist {shared.status_code}"}
+            rows = shared.json()
+
+            imported = 0
+            # PER CUSTOMER, not globally · see WatchlistBootstrap.migrated.
+            already = (int(customer) in body.migrated
+                       if isinstance(body.migrated, list) else bool(body.migrated))
+            if not rows and local and not already:
+                r = await http.post(
+                    f"{BROKER_URL}/api/watchlist",
+                    json={"customer": customer, "action": "import",
+                          "symbols": [{"symbol": s} for s in local]},
+                )
+                if r.status_code != 200:
+                    return {"available": False, "linked": True, "symbols": [], "imported": 0,
+                            "reason": f"import {r.status_code}"}
+                imported = len(local)
+                # read back rather than echo the request · what landed is the
+                # broker's answer, including the tradable flags we did not send
+                again = await http.get(f"{BROKER_URL}/api/watchlist",
+                                       params={"customer": customer})
+                if again.status_code != 200:
+                    return {"available": False, "linked": True, "symbols": [], "imported": 0,
+                            "reason": f"watchlist {again.status_code}"}
+                rows = again.json()
+    except Exception as e:
+        return {"available": False, "linked": False, "symbols": [], "imported": 0,
+                "reason": type(e).__name__}
+
+    return {"available": True, "linked": True, "customer": customer,
+            "symbols": rows, "imported": imported}
+
+
 @app.post("/api/watchlist/sync")
 async def watchlist_sync(body: WatchlistSync, request: Request):
     """Mirror one watchlist membership change onto the broker. Never fails."""

@@ -411,7 +411,20 @@ function killGhostTurn(userItemId, wasSpeaking) {
   // turn is a real sentence the caller is listening to · cancelling that was
   // the desk cutting itself off while nobody spoke. Compare the clocks: the
   // active response is the ghost only if it was created after the noise.
+  // NEVER kill an answer to a question that was actually asked. expectReply is
+  // set the moment a transcription passes REAL_WORDS (and by every deliberate
+  // requestResponse), and cleared at response.done, so it marks exactly the
+  // window where the live response is owed to somebody.
+  //
+  // Without it the clock comparison below false-positives, because
+  // speechStartedAt is ONE global that every speech_started overwrites while
+  // transcriptions land late and out of order: noise at T1, a real question at
+  // T2 that moves the clock, the answer created at T3, then T1's slow
+  // transcription arrives, fails REAL_WORDS, and T3 > T2 declares the real
+  // answer a ghost. That is the mid-word cutoff, and the resume below then
+  // continues from the severed token.
   const isGhost = voice.responseActive
+    && !voice.expectReply
     && (voice.responseStartedAt || 0) > (voice.speechStartedAt || 0);
   try {
     if (isGhost) {

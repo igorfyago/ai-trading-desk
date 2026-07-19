@@ -234,12 +234,23 @@ services:
     depends_on:
       minibank-control:
         condition: service_healthy
+      minibank-shard0:
+        condition: service_healthy
+      minibank-shard1:
+        condition: service_healthy
       minibank-kafka:
         condition: service_started
     environment:
       BROKER_PORT: "8091"
       BROKER_VENUE: simulated
       MINIBANK_DB_URL: jdbc:postgresql://minibank-control:5432/minibank
+      # The broker holds BOTH books open to reconcile them: its own positions
+      # and the ledger's asset accounts, one per region. Without these it fell
+      # back to the dev default of localhost:5434 and reported
+      # "reconciliation and backfill unavailable" · which is the honest
+      # failure, but it means the audit never runs and the drift never heals.
+      MINIBANK_SHARD0_URL: jdbc:postgresql://minibank-shard0:5432/minibank
+      MINIBANK_SHARD1_URL: jdbc:postgresql://minibank-shard1:5432/minibank
       MINIBANK_KAFKA: minibank-kafka:9092
       FX_URL: http://minibank-fx:8090
       JAVA_TOOL_OPTIONS: "-Xmx96m"

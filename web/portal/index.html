@@ -298,78 +298,149 @@
     return s + '</svg>';
   }
 
-  /* ---- level 1, laid out from the same table ---------------------------- */
-  var CW = 196, CH = 68, HG = 22, VG = 52, DW = 1120, PER_ROW = 5;
+  /* ---- level 1 · hand-placed, one coordinate table per service -----------
+     There is no packer here on purpose. An automatic grid places a node by its
+     index in a queue, which is a number that has nothing to do with what the
+     node talks to, so a service's process lands nowhere near its own database
+     and every edge crosses the picture. These coordinates are chosen by hand so
+     that the drawing reads as the flow it is: HTTP surface at the top, stores
+     and in-process parts beside whatever uses them, topics and their consumers
+     below in the direction messages travel. A handful of edges carry explicit
+     waypoints, for the same reason a hand-drawn diagram does: a return path in a
+     cycle has to get home down a lane, not through the boxes.
+     Boxes are all 48 tall, label centred, id centred underneath in mono, which
+     is the bank x-ray's treatment because this is the same family of diagram. */
+  /* Every service is authored in the SAME 1240-wide canvas, and that is not an
+     accident of copy-paste. The svg is scaled to the container, so a two-node
+     service drawn in a 700-wide box would render its type nearly twice the size
+     of minibank's and stop looking like the same diagram. One canvas width, one
+     text size, one visual weight across all ten. */
+  var NH = 48, DW = 1240;
+  var LAY = {
+    edge: { h:250, n:{
+      browser:{x:490,y:54,w:260}, caddy:{x:470,y:150,w:300} } },
+
+    'sso-service': { h:270, n:{
+      sso:{x:500,y:54,w:240}, ssodb:{x:330,y:160,w:250}, jwks:{x:630,y:160,w:280} } },
+
+    minipay: { h:250, n:{
+      pay:{x:500,y:54,w:240}, paydb:{x:480,y:160,w:280} } },
+
+    external: { h:150, n:{
+      openai:{x:350,y:54,w:240}, ext_mkt:{x:650,y:54,w:260} } },
+
+    platform: { h:250, n:{
+      prometheus:{x:480,y:54,w:280}, grafana:{x:500,y:160,w:240} } },
+
+    'options-flow-analytics': { h:250, n:{
+      gexapi:{x:500,y:54,w:240}, gexpg:{x:490,y:160,w:260} } },
+
+    minianalytics: { h:280, n:{
+      anacons:{x:280,y:54,w:260}, analytics:{x:640,y:54,w:260}, anadb:{x:460,y:170,w:280} } },
+
+    'ai-trading-desk': { h:360, n:{
+      desk:{x:500,y:54,w:240}, deskdb:{x:500,y:160,w:240}, deskbus:{x:480,y:266,w:280} } },
+
+    /* mart writes one commit, the relay drains the outbox into two topics, and
+       the only consumer of the orders topic is this same service, so the loop
+       back into martdb is drawn closing on the right rather than crossing. */
+    minimart: { h:440, n:{
+      mart:{x:340,y:54,w:220},   martdb:{x:340,y:150,w:220}, martrelay:{x:340,y:246,w:220},
+      martsubs:{x:210,y:342,w:260}, martorders:{x:530,y:342,w:250}, replen:{x:820,y:246,w:220} } },
+
+    /* 19 nodes, and they do fit in one view because they are not one graph:
+       the request path runs down the middle, the four in-process helpers sit in
+       a column on the right where the router can reach them without crossing
+       anything, the payments topic and its two consumers own the lower left,
+       and the securities loop owns the lower right. The two hazard-ish returns
+       (settle back into both shards) and the api -> notifications read are the
+       only edges that need lanes, and they get them. */
+    minibank: { h:800, n:{
+      intransit:{x:40,y:54,w:190},   api:{x:330,y:54,w:420},
+      redis:{x:1000,y:54,w:190},     fx:{x:1000,y:134,w:190},
+      pricefeed:{x:1000,y:214,w:190},rita:{x:1000,y:294,w:190},
+      directory:{x:40,y:160,w:220},  issuer:{x:280,y:160,w:180},
+      shard0:{x:330,y:270,w:210},    shard1:{x:640,y:270,w:230},
+      applier:{x:48,y:370,w:190},    kafka:{x:260,y:390,w:190},
+      notif:{x:250,y:490,w:210},
+      ksettle:{x:600,y:390,w:240},   brokercons:{x:880,y:390,w:220},
+      brokerdb:{x:880,y:490,w:220},  broker:{x:880,y:590,w:220},
+      korders:{x:630,y:590,w:230},   settle:{x:400,y:690,w:280} },
+      /* Three lanes, and each one is here because the alternative was a line
+         through six other lines. The api -> notifications read is a boundary
+         violation, so it goes the long way round the outside where it is
+         impossible to mistake for part of the flow. The applier's write back to
+         the uk shard runs above the shard row, and settlement's write back to
+         the uk shard runs up the corridor between the two shards. */
+      e:{ 'api|notif':      [[22,126],[22,514]],
+          'applier|shard1': [[35,240],[755,240]],
+          'settle|shard1':  [[560,560],[560,356]] } }
+  };
+
   function detailLayout(sid) {
-    var ids = [], set = {};
-    D.nodes.forEach(function (n) { if (n.service === sid) { ids.push(n.id); set[n.id] = 1; } });
+    var P = LAY[sid], cells = {}, set = {};
+    D.nodes.forEach(function (n) {
+      if (n.service !== sid) return;
+      set[n.id] = 1;
+      var c = P && P.n[n.id];
+      cells[n.id] = c ? { id:n.id, x:c.x, y:c.y, w:c.w, h:c.h || NH }
+                      : { id:n.id, x:20, y:20, w:180, h:NH };
+    });
     var inner = D.edges.filter(function (e) { return set[e.from] && set[e.to]; });
-    var adj = {}, indeg = {};
-    ids.forEach(function (i) { adj[i] = []; indeg[i] = 0; });
-    inner.forEach(function (e) { if (e.from !== e.to) { adj[e.from].push(e.to); indeg[e.to]++; } });
-    var rank = {}, q = ids.filter(function (i) { return indeg[i] === 0; });
-    if (!q.length) q = [ids[0]];
-    q.forEach(function (i) { rank[i] = 0; });
-    for (var h = 0; h < q.length; h++) {
-      var u = q[h];
-      for (var j = 0; j < adj[u].length; j++) {
-        var v = adj[u][j];
-        if (!(v in rank)) { rank[v] = rank[u] + 1; q.push(v); }
-      }
+    return { cells:cells, inner:inner, way:(P && P.e) || {}, w:DW, h:P ? P.h : 300 };
+  }
+
+  /* Where a straight run from `from` towards `to` leaves the rectangle. Every
+     endpoint therefore lands on a border rather than floating in the box. */
+  function border(c, fx, fy, tx, ty) {
+    var cx = c.x + c.w / 2, cy = c.y + c.h / 2, dx = tx - fx, dy = ty - fy;
+    if (!dx && !dy) return [cx, cy];
+    var t = Infinity;
+    function hit(v) { if (v > 0 && v < t) t = v; }
+    if (dx) { hit((c.x - fx) / dx); hit((c.x + c.w - fx) / dx); }
+    if (dy) { hit((c.y - fy) / dy); hit((c.y + c.h - fy) / dy); }
+    if (!isFinite(t)) return [cx, cy];
+    var px = fx + dx * t, py = fy + dy * t;
+    return [Math.min(Math.max(px, c.x), c.x + c.w), Math.min(Math.max(py, c.y), c.y + c.h)];
+  }
+  function edgePoints(e, L) {
+    var a = L.cells[e.from], b = L.cells[e.to];
+    if (!a || !b || a === b) return null;
+    var ac = [a.x + a.w / 2, a.y + a.h / 2], bc = [b.x + b.w / 2, b.y + b.h / 2];
+    var w = L.way[e.from + '|' + e.to];
+    if (w && w.length) {
+      var pts = [border(a, ac[0], ac[1], w[0][0], w[0][1])];
+      for (var i = 0; i < w.length; i++) pts.push([w[i][0], w[i][1]]);
+      var last = w[w.length - 1];
+      pts.push(border(b, last[0], last[1], bc[0], bc[1]));
+      return pts;
     }
-    var mx = 0;
-    Object.keys(rank).forEach(function (k) { if (rank[k] > mx) mx = rank[k]; });
-    ids.forEach(function (i) { if (!(i in rank)) rank[i] = mx + 1; });
-    var byRank = {};
-    ids.forEach(function (i) { (byRank[rank[i]] = byRank[rank[i]] || []).push(i); });
-    var rows = [];
-    Object.keys(byRank).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      var g = byRank[r];
-      for (var k = 0; k < g.length; k += PER_ROW) rows.push(g.slice(k, k + PER_ROW));
-    });
-    var cells = {};
-    rows.forEach(function (row, ri) {
-      var rw = row.length * CW + (row.length - 1) * HG;
-      var x0 = (DW - rw) / 2;
-      row.forEach(function (id, ci) {
-        cells[id] = { id: id, x: x0 + ci * (CW + HG), y: 54 + ri * (CH + VG), w: CW, h: CH };
-      });
-    });
-    return { cells: cells, rows: rows, inner: inner, w: DW, h: 54 + rows.length * (CH + VG) - VG + 26 };
+    return [border(a, ac[0], ac[1], bc[0], bc[1]), border(b, bc[0], bc[1], ac[0], ac[1])];
   }
   function innerEdge(e, L) {
-    var a = L.cells[e.from], b = L.cells[e.to];
-    if (!a || !b || a === b) return '';
+    var pts = edgePoints(e, L);
+    if (!pts) return '';
     var k = KIND[e.kind] || KIND.http;
-    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2, d;
-    if (b.y > a.y) {
-      d = 'M' + acx + ',' + (a.y + a.h) + ' C' + acx + ',' + (a.y + a.h + 30) +
-          ' ' + bcx + ',' + (b.y - 30) + ' ' + bcx + ',' + b.y;
-    } else if (b.y < a.y) {
-      d = 'M' + acx + ',' + a.y + ' C' + acx + ',' + (a.y - 30) +
-          ' ' + bcx + ',' + (b.y + b.h + 30) + ' ' + bcx + ',' + (b.y + b.h);
-    } else {
-      var my = a.y + a.h / 2, right = bcx > acx;
-      var sx = right ? a.x + a.w : a.x, tx = right ? b.x : b.x + b.w, off = right ? 28 : -28;
-      d = 'M' + sx + ',' + my + ' C' + (sx + off) + ',' + (my - 24) +
-          ' ' + (tx - off) + ',' + (my - 24) + ' ' + tx + ',' + my;
-    }
+    var d = pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
     return '<g class="edg" data-edge="' + e.from + '|' + e.to + '">' +
-      '<path d="' + d + '" fill="none" stroke="' + k.c + '" stroke-width="' + k.w + '"' +
+      '<polyline points="' + d + '" fill="none" stroke="' + k.c + '" stroke-width="' + k.w + '"' +
       (k.d ? ' stroke-dasharray="' + k.d + '"' : '') + (k.o ? ' opacity="' + k.o + '"' : '') +
-      ' marker-end="url(#' + k.m + ')"/>' +
-      '<path d="' + d + '" class="ehit"/></g>';
+      ' stroke-linejoin="round" marker-end="url(#' + k.m + ')"/>' +
+      '<polyline points="' + d + '" class="ehit"/></g>';
   }
   function nodeCell(n, c) {
     var tag = /^EXISTING/.test(n.represents) ? 'existing'
             : /^NEW/.test(n.represents) ? 'new' : '';
+    var mid = c.x + c.w / 2;
     return '<g class="nd" data-node="' + n.id + '" tabindex="0" role="button" aria-label="' +
       esc(n.label) + '">' +
-      '<rect class="ndbox" x="' + c.x + '" y="' + c.y + '" width="' + c.w + '" height="' + c.h + '" rx="8"/>' +
-      '<text class="ndname" x="' + (c.x + 12) + '" y="' + (c.y + 27) + '">' + esc(n.label) + '</text>' +
-      (tag ? '<text class="ndtag ' + tag + '" x="' + (c.x + c.w - 12) + '" y="' + (c.y + 26) +
+      '<rect class="ndbox" x="' + c.x + '" y="' + c.y + '" width="' + c.w + '" height="' + c.h + '" rx="9"/>' +
+      (tag ? '<text class="ndtag ' + tag + '" x="' + (c.x + c.w - 9) + '" y="' + (c.y + 13) +
              '" text-anchor="end">' + tag.toUpperCase() + '</text>' : '') +
-      '<text class="ndid" x="' + (c.x + 12) + '" y="' + (c.y + 49) + '">' + esc(n.id) + '</text></g>';
+      '<text class="ndname" x="' + mid + '" y="' + (c.y + 27) + '" text-anchor="middle">' +
+      esc(n.label) + '</text>' +
+      '<text class="ndid" x="' + mid + '" y="' + (c.y + 41) + '" text-anchor="middle">' +
+      esc(n.id) + '</text></g>';
   }
   function renderDetail(sid) {
     var L = detailLayout(sid);

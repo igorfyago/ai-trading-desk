@@ -237,7 +237,7 @@ def recommend_trade(ticker: str, as_of: str | None = None,
     confluence = _confluence(execution["kind"], snap, flip, score, tape)
     execution["contract_plan"] = _contract_and_sizing(
         execution, snap["ticker"], snap["regime"], score,
-        verdict=confluence["verdict"])
+        verdict=confluence["verdict"], tape=tape)
     plain = _plain_english_exec("SPY" if snap["ticker"] in ("SPY", "XSP") else snap["ticker"],
                                 execution)
     return {
@@ -534,7 +534,8 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
 
 def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float,
                          budget: float = DEFAULT_BUDGET_USD,
-                         verdict: str | None = None) -> dict:
+                         verdict: str | None = None,
+                         tape: dict | None = None) -> dict:
     """House conventions on top of the plan:
       - S&P trades: analysis stays in SPY levels, the CONTRACT is XSP
         (strike = SPY strike + ~2), notation like '753p'
@@ -555,6 +556,29 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
 
     est_px = execution["entry_option_price_est"]
     per_contract = max(est_px * 100, 1)
+
+    # THE TRIGGER HAS TO CARRY A NUMBER. Every branch below used to describe
+    # its condition in prose and REFER to a level ("the entry level", "the far
+    # wall", "the missing board boxes") while the actual price sat unused in
+    # scope. The desk can only ever be as exact as this string: handed prose,
+    # the best it can do is paraphrase, which is how "when would it flip" got
+    # answered with "it flips when the rules are met, and if they aren't it
+    # doesn't". The second lot is earned by CONTINUATION: price carrying
+    # through the next band in the direction of the trade.
+    short = execution["kind"] == "put"
+    bands = (tape or {}).get("bands") or {}
+    cont = bands.get("d1") if short else bands.get("u1")
+    if cont is None:                       # no bands on this snapshot
+        cont = execution.get("entry_underlying")
+    thru = "under" if short else "through"
+    second = round(budget / 2)
+    # levels are always spoken in the ANALYSIS ticker, never the contract one:
+    # the same rule _plain_english_exec follows, so 744.44 never reads as XSP
+    spoken = "SPY" if ticker in ("SPY", "XSP") else ticker
+
+    def _at(level, fallback: str) -> str:
+        """A level, or the honest prose when there genuinely isn't one."""
+        return f"{level:.2f}" if isinstance(level, (int, float)) else fallback
     # CONFLUENCE DRIVES SIZE: the board's verdict outranks the old
     # regime/score heuristic whenever it is available
     if verdict == "full_confluence":
@@ -563,12 +587,13 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         why = "every box on the board is green - structure and the checklist agree, full clip"
     elif verdict == "partial":
         plan, now_usd, later_usd = "split", budget / 2, budget / 2
-        trigger = ("add the second half only when the missing board boxes go "
-                   "green (confirmation prints or structure swings behind it)")
+        trigger = (f"add the second ${second:g} when {spoken} crosses {thru} "
+                   f"{_at(cont, 'the next band')}")
         why = "the board is part-green - half now, the tape earns the add"
     elif verdict == "wait":
         plan, now_usd, later_usd = "plan", 0, budget
-        trigger = "no fill until the board's entry condition prints - this is the plan, not an order"
+        trigger = (f"no fill until {spoken} trades {thru} {_at(cont, 'the entry level')} "
+                   "- this is the plan, not an order")
         why = "the board says wait - quoting the structure so you're ready, not filled"
     elif regime == "negative_gamma" and abs(score) >= 40:
         plan, now_usd, later_usd = "full clip", budget, 0
@@ -576,12 +601,13 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         why = "momentum tape and strong signal agree - deploy the full clip"
     elif regime == "negative_gamma":
         plan, now_usd, later_usd = "split", budget / 2, budget / 2
-        trigger = ("add the second half only if the contract is up 25% or SPY "
-                   "pushes through the entry level with momentum")
+        trigger = (f"add the second ${second:g} if the contract is up 25% or {spoken} "
+                   f"pushes {thru} {_at(execution.get('entry_underlying'), 'the entry level')}")
         why = "momentum tape but the signal is lukewarm - half now, prove it, then add"
     else:
         plan, now_usd, later_usd = "split", budget / 2, budget / 2
-        trigger = "add the second half only on a clean tag of the far wall"
+        trigger = (f"add the second ${second:g} on a clean tag of "
+                   f"{_at(execution.get('context_level'), 'the far wall')}")
         why = "pinned tape - mean-reversion entries earn the add, they don't get it upfront"
 
     return {

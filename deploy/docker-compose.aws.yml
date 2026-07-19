@@ -176,7 +176,12 @@ services:
       KAFKA_HEAP_OPTS: "-Xmx256m -Xms128m"
 
   minibank:
-    build: ../../minibank/ledger-service
+    build:
+      # THE CONTEXT IS THE REPO ROOT, not the module. ledger-service now
+      # depends on the in-repo sso-client, which is published to no
+      # registry, so the build has to be able to see a sibling directory.
+      context: ../../minibank
+      dockerfile: ledger-service/Dockerfile
     restart: unless-stopped
     depends_on:
       minibank-shard0:
@@ -208,7 +213,12 @@ services:
     command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
 
   minibank-fx:
-    build: ../../minibank/ledger-service
+    build:
+      # THE CONTEXT IS THE REPO ROOT, not the module. ledger-service now
+      # depends on the in-repo sso-client, which is published to no
+      # registry, so the build has to be able to see a sibling directory.
+      context: ../../minibank
+      dockerfile: ledger-service/Dockerfile
     restart: unless-stopped
     entrypoint: ["java", "-cp", "classes:deps/*", "dev.minibank.fx.FxService"]
     environment:
@@ -228,7 +238,12 @@ services:
   # and pointing it at one is a decision somebody makes on purpose, never a
   # side effect of deploying.
   minibank-broker:
-    build: ../../minibank/ledger-service
+    build:
+      # THE CONTEXT IS THE REPO ROOT, not the module. ledger-service now
+      # depends on the in-repo sso-client, which is published to no
+      # registry, so the build has to be able to see a sibling directory.
+      context: ../../minibank
+      dockerfile: ledger-service/Dockerfile
     restart: unless-stopped
     entrypoint: ["java", "-cp", "classes:deps/*", "dev.minibank.broker.BrokerService"]
     depends_on:

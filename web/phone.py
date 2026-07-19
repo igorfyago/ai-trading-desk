@@ -94,10 +94,18 @@ def run_call_loop(call_id: str) -> None:
     )
     turn = _new_turn()
     try:
+        # the SAME audio config the browser gets, not a second hand-rolled one.
+        # This line had drifted: it was missing interrupt_response False, so on
+        # the phone the server truncated Marcus mid-word whenever its VAD heard
+        # a breath or a chair, and it was missing transcription entirely, so the
+        # caller's words were never transcribed and every phone turn logged with
+        # no question attached to the answer.
+        from web.server import AUDIO_CONFIG   # app runs as web.server:app
+
         ws.send(json.dumps({"type": "session.update", "session": {
             "type": "realtime",
             "tools": p["tools"], "tool_choice": "auto",
-            "audio": {"input": {"turn_detection": {"type": "semantic_vad", "eagerness": "low"}}},
+            "audio": AUDIO_CONFIG(p["voice"]),
         }}))
         ws.send(json.dumps({"type": "response.create"}))   # Riley answers the phone
 

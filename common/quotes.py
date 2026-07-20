@@ -443,6 +443,36 @@ def _resample(bars: list[dict], factor: int, step_s: int) -> list[dict]:
     return out
 
 
+def _fold_partial_tail(bars: list[dict], step_s: int) -> list[dict]:
+    """Fold yahoo's synthetic in-progress bar into the bucket it belongs to.
+
+    Yahoo appends a live datapoint stamped at meta.regularMarketTime, which is
+    NOT on a bucket boundary. The resampled intervals (3m/45m/4h) absorb it
+    because _resample floors every timestamp; the raw ones (1m/5m/15m) do not,
+    so it survived as its own candle with o==h==l==c. That gave one chart a
+    one-tick sliver as its last candle and another a real partial bucket, so
+    the OHLC legend and the change column disagreed between two timeframes
+    with no market event behind it.
+
+    INTRADAY ONLY, and the caller enforces that. Daily bars are stamped 13:30Z
+    and weekly ones on Monday 04:00Z, neither aligned to their own step, so
+    flooring those would fold a genuine bar back into its predecessor and
+    silently drop a day (or four) from the chart.
+    """
+    if len(bars) < 2 or step_s <= 0:
+        return bars
+    tail = bars[-1]
+    if tail["t"] % step_s == 0:
+        return bars                      # already a boundary: a real bar
+    prev = bars[-2]
+    if tail["t"] - prev["t"] >= 2 * step_s:
+        return bars                      # a gap, not this bucket's stub
+    merged = {**prev, "h": max(prev["h"], tail["h"]),
+              "l": min(prev["l"], tail["l"]), "c": tail["c"],
+              "v": prev["v"] + tail["v"]}
+    return bars[:-2] + [merged]
+
+
 def _bars_alpaca(symbol: str, interval: str, limit: int) -> list[dict] | None:
     keys = _alpaca_keys()
     if not keys:
@@ -513,6 +543,11 @@ def _bars_yahoo(symbol: str, interval: str, limit: int) -> list[dict] | None:
         bars = _scrub_bars(bars)           # scrub BEFORE resampling so 45m
     if factor:                             # buckets can't inherit a phantom
         bars = _resample(bars, factor, step)
+    elif step < 86400:
+        # raw intraday: _resample would have absorbed yahoo's live stub, so
+        # these intervals have to do it themselves or their last candle means
+        # something different from every resampled chart's last candle
+        bars = _fold_partial_tail(bars, step)
     return bars
 
 

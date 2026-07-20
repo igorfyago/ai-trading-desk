@@ -439,3 +439,47 @@ def test_a_delayed_print_is_still_better_than_nothing(monkeypatch):
 
     out = quotes.fetch_spots(["SPY"])
     assert out["SPY"]["price"] == 743.29 and out["SPY"]["delayed"] is True
+
+
+def test_partial_tail_folds_on_intraday_only():
+    """Yahoo appends a live stub stamped off-boundary. The resampled charts
+    (3m/45m/4h) absorb it because _resample floors every timestamp; the raw
+    ones (1m/5m/15m) used to keep it as its own o==h==l==c candle. Two charts
+    of the same tape then reported different OHLC and a different change."""
+    step = 900
+    t0 = 1_750_000_000 // step * step
+    aligned = [{"t": t0, "o": 100.0, "h": 101.0, "l": 99.0, "c": 100.5, "v": 10},
+               {"t": t0 + step, "o": 100.5, "h": 102.0, "l": 100.0, "c": 101.0, "v": 20}]
+    stub = {"t": t0 + step + 137, "o": 101.4, "h": 101.4, "l": 101.4,
+            "c": 101.4, "v": 3}
+
+    out = quotes._fold_partial_tail(aligned + [stub], step)
+    assert len(out) == 2                       # the sliver is not its own bar
+    last = out[-1]
+    assert last["t"] == t0 + step              # the bucket keeps its boundary
+    assert last["o"] == 100.5                  # ...and its open
+    assert last["c"] == 101.4                  # but takes the live close
+    assert last["h"] == 102.0 and last["l"] == 100.0
+    assert last["v"] == 23                     # volume is summed, not dropped
+
+    # an already-aligned tail is a real bar and must survive untouched
+    assert quotes._fold_partial_tail(aligned, step) == aligned
+
+
+def test_partial_tail_never_folds_daily_or_weekly():
+    """THE TRAP. Daily yahoo bars are stamped 13:30Z and weekly ones Monday
+    04:00Z, so neither is aligned to its own step. Flooring those would fold a
+    genuine bar into its predecessor and silently delete a day (or four) from
+    the chart, which is why this is gated to intraday at the call site."""
+    day = 86400
+    d1 = 1_750_000_000 // day * day + 13 * 3600 + 1800      # 13:30Z, unaligned
+    daily = [{"t": d1, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 5},
+             {"t": d1 + day, "o": 1.5, "h": 2.5, "l": 1.0, "c": 2.0, "v": 6}]
+    # consecutive daily bars are exactly one step apart, so the gap guard does
+    # not save us here: the CALLER must not invoke this for step >= 86400
+    folded = quotes._fold_partial_tail(daily, day)
+    assert len(folded) == 1, "proves the intraday gate is load-bearing"
+
+    # and the real path leaves daily bars alone
+    _, _, _, factor, step = quotes.INTERVALS["D"]
+    assert factor is None and step == 86400    # so neither branch touches them

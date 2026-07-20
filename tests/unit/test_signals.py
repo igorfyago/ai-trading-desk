@@ -616,3 +616,96 @@ def test_the_stated_condition_is_never_already_satisfied(monkeypatch):
                 assert n > spot, f"call waits on {n} but spot is already {spot}"
             else:
                 assert n < spot, f"put waits on {n} but spot is already {spot}"
+
+
+def test_one_level_has_exactly_one_spelling(monkeypatch):
+    """A field published round(x, 2) while the prose rendered the same value
+    with %g unrounded, handing the model 747.01 and 747.00999999 for one line.
+    It voiced whichever it read last, which looks like the level drifting."""
+    _force(monkeypatch, "negative_gamma", -40)
+    x = signals.recommend_trade("SPY")["execution"]
+    tl = x["thesis_reference"]
+    assert tl == round(tl, 2)
+    # the prose must spell it the SAME way the field does
+    assert f"{tl:g}" in x["thesis_note"]
+    if x.get("context_level") is not None:
+        cl = x["context_level"]
+        assert cl == round(cl, 2) and f"{cl:g}" in x["thesis_note"]
+
+
+def test_the_add_level_is_always_ahead_of_the_trade(monkeypatch):
+    """The live-call complaint, on the ARMED path this time. u1/d1 are on the
+    right side of the VWAP, not of spot, and the old fallback to
+    entry_underlying was already satisfied by construction - which is how a
+    caller at 746.53 was told to add "when SPY crosses through 746.48", twice.
+    Every branch that fills must name a level the trade has not reached."""
+    import re
+
+    real = market.latest_snapshot
+
+    for score, regime in ((-40, "negative_gamma"), (40, "negative_gamma"),
+                          (50, "positive_gamma"), (-50, "positive_gamma")):
+        def fake(ticker, as_of=None, _s=score, _r=regime):
+            snap = real(ticker)
+            snap["regime"], snap["signal_score"] = _r, _s
+            snap["gamma_flip"] = None
+            return snap
+
+        monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+        for bars in (_reversal_bars(), _double_bottom_day(), None):
+            r = signals.recommend_trade("SPY", tape_bars=bars)
+            x = r["execution"]
+            cp = x["contract_plan"]
+            trig, entry = cp.get("add_trigger"), x.get("entry_underlying")
+            if not trig or entry is None:
+                continue
+            for n in (float(m) for m in re.findall(r"\d+\.\d+", trig)):
+                # option prices (small) are not levels; only compare levels
+                if n < entry * 0.5:
+                    continue
+                if x["kind"] == "call":
+                    assert n > entry, f"call adds at {n}, already past {entry}: {trig}"
+                else:
+                    assert n < entry, f"put adds at {n}, already past {entry}: {trig}"
+
+
+def _armed_tape(u1, d1, u2=None, d2=None):
+    """A tape that has armed a setup, with bands at a chosen place relative to
+    the entry, so the add-level selection can be exercised at one scale."""
+    return {"bands_ok": True, "capitulation": None, "day_shape": None,
+            "action": {"stance": "enter", "up": None, "down": None},
+            "bands": {"u1": u1, "d1": d1,
+                      "u2": u2 if u2 is not None else u1 + 2,
+                      "d2": d2 if d2 is not None else d1 - 2}}
+
+
+def test_add_level_walks_past_a_band_price_has_already_taken():
+    """u1 sits on the right side of the VWAP, which is NOT the right side of
+    SPOT. Once price pushes through it, "add when SPY crosses through 746.48"
+    is satisfied the moment it is spoken - the live-call complaint. The engine
+    must walk out to the next band that is genuinely ahead of the trade."""
+    ex = {"kind": "call", "strike": 746.0, "entry_underlying": 746.50,
+          "entry_option_price_est": 1.80}
+
+    # u1 is BEHIND price (746.20 < 746.50), u2 is ahead: u2 must be chosen
+    cp = signals._contract_and_sizing(ex, "SPY", "negative_gamma", 20,
+                                      verdict="partial",
+                                      tape=_armed_tape(u1=746.20, d1=744.0, u2=747.90))
+    assert cp["contracts_now"] > 0                    # this IS a filling plan
+    assert "747.9" in cp["add_trigger"], cp["add_trigger"]
+    assert "746.2" not in cp["add_trigger"]
+
+    # both bands behind price: name no level at all rather than a stale one
+    cp2 = signals._contract_and_sizing(ex, "SPY", "negative_gamma", 20,
+                                       verdict="partial",
+                                       tape=_armed_tape(u1=746.20, d1=744.0, u2=746.30))
+    assert "746.2" not in cp2["add_trigger"] and "746.3" not in cp2["add_trigger"]
+    assert "the next band" in cp2["add_trigger"]
+
+    # a put mirrors it: the add level must be BELOW the entry
+    exp = {**ex, "kind": "put"}
+    cp3 = signals._contract_and_sizing(exp, "SPY", "negative_gamma", -20,
+                                       verdict="partial",
+                                       tape=_armed_tape(u1=748.0, d1=746.80, d2=745.10))
+    assert "745.1" in cp3["add_trigger"], cp3["add_trigger"]
+    assert "746.8" not in cp3["add_trigger"]

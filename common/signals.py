@@ -276,6 +276,9 @@ def recommend_trade(ticker: str, as_of: str | None = None,
             "rsi": (tape.get("rsi") or {}).get("state"),
             "day_shape": (tape.get("day_shape") or {}).get("shape"),
             "day_shape_takeable": (tape.get("day_shape") or {}).get("takeable"),
+        # published so a consumer of THIS dict can ask tape_armed the same
+        # question the engine asked, and get the same answer
+        "bands_ok": tape.get("bands_ok"),
             "cap_age_h": (tape.get("day_shape") or {}).get("age_h"),
             "capitulation_x": (tape.get("day_shape") or {}).get("capitulation_x"),
             "checklist": tape.get("checklist"),
@@ -419,6 +422,16 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
             near = min((atm, put_wall, call_wall), key=lambda v: abs(v - spot))
             thesis_level, thesis_label = near, "the nearest level"
 
+    # ROUND ONCE, HERE, BEFORE ANYTHING RENDERS IT. One field below published
+    # round(level, 2) while the prose rendered the SAME quantity with %g on the
+    # unrounded value, so the payload carried two spellings of one line (747.01
+    # and 747.00999999) and the model voiced whichever it read last. That is
+    # apparent drift with no market move behind it, on the number a caller is
+    # being told to wait for.
+    thesis_level = round(thesis_level, 2)
+    if context_level is not None:
+        context_level = round(context_level, 2)
+
     # the achievable TARGET: the tape's gap/wall on a triggered reversal; the
     # next profile wall in the trade direction on a reversal day
     if trig:
@@ -463,7 +476,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         "stop": None,
         "risk_plan": "no stop until the trim: size small (half a percent of the "
                      "account max) and accept the contract can go to zero",
-        "thesis_reference": round(thesis_level, 2),
+        "thesis_reference": thesis_level,          # already rounded above
         # derived from the label that actually shipped: the dshape, gap-run,
         # capitulation and horizon-demotion branches all reassign thesis_label
         # without touching this, so a hardcoded value drifts out of agreement
@@ -472,7 +485,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
                         else "wall" if thesis_label.endswith(" wall") else "level"),
         "thesis_label": thesis_label,
         "target": None if target is None else round(target, 2),
-        "context_level": None if context_level is None else round(context_level, 2),
+        "context_level": context_level,            # already rounded above
         "context_label": context_label,
         "horizon": "the next 2-3 hours",
         "thesis_note": (f"{thesis_label} at {thesis_level:g} is the line for the THESIS - "
@@ -618,8 +631,15 @@ def tape_armed(tape: dict | None) -> bool:
         return False              # no measurable levels: nothing can arm
     if tape.get("capitulation"):
         return True
+    # Two shapes reach this function: the full read_tape dict (day_shape is a
+    # dict) and the FLATTENED payload published on the recommendation, where
+    # day_shape has been reduced to its name and takeability moved to its own
+    # key. Reading only the first spelling crashed on the second, and only the
+    # bands_ok short-circuit above hid it - so accept both, explicitly.
     ds = tape.get("day_shape")
-    if ds and ds.get("takeable"):
+    if isinstance(ds, dict) and ds.get("takeable"):
+        return True
+    if tape.get("day_shape_takeable"):
         return True
     return ((tape.get("action") or {}).get("stance")) in ("enter", "in_trade")
 
@@ -659,9 +679,21 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
     # through the next band in the direction of the trade.
     short = execution["kind"] == "put"
     bands = (tape or {}).get("bands") or {}
-    cont = bands.get("d1") if short else bands.get("u1")
-    if cont is None:                       # no bands on this snapshot
-        cont = execution.get("entry_underlying")
+    # THE ADD LEVEL HAS TO BE AHEAD OF PRICE. u1/d1 sit on the correct side of
+    # the VWAP, which is NOT the same as the correct side of spot: once price
+    # pushes past the band, "add the second $1000 when SPY crosses through
+    # 746.48" is a condition already met at the moment it is spoken, and the
+    # old fallback to entry_underlying was already met by construction, every
+    # time. Walk out to the first band genuinely ahead of the trade, and if
+    # there is none, hand the prose its honest fallback instead of a line the
+    # price is already through.
+    ref = execution.get("entry_underlying")
+    ladder = ([bands.get("d1"), bands.get("d2")] if short
+              else [bands.get("u1"), bands.get("u2")])
+    cont = None
+    if isinstance(ref, (int, float)):
+        cont = next((b for b in ladder if isinstance(b, (int, float))
+                     and (b < ref if short else b > ref)), None)
     thru = "under" if short else "through"
     second = round(budget / 2)
     # levels are always spoken in the ANALYSIS ticker, never the contract one:

@@ -479,7 +479,7 @@ PERSONAS = {
             "so the trade is free, and a round-trip costs nothing. Never "
             "say 'no stop-loss' flat - true before the runner rule, wrong "
             "now, and it is the rule doing the most work in the results. "
-            "Superseded wording: — size for zero, the premium is the risk. The "
+            "The "
             "thesis line is whatever the engine names (thesis_label): the tipping "
             "point when the flip is a REAL distinct level, otherwise the wall. It "
             "only tells you if the THESIS still stands — never a tripwire, never an "

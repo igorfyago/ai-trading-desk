@@ -934,7 +934,7 @@ async def watch_setup(ticker: str):
     # the fingerprint pins the SETUP, not the moment: a flush that stays live
     # for three bars must not be pitched three times. Bar timestamp + kind is
     # enough, since one setup per bar per ticker is the most that can fire.
-    bar_t = read.get("as_of") or read.get("t") or ""
+    bar_t = read.get("bar_t") or ""
     return {"signal": kind, "side": side, "why": why,
             "ticker": ticker.upper(),
             "spot": read.get("spot"),

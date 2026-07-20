@@ -726,6 +726,10 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         "vwap": round(band["vwap"], 4),
         "day_shape": ds,
         "capitulation": cap,
+        # the bar this read describes. Consumers fingerprint a setup by
+        # it: without a timestamp every capitulation looks like the same
+        # one and only the first of the day would ever raise an alert.
+        "bar_t": bars[-1]["t"],
         "band_position": pos,
         "rsi": {"value": None if rsi_s[-1] is None else round(rsi_s[-1], 2),
                 "ma": None if ma_s[-1] is None else round(ma_s[-1], 2),

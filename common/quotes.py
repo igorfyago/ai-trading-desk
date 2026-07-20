@@ -641,13 +641,18 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
                 # quoted price with no trade behind it.
                 live = None
                 try:
-                    live = _spot_yahoo(sym)
+                    live = fetch_spots([sym]).get(sym)
                 except Exception:
                     pass
                 if live:
                     bars = _live_last(bars, INTERVALS[norm][4], live)
                 payload = {"ticker": sym, "interval": norm, "source": src,
                            "delayed": delayed, "bars": bars[-limit:]}
+                if live:
+                    # expose the singleton so any surface can read the ONE
+                    # price without re-deriving it from candles
+                    payload["last"] = float(live["price"])
+                    payload["last_ts"] = live.get("ts")
                 with _lock:
                     _bars_cache[key] = (now, payload)
                 return payload
@@ -770,6 +775,10 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
         # made ext values and session dots flap back to blanks, the second let
         # the boundary-stamped SIP close overwrite the real post-market trade.
         prior = _last_watch_row.get(s)
+        # A held REAL-TIME print always outranks a delayed or older candidate —
+        # that's the weekend rule: Saturday's frozen SIP close (delayed, stamped
+        # at the session boundary) may never displace Friday's genuine last
+        # post-market trade, all weekend long. Age does not weaken that.
         if q and prior and prior.get("ts") and _beats(prior, q, tol_s=1.0):
             rows.append(dict(prior))
             continue
@@ -797,8 +806,17 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
             _last_watch_row[s] = row
         elif s in _last_watch_row:
             # nothing came back at all this round: the last known print STANDS
-            # (marked held) — the tape never goes blank once it has spoken
-            row = {**_last_watch_row[s], "held": True}
+            # (marked held) — the tape never goes blank once it has spoken.
+            # But a hold is not the price: past 120s with nobody confirming it,
+            # the row must stop claiming a LIVE number and wait for the feed,
+            # or the watchlist disagrees with every chart the moment the tape
+            # moves on. The held fields stay (never blank); only the stale
+            # price stops masquerading as current.
+            held = _last_watch_row[s]
+            if held.get("ts") and _age_s(held["ts"]) < 120.0:
+                row = {**held, "held": True}
+            else:
+                row = {**held, "held": True, "stale": True}
         rows.append(row)
     _watch_cache = (now, key, rows)
     global _watch_saved

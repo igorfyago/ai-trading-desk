@@ -200,14 +200,31 @@ def expected_move(spot: float, iv: float, dte_days: float) -> float:
 
 
 def days_to(expiry_iso: str, from_iso: str | None = None) -> float:
-    """DTE from now — or from a past moment (the replay blindfold: a July-6
-    decision must price July-6's time value, not today's)."""
+    """FRACTIONAL days until the expiry's 16:00 New York close - from now, or
+    from a past moment (the replay blindfold: a July-6 decision must price
+    July-6's time value, not today's).
+
+    Whole-day arithmetic made every 0DTE quote worth half a day all session:
+    at 14:00 ET the entry was priced as if the morning still lay ahead, so
+    premiums ran rich exactly on the tenor the desk trades. Now that the
+    collector stores the same-day chain, the engine prices the afternoon
+    that actually remains. Same manual-DST convention as the tape module,
+    the collector's clock.rs, and the replay grader: one clock everywhere.
+    The 0.02-day floor (~30 min) keeps the maths finite at the bell.
+    """
     d = date.fromisoformat(expiry_iso)
     if from_iso:
-        ref = datetime.fromisoformat(from_iso.replace("Z", "+00:00")).date()
+        ref = datetime.fromisoformat(from_iso.replace("Z", "+00:00"))
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
     else:
-        ref = datetime.now(timezone.utc).date()
-    return max((d - ref).days, 0.5)
+        ref = datetime.now(timezone.utc)
+    # 16:00 ET close in UTC: 20:00 during EDT, 21:00 during EST
+    from common.tape import _true_et_secs
+    noon_utc = datetime(d.year, d.month, d.day, 12, 0, tzinfo=timezone.utc)
+    edt = _true_et_secs(int(noon_utc.timestamp())) != 7 * 3600  # 12Z is 8am EDT / 7am EST
+    close = datetime(d.year, d.month, d.day, 20 if edt else 21, 0, tzinfo=timezone.utc)
+    return max((close - ref).total_seconds() / 86400.0, 0.02)
 
 
 # Live spot may only be blended into snapshot STRUCTURE when the two agree

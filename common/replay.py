@@ -28,7 +28,25 @@ def _parse(ts: str) -> datetime:
 
 
 def moments(ticker: str, limit: int = 800) -> list[str]:
-    return market.snapshot_moments(ticker, limit)
+    """Replay-worthy decision moments: LIVE SESSION ONLY. The collector runs
+    around the clock, so 69% of raw snapshots were weekend and overnight
+    rows with frozen structure - replaying those graded nothing and diluted
+    every aggregate. A decision moment is Mon-Fri, 09:30-16:00 ET."""
+    from common.tape import _true_et_secs
+    out = []
+    for ts in market.snapshot_moments(ticker, limit):
+        t = int(_parse(ts).timestamp())
+        wd = datetime.fromtimestamp(t, tz=timezone.utc).weekday()
+        # weekday in ET: shift by the ET offset before asking
+        secs = _true_et_secs(t)
+        wd_et = datetime.fromtimestamp(t - (86400 if secs > _true_et_secs(t) else 0),
+                                       tz=timezone.utc).weekday()
+        if wd > 4 and wd_et > 4:
+            continue
+        if not (9 * 3600 + 1800 <= secs < 16 * 3600):
+            continue
+        out.append(ts)
+    return out
 
 
 def _bars_for(ticker: str, interval: str = "15m") -> list[dict]:
@@ -47,6 +65,11 @@ def score_path(rec: dict, bars: list[dict]) -> dict:
     expiry_dt = datetime.fromisoformat(str(x["expiry"])).replace(
         hour=20, minute=0, tzinfo=timezone.utc)          # ~16:00 ET close
     cp = x.get("contract_plan") or {}
+    # a plan (contracts_now 0) still gets graded at one contract so the
+    # STRUCTURE can be measured, but it is labelled: the desk never filled
+    # it, and an aggregate that mixes real fills with hypotheticals while
+    # calling both "the house rules" is how edges get invented
+    hypothetical = not cp.get("contracts_now")
     contracts = cp.get("contracts_now") or 1
     clip = cp.get("now_usd") or cp.get("budget_usd") or 2000
 
@@ -105,6 +128,7 @@ def score_path(rec: dict, bars: list[dict]) -> dict:
 
     return {
         "gradable": True,
+        "hypothetical": hypothetical,
         "entry": {"t": t0, "px": round(entry_graded, 2), "spot": x["entry_underlying"],
                   "quoted_px": entry},
         "trim": trim, "runner_exit": runner_exit, "final": last, "expired": expired,
@@ -156,7 +180,9 @@ def sweep(ticker: str, start: str, end: str, step_minutes: int = 60,
     while t <= t_end and len(results) < max_runs:
         at = t.isoformat()
         t0 = t.timestamp()
-        past = [b for b in bars if b["t"] <= t0]
+        # same strict blindfold as run(): the bar straddling the decision
+        # carries post-decision prints, so only fully closed bars decide
+        past = [b for b in bars if b["t"] + 900 <= t0]
         rec = signals.recommend_trade(
             ticker, as_of=at, tape_bars=past if len(past) >= 30 else None)
         t += timedelta(minutes=step_minutes)

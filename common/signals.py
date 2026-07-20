@@ -77,6 +77,9 @@ def recommend_trade(ticker: str, as_of: str | None = None,
     or before that moment only; no live feed, no future, no exceptions.
     tape_bars: the intraday bars the tape read runs on (replay passes its own
     past-only slice; live mode fetches from the shared feed)."""
+    # normalise ONCE: a lowercase 'spy' fell through the index-ETF strike
+    # grid into the 0.5%-spaced one and quoted an "ATM" strike up to $1.50 off
+    ticker = ticker.upper()
     snap = market.latest_snapshot(ticker, as_of)
     if snap is None:
         return {"error": f"No data for {ticker}. Covered: SPY, QQQ, IWM, XSP."}
@@ -388,7 +391,9 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         else:
             why = ("dealers amplify the move and the desk signal "
                    f"({score:+.0f}) sits with the {'buyers' if bullish else 'sellers'} "
-                   "- the flip is on price, no edge from the level itself")
+                   + ("- the flip sits on price, no edge from the level"
+                      if snap.get("gamma_flip") is not None else
+                      "- no flip in this chain: cumulative gamma never crosses zero"))
     else:
         bullish = score >= 0
         headline = "GEX says pinned, mean-reversion tape today"
@@ -525,8 +530,14 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
     # 1. GEX structure: does dealer positioning back this side?
     struct_dir = 1 if ((spotv := snap["spot"]) >= flip if flip is not None
                        else score >= 0) else -1
-    if abs(score) < 15 and flip is None:
-        s1 = box("gex structure", "gray", f"signal {score:+.0f} is noise, no usable flip")
+    if flip is None:
+        # WITHOUT a flip the score is the regime restated: the collector
+        # builds it as (regime sign) + (spot vs flip), so the second term is
+        # gone and the first is already on the board. Whatever its magnitude,
+        # it is one fact wearing two names - never a second confirmation.
+        s1 = box("gex structure", "gray",
+                 f"{snap['regime'].replace('_', ' ')}, no usable flip - the "
+                 f"signal ({score:+.0f}) just echoes the regime")
     elif struct_dir == side:
         s1 = box("gex structure", "green",
                  f"{snap['regime'].replace('_', ' ')}, signal {score:+.0f}"

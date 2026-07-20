@@ -73,10 +73,13 @@ function startHeartbeat(ticker) {
   beat.ticker = (ticker || "SPY").toUpperCase();
   beat.seen = new Set();
   beat.pitch = null;
-  // whatever is already true at pickup is old news, not an opening ambush
+  beat.ready = false;   // no tick may run before the seed lands: a slow seed
+                        // fetch losing the race turned pickup into an ambush
   fetch(`/api/watch/${beat.ticker}`).then(r => r.json())
     .then(d => (d.events || []).forEach(e => beat.seen.add(e.fingerprint)))
-    .catch(() => {});
+    .catch(() => {})
+    // whatever was already true at pickup is old news either way
+    .finally(() => { beat.ready = true; });
   beat.timer = setInterval(checkTape, BEAT_MS);
 }
 
@@ -89,6 +92,7 @@ async function checkTape() {
   if (!voice.live || !voice.dc || voice.dc.readyState !== "open") return;
   if (voice.responseActive) return;       // never cut across him mid-sentence
   if (voice.userTalking) return;          // and never across the CALLER either
+  if (!beat.ready) return;                // the pickup seed has not landed yet
   let d;
   try {
     d = await fetch(`/api/watch/${beat.ticker}${beatQuery()}`).then(r => r.json());

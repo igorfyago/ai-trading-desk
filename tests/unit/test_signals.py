@@ -342,12 +342,18 @@ def test_confluence_board_is_the_model(monkeypatch):
     structure (the OOS coin-flip case) can only ever be half size."""
     real = market.latest_snapshot
 
-    def fake(score):
+    def fake(score, flip="none"):
         def _f(ticker, as_of=None):
             snap = real(ticker)
             snap["regime"] = "negative_gamma"
             snap["signal_score"] = score
-            snap["gamma_flip"] = None
+            # "none": no flip in the chain. "below": a REAL flip under spot -
+            # dealers demonstrably behind the upside. Without a real flip the
+            # score is the regime echoed back (the collector composes it from
+            # regime sign + spot-vs-flip), so structure can never be the
+            # green confirmation on its own - that combination was retired
+            # with the signal-echo fix.
+            snap["gamma_flip"] = None if flip == "none" else round(snap["spot"] * 0.985, 2)
             return snap
         return _f
 
@@ -358,15 +364,23 @@ def test_confluence_board_is_the_model(monkeypatch):
     r = signals.recommend_trade("SPY", tape_bars=bars)
     c = r["confluence"]
     assert len(c["boxes"]) == 5 and {b["state"] for b in c["boxes"]} <= {"green", "red", "gray"}
-    assert c["verdict"] != "full_confluence"          # structure box is red
+    assert c["verdict"] != "full_confluence"          # structure cannot confirm
     assert r["execution"]["contract_plan"]["plan"] != "full clip"
 
-    # same tape with dealers BEHIND it: every box lines up, full clip
-    monkeypatch.setattr(signals.market, "latest_snapshot", fake(40))
+    # same tape with dealers BEHIND it - a REAL flip below spot: full clip
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(40, flip="below"))
     r2 = signals.recommend_trade("SPY", tape_bars=bars)
     c2 = r2["confluence"]
     assert c2["verdict"] == "full_confluence", c2
     assert r2["execution"]["contract_plan"]["plan"] == "full clip"
+
+    # flipless agreement is HALF conviction now, never full: the echo is not
+    # a second confirmation, so the same tape with score +40 and no flip
+    # stays partial
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake(40))
+    r2b = signals.recommend_trade("SPY", tape_bars=bars)
+    assert r2b["confluence"]["verdict"] == "partial"
+    assert r2b["execution"]["contract_plan"]["plan"] != "full clip"
 
     # no tape at all: structure alone is never full conviction
     monkeypatch.setattr(signals.market, "latest_snapshot", fake(-40))

@@ -38,7 +38,10 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
-      TICKERS: ${TICKERS:-SPY,QQQ}
+      # IWM joined 2026-07-20: the desk's covered-tickers strings said
+      # SPY/QQQ/IWM while the DB had zero IWM rows - the claim and the
+      # collector now agree
+      TICKERS: ${TICKERS:-SPY,QQQ,IWM}
       INTERVAL_SECS: ${INTERVAL_SECS:-30}
       PROVIDER: ${PROVIDER:-cboe}          # real delayed market data, no key needed
       RETENTION_DAYS: ${RETENTION_DAYS:-30}

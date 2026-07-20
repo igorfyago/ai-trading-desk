@@ -89,6 +89,18 @@ def desk_status(ticker: str) -> str:
             out["flip"] = gl.get("flip_note") or "no gamma flip in this chain"
     out["book"] = trades.book_line()
     out["clock"] = clock
+    # captured_at is when the COLLECTOR fetched, which advances even while
+    # the chain is frozen after the close - so the age is computed here and
+    # said in minutes, and off-hours the number is honest about what it is
+    try:
+        from datetime import datetime, timezone
+        ts = datetime.fromisoformat(str(out["captured_at"]).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        out["structure_age_min"] = round(
+            (datetime.now(timezone.utc) - ts).total_seconds() / 60, 1)
+    except Exception:
+        pass
     return json.dumps(out)
 
 

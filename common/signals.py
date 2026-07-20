@@ -179,8 +179,20 @@ def recommend_trade(ticker: str, as_of: str | None = None,
     ds = (tape or {}).get("day_shape")
     # same precedence fix as _execution_plan: the branch with an out-of-sample
     # record is not allowed to be preempted by the two branches without one
-    _validated = bool(ds and ds.get("takeable", True))
-    if (tape and not _validated
+    # capitulation counts as validated HERE TOO. _execution_plan already
+    # treats it that way, and when only one of the two ladders knows about it
+    # the payload describes a short in `bias` and `rationale` while `execution`
+    # is buying calls - one object, two opposite trades.
+    cap_r = (tape or {}).get("capitulation") if tape else None
+    _validated = bool((ds and ds.get("takeable", True)) or cap_r)
+    if cap_r:
+        tag = "capitulation flush"
+        bias = "bullish - capitulation flush, sellers spent"
+        invalidation = ("a 15m close back below the session VWAP at "
+                        f"{tape['vwap']:.2f}")
+        rationale = ("Capitulation flush: " + cap_r["why"] +
+                     " - the desk buys the bounce; the session VWAP is the thesis.")
+    elif (tape and not _validated
             and tape.get("stage") == "triggered" and tape.get("bias")):
         t_kind = "call" if tape["bias"] == "long" else "put"
         tag = "tape reversal triggered"
@@ -448,7 +460,12 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         "risk_plan": "no stop until the trim: size small (half a percent of the "
                      "account max) and accept the contract can go to zero",
         "thesis_reference": round(thesis_level, 2),
-        "thesis_kind": ("tape" if trig else "flip" if flip_ok else "wall"),
+        # derived from the label that actually shipped: the dshape, gap-run,
+        # capitulation and horizon-demotion branches all reassign thesis_label
+        # without touching this, so a hardcoded value drifts out of agreement
+        "thesis_kind": ("tape" if thesis_label == "the session VWAP"
+                        else "flip" if thesis_label == "the tipping point"
+                        else "wall" if thesis_label.endswith(" wall") else "level"),
         "thesis_label": thesis_label,
         "target": None if target is None else round(target, 2),
         "context_level": None if context_level is None else round(context_level, 2),
@@ -627,7 +644,7 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         trigger = (f"add the second ${second:g} when {spoken} crosses {thru} "
                    f"{_at(cont, 'the next band')}")
         why = "the board is part-green - half now, the tape earns the add"
-    elif verdict == "wait":
+    elif verdict == "wait" and not (tape or {}).get("capitulation"):
         plan, now_usd, later_usd = "plan", 0, budget
         trigger = (f"no fill until {spoken} trades {thru} {_at(cont, 'the entry level')} "
                    "- this is the plan, not an order")

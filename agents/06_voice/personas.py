@@ -95,12 +95,15 @@ def desk_status(ticker: str) -> str:
 def trade_recommendation(ticker: str, session: str = "voice") -> str:
     rec = signals.recommend_trade(ticker)
     if "error" not in rec:
-        from common import trades
+        from common import quotes, trades
 
         pinned = trades.log_quote(session, rec, source="marcus")
         if pinned:
             rec["trade_log"] = "pinned to the desk chart automatically"
         rec["book"] = trades.book_line()
+        # the prompt forbids guessing a weekday and promises a clock on every
+        # recommendation; without this the expiry's day-name is model prior
+        rec["clock"] = quotes.trading_clock()
     return json.dumps(rec)
 
 
@@ -156,7 +159,8 @@ def trim_half(session: str = "voice", price: float | None = None) -> str:
     return json.dumps({"status": t["status"], "trim_px": t["trim_px"],
                        "runner_contracts": t["contracts_open"],
                        "realized_usd": t["realized_usd"],
-                       "say": f"Half off at {_say_px(t['trim_px'])}, runner rides."})
+                       "say": f"Half off at {_say_px(t['trim_px'])}, "
+                              f"stop the rest at {_say_px(t.get('entry_px'))}."})
 
 
 def close_position(session: str = "voice", price: float | None = None) -> str:

@@ -611,7 +611,11 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
 
     vw_px = band["vwap"]
     up = down = None
-    if stage == "triggered":
+    # PRECEDENCE MATCHES THE ENGINE. _execution_plan puts the capitulation
+    # ahead of a triggered stage on its out-of-sample record; if this block
+    # ordered them the other way, `do_now` would narrate a short reversal
+    # while `copy_trade` bought calls on the same payload.
+    if stage == "triggered" and not cap:
         stance = "in_trade"
         do_now = (f"The {bias} reversal is live - manage it, don't re-pitch it: "
                   f"target {_fmt(target)}, thesis dies on a 15m close back "

@@ -212,6 +212,7 @@ services:
       MINIBANK_POOL: "10"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}     # Rita, the support agent (read-only, metered)
       FX_URL: http://minibank-fx:8090         # the FX microservice · its own container
+      BROKER_URL: http://minibank-broker:8091 # where orders go · without this BrokerClient falls back to localhost:8091 (itself) and every trade fizzles
       REDIS_URL: redis://minibank-redis:6379  # read-through cache for prices/market data
       JAVA_TOOL_OPTIONS: "-Xmx256m"
     ports:

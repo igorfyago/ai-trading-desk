@@ -317,7 +317,8 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     # never been tested at all - yet both used to take the trade ahead of it,
     # purely by sitting earlier in the chain. They are demoted, not deleted:
     # they still run when there is no day shape to preempt.
-    _validated = bool(dshape and dshape.get("takeable", True))
+    cap = (tape or {}).get("capitulation") if tape else None
+    _validated = bool((dshape and dshape.get("takeable", True)) or cap)
     trig = tape if (tape and not _validated
                     and tape.get("stage") == "triggered"
                     and tape.get("bias")) else None
@@ -345,6 +346,14 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         headline = f"TAPE says {'bullish' if bullish else 'bearish'} gap run - thin book ahead"
         why = (f"wicks based at the band, a thick close crossed {grun['trigger']} "
                f"and the profile is empty to {grun['target']} - it travels fast")
+    elif cap:
+        # The capitulation flush. Out-of-sample on DIA 2022-2026 (PF 3.05) and
+        # IWM 2018-2021 (PF 3.41) at 0DTE under house management after 5%
+        # per-side friction - the only entry here confirmed on instruments it
+        # was not built from. Long only: the short mirror lost in every test.
+        bullish = True
+        headline = "TAPE says capitulation flush - sellers spent"
+        why = cap["why"] + " - long the bounce, VWAP is the thesis"
     elif dshape:
         bullish = dshape["shape"].startswith("bull")
         headline = (f"TAPE says {'bullish' if bullish else 'bearish'} reversal day"

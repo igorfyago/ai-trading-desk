@@ -411,3 +411,45 @@ def test_morning_day_shape_never_fights_the_day(monkeypatch):
     r2 = signals.recommend_trade("SPY", tape_bars=bars)
     if "tape triggered" not in r2["bias"]:
         assert "pullback only" not in r2["bias"]             # agreeing structure runs
+
+
+def test_capitulation_needs_flush_and_oversold(monkeypatch):
+    """Both conditions, or nothing. A heavy bar that is not oversold, or an
+    oversold tape without the flush, is not this setup - each measured worse
+    on its own than the pair."""
+    from common import tape as T
+
+    t0 = 1_750_000_000 - (1_750_000_000 - 4 * 3600) % 86400 + 14 * 3600
+    def series(last_vol, drift):
+        bars, p = [], 600.0
+        for i in range(70):
+            o = p; p -= drift
+            bars.append({"t": t0 + i * 900, "o": o, "h": o + 0.05,
+                         "l": p - 0.05, "c": p, "v": 1000})
+        o = p; p -= 1.2
+        bars.append({"t": t0 + 70 * 900, "o": o, "h": o + 0.05,
+                     "l": p - 0.4, "c": p, "v": last_vol})
+        return bars
+
+    hit = T.capitulation(series(4200, 0.14))          # flush + oversold
+    assert hit and hit["side"] == "long" and hit["vol_x"] >= 3.0
+
+    assert T.capitulation(series(1100, 0.14)) is None   # oversold, no flush
+    assert T.capitulation(series(4200, -0.14)) is None  # flush, not oversold
+
+
+def test_capitulation_is_long_only(monkeypatch):
+    """The short mirror lost money in every test that touched it, so the
+    detector has no bearish branch to accidentally reach."""
+    from common import tape as T
+
+    t0 = 1_750_000_000 - (1_750_000_000 - 4 * 3600) % 86400 + 14 * 3600
+    bars, p = [], 600.0
+    for i in range(70):
+        o = p; p -= 0.14
+        bars.append({"t": t0 + i * 900, "o": o, "h": o + 0.05,
+                     "l": p - 0.05, "c": p, "v": 1000})
+    o = p; p -= 1.2
+    bars.append({"t": t0 + 70 * 900, "o": o, "h": o + 0.05,
+                 "l": p - 0.4, "c": p, "v": 4200})
+    assert T.capitulation(bars)["side"] == "long"

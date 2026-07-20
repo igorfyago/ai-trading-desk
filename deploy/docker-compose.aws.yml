@@ -75,6 +75,11 @@ services:
       ALPACA_KEY_ID: ${ALPACA_KEY_ID:-}
       ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY:-}
       WATCH_SYMBOLS: ${WATCH_SYMBOLS:-SPY,QQQ,IWM}
+      # every trade decision runs through the LangGraph desk brain and the
+      # run record ships to the observatory next door - same box, docker
+      # network, but the token still gates it because obs is public
+      OBS_INGEST_URL: ${OBS_INGEST_URL:-http://observatory:8321/api/desk/runs}
+      OBS_INGEST_TOKEN: ${OBS_INGEST_TOKEN:-}
       X_LIST_HANDLES: ${X_LIST_HANDLES:-}
       # the agents query the LIVE dealer-positioning DB, not the demo SQLite:
       DATABASE_URL: postgres://options:${POSTGRES_PASSWORD}@postgres:5432/options
@@ -99,6 +104,8 @@ services:
       OBS_MONTHLY_USD: ${OBS_MONTHLY_USD:-20.00}
       OBS_COOLDOWN_S: ${OBS_COOLDOWN_S:-20}
       OBS_MAX_CONCURRENT: ${OBS_MAX_CONCURRENT:-3}
+      # unset = the desk-run ingest endpoint rejects everything (fail closed)
+      OBS_INGEST_TOKEN: ${OBS_INGEST_TOKEN:-}
       OBS_SES_FROM: ${OBS_SES_FROM:-}      # unset = alerts degrade to log lines
       # the SES identity lives in eu-west-2 while the box is us-east-1, so the
       # alert region is pinned explicitly rather than inherited from AWS_REGION

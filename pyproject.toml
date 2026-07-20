@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "minitrade: a live options-trading cockpit with a deterministic tape-reading engine and Marcus, its real-time voice analyst."
 requires-python = ">=3.10"
 dependencies = [
-    # The LangChain and LangGraph stack left with the text agents, which now
-    # live in agent-observatory. What stays is the voice desk: langsmith only
-    # so Marcus's tool calls still show up as traces.
+    # LangChain left with the text agents (agent-observatory). LangGraph came
+    # BACK on 2026-07-20 for the desk brain (common/deskgraph.py): the
+    # deterministic pipeline runs as a StateGraph so every live decision is a
+    # traced, observable run - no langchain, no LLM in the graph.
+    "langgraph>=0.2.60",
     "langsmith>=0.3.0",
     "pydantic>=2.7",
     "python-dotenv>=1.0",

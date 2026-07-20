@@ -569,6 +569,39 @@ def _bars_yahoo(symbol: str, interval: str, limit: int) -> list[dict] | None:
     return bars
 
 
+def _live_last(bars: list[dict], step_s: int, live: dict) -> list[dict]:
+    """Stamp the freshest print onto the last bar, whatever the interval.
+
+    CHANGE IN TIME DOES NOT CHANGE THE MARKET PRICE: the last candle's close
+    on 5m, 15m, 45m, 4h and 1D is ONE number — the latest trade. Providers
+    freeze the last bar at whatever moment their series was cut (yahoo's
+    stub, alpaca's official close), so without this every timeframe quoted a
+    different 'price' for the same ticker at the same instant. The live
+    print only ever moves the close (and extends high/low): it never invents
+    a bar, never rewrites history, and never opens a bucket the tape hasn't
+    reached."""
+    if not bars or not live or not live.get("ts"):
+        return bars
+    px = float(live["price"])
+    ts = int(_ts_utc(live["ts"]).timestamp())
+    last = bars[-1]
+    if step_s >= 86400:
+        if ts // 86400 != last["t"] // 86400:
+            # the print is a NEWER session than the last daily bar: append it
+            # through the fold so it lands as today's forming candle, stamped
+            # at the print, opened at today's open if we have it
+            if ts > last["t"]:
+                stub = {"t": ts, "o": px, "h": px, "l": px, "c": px, "v": 0}
+                return _fold_partial_tail(bars + [stub], step_s)
+            return bars
+    else:
+        if ts - last["t"] >= step_s:
+            return bars            # beyond the live bucket: not this bar's print
+    bars[-1] = {**last, "c": px, "h": max(last["h"], px),
+                "l": min(last["l"], px)}
+    return bars
+
+
 def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
     """Candles for the chart: {source, delayed, bars:[{t,o,h,l,c,v}]}."""
     norm = normalize_interval(interval)
@@ -579,13 +612,11 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
     now = time.monotonic()
     with _lock:
         hit = _bars_cache.get(key)
-    # TTL is CAPPED, not proportional. interval/4 meant every timeframe served
-    # a snapshot from a different moment in the past: 15m up to 3.7min stale,
-    # 45m up to 11min, 4h up to a full hour. Flipping between timeframes then
-    # moved the quoted price with no market event behind it, which read as the
-    # desk contradicting itself. One ceiling keeps every chart within a minute
-    # of every other; the per-interval floor still spares the 1D/1W fetches.
-    if hit and now - hit[0] < min(max(20.0, INTERVALS[norm][4] / 4), 60.0):
+    # TTL is SHORT AND UNIFORM. Per-interval TTLs meant every timeframe served
+    # a snapshot from a different moment in the past, so flipping between them
+    # moved the quoted price with no market event behind it. 15s for all:
+    # every chart agrees within one tick of every other.
+    if hit and now - hit[0] < 15.0:
         return hit[1]
     provs = provider_order()
     if INTERVALS[norm][4] < 86400:
@@ -603,28 +634,18 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
             else:
                 continue  # cboe has no candle history
             if bars:
-                if INTERVALS[norm][4] >= 86400 and prov == "alpaca":
-                    # the daily's last candle must be the LIVE session, not a
-                    # frozen official close: alpaca's daily closes at 16:00 and
-                    # yahoo's daily can lag a full session, so after the bell
-                    # the 1D chart disagreed with every intraday timeframe.
-                    # Fold the freshest print in by calendar day — the same
-                    # fold intraday bars get, so the last price is ONE number
-                    # on 5m, 15m, 45m, 4h and 1D alike.
-                    try:
-                        live = _spot_yahoo(sym)
-                    except Exception:
-                        live = None
-                    if live and live.get("ts"):
-                        px = float(live["price"])
-                        ts = int(_ts_utc(live["ts"]).timestamp())
-                        stub = {"t": ts, "o": px, "h": px, "l": px, "c": px, "v": 0}
-                        if bars and ts // 86400 == bars[-1]["t"] // 86400:
-                            bars[-1] = {**bars[-1], "c": px,
-                                        "h": max(bars[-1]["h"], px),
-                                        "l": min(bars[-1]["l"], px)}
-                        elif bars and ts > bars[-1]["t"]:
-                            bars = _fold_partial_tail(bars + [stub], 86400)
+                # THE PRICE IS THE PRICE: stamp the freshest live print onto
+                # the last bar of EVERY interval. Without this, 5m/15m/45m/4h
+                # each closed at whatever second their own fetch ran, and 1D
+                # froze at the official close — flipping timeframes moved the
+                # quoted price with no trade behind it.
+                live = None
+                try:
+                    live = _spot_yahoo(sym)
+                except Exception:
+                    pass
+                if live:
+                    bars = _live_last(bars, INTERVALS[norm][4], live)
                 payload = {"ticker": sym, "interval": norm, "source": src,
                            "delayed": delayed, "bars": bars[-limit:]}
                 with _lock:

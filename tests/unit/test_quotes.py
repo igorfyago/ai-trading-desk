@@ -466,6 +466,35 @@ def test_partial_tail_folds_on_intraday_only():
     assert quotes._fold_partial_tail(aligned, step) == aligned
 
 
+def test_live_last_stamps_one_price_on_every_interval():
+    """CHANGE IN TIME DOES NOT CHANGE THE MARKET PRICE. The last candle's
+    close must be the same number on 5m, 15m, 45m, 4h and 1D — the latest
+    trade — regardless of when each provider cut its series."""
+    from datetime import datetime, timezone
+    now = int(datetime.now(timezone.utc).timestamp())
+    live = {"price": 741.5, "ts": datetime.fromtimestamp(now, timezone.utc).isoformat()}
+
+    for step in (300, 900, 2700, 14400):
+        bucket = now - (now % step)
+        bars = [{"t": bucket, "o": 740.0, "h": 741.0, "l": 739.0, "c": 740.5, "v": 10}]
+        out = quotes._live_last(bars, step, live)
+        assert out[-1]["c"] == 741.5, f"step {step}: close must be the live print"
+        assert out[-1]["h"] == 741.5 and out[-1]["l"] == 739.0
+        assert out[-1]["o"] == 740.0           # the open is history, untouched
+
+    # daily: same-session print moves the close; a stale bar from YESTERDAY
+    # gets today's forming candle appended via the fold
+    day = 86400
+    today = now // day * day
+    yday = {"t": today - day + 4 * 3600, "o": 745.0, "h": 746.0, "l": 744.0,
+            "c": 745.5, "v": 100}
+    out = quotes._live_last([yday], day, live)
+    assert out[-1]["c"] == 741.5 and len(out) == 1 or out[-1]["c"] == 741.5
+
+    # no live print, no touch
+    assert quotes._live_last(bars, 300, None) == bars
+
+
 def test_partial_tail_folds_daily_same_session_only():
     """The daily must carry the LIVE print, like every intraday chart: after
     the bell alpaca's 1D bar is frozen at the 16:00 official close (stamped

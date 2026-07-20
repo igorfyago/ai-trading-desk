@@ -735,11 +735,13 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
         #              at any age. Alpaca's SIP close stamped at the session
         #              boundary is 20h old by Saturday night and still wrong,
         #              so an age ceiling here would freeze SPY at the close;
-        #   frozen   — real time but 30min < age < 12h. Past 12h with a REAL
-        #              TIME print the market is genuinely shut and nothing
-        #              anywhere is fresher, so don't ask.
+        #   frozen   — real time but 60s < age < 12h. The singleton law:
+        #              the watchlist shows the SAME live print as every
+        #              chart, and a minute-old unconfirmed row is already a
+        #              disagreement. Past 12h with a REAL-TIME print the
+        #              market is genuinely shut and nothing is fresher.
         # Volume stays bounded by the budget, not by the age window:
-        # >=300s between rescues per symbol, <=25 rescues per call.
+        # >=60s between rescues per symbol, <=25 rescues per call.
         now_m = time.monotonic()
         rescued = 0
         for s in syms:
@@ -751,10 +753,10 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
             missing = best is None
             if not missing:
                 superseded = bool(best.get("delayed")) or (
-                    30 * 60 < _age_s(best.get("ts")) < 12 * 3600)
+                    60 < _age_s(best.get("ts")) < 12 * 3600)
                 if not superseded:
                     continue
-            if rescued >= 25 or (not missing and now_m - _rescue_at.get(s, -1e9) < 300):
+            if rescued >= 25 or (not missing and now_m - _rescue_at.get(s, -1e9) < 60):
                 continue
             _rescue_at[s] = now_m
             rescued += 1

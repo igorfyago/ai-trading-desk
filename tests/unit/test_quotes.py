@@ -363,7 +363,7 @@ def test_watch_rows_never_regress_to_an_older_print(monkeypatch):
     monkeypatch.setenv("ALPACA_KEY_ID", "k")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
     now = datetime.now(timezone.utc)
-    fresh = (now - timedelta(minutes=1)).isoformat()
+    fresh = (now - timedelta(seconds=30)).isoformat()
     frozen = (now - timedelta(hours=4)).isoformat()
     monkeypatch.setattr(quotes, "_closes", lambda s: (330.0, 333.25))
     quotes._watch_cache = None

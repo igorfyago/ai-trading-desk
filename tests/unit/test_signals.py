@@ -585,3 +585,34 @@ def test_location_box_never_scores_the_opposite_side_green(monkeypatch):
     r = signals.recommend_trade("SPY", tape_bars=_flat_zero_volume_bars())
     loc = [b for b in r["confluence"]["boxes"] if b["name"] == "location"][0]
     assert loc["state"] == "gray", loc
+
+
+def test_the_stated_condition_is_never_already_satisfied(monkeypatch):
+    """Igor, on a live call: 'why are you recommending me 746.48, like if it
+    has to cross it, if we have already crossed it?' - spot was 746.53. A
+    condition the price has already met is not a condition, and being told to
+    wait for it twice is what destroyed the call. Whatever level the wait
+    message names must sit on the far side of spot."""
+    import re
+
+    real = market.latest_snapshot
+
+    for score in (-40, 40):
+        def fake(ticker, as_of=None, _s=score):
+            snap = real(ticker)
+            snap["regime"] = "negative_gamma"
+            snap["signal_score"] = _s
+            snap["gamma_flip"] = None
+            return snap
+
+        monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+        r = signals.recommend_trade("SPY", tape_bars=_flat_zero_volume_bars())
+        cp = r["execution"]["contract_plan"]
+        assert cp["contracts_now"] == 0
+        nums = [float(n) for n in re.findall(r"\d+\.\d+", cp["add_trigger"] or "")]
+        spot = r["spot"]
+        for n in nums:
+            if r["execution"]["kind"] == "call":
+                assert n > spot, f"call waits on {n} but spot is already {spot}"
+            else:
+                assert n < spot, f"put waits on {n} but spot is already {spot}"

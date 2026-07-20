@@ -678,8 +678,20 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
     # armed". Structure still gets quoted in full; it just cannot fill.
     if not tape_armed(tape):
         plan, now_usd, later_usd = "plan", 0, budget
-        trigger = (f"no fill until {spoken} trades {thru} "
-                   f"{_at(cont, 'the entry level')} - this is the plan, not an order")
+        # STATE THE CONDITION, ON THE RIGHT SIDE OF PRICE. Quoting a static
+        # entry level here produced "wait for SPY to cross 746.48" while SPY
+        # was already at 746.53 - a condition the caller had to be told twice
+        # was not a condition. The tape's own up/down lines are built from
+        # levels strictly beyond spot and within reach, so a line taken from
+        # there cannot already be satisfied when it is spoken.
+        act = (tape or {}).get("action") or {}
+        line = act.get("up") if execution["kind"] == "call" else act.get("down")
+        if line and line.get("level") is not None:
+            trigger = (f"nothing arms yet - {spoken} has to reach {line['level']:g}, "
+                       f"and then: {line['means']}. This is the plan, not an order")
+        else:
+            trigger = ("nothing arms yet and there is no line within reach - "
+                       "this is the plan, not an order")
         why = ("the tape has not armed a setup - this is the structure quoted so "
                "you are ready, not an order")
     elif verdict == "full_confluence":

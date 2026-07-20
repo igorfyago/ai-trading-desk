@@ -113,12 +113,21 @@ def session_vwap(bars: list[dict]) -> list[dict]:
         if cum_v > _TINY:
             vwap = cum_pv / cum_v
             var = max(cum_p2v / cum_v - vwap * vwap, 0.0)
+            degenerate = False
         else:
-            vwap, var = p, 0.0   # zero-volume session start: degenerate bands
+            # NOT a VWAP. With no volume there is no volume-weighted anything,
+            # and hlc3 is just this bar's price wearing a level's name. Left in
+            # so the bands stay numeric, but FLAGGED: a caller that quotes this
+            # as "the session VWAP at 747.01" is quoting spot back at the
+            # caller, and a gate set there is crossed within seconds of being
+            # spoken. That is exactly what happened on a live call.
+            vwap, var = p, 0.0
+            degenerate = True
         sig = math.sqrt(var)
         out.append({"vwap": vwap, "sigma": sig,
                     "u1": vwap + sig, "d1": vwap - sig,
-                    "u2": vwap + 2 * sig, "d2": vwap - 2 * sig})
+                    "u2": vwap + 2 * sig, "d2": vwap - 2 * sig,
+                    "degenerate": degenerate})
     return out
 
 
@@ -700,6 +709,17 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         else:
             down = _line(gap["trigger"], f"a THICK 15m close below it starts the run - thin book to {gap['target']}")
             up = _line(band["u1"], "losing the basing zone kills the idea")
+    elif band["degenerate"]:
+        # No volume in this session, so there is no VWAP and no bands. Say that
+        # instead of pointing at spot: quoting a placeholder as "the line" is
+        # what produced a gate the price had already crossed when it was
+        # spoken. The free intraday feed carries no extended-hours volume, so
+        # this is the normal state before the open, not a fault.
+        stance = "wait"
+        do_now = (f"No session volume yet at {spot:.2f} - no VWAP, no bands, so "
+                  "no band setup can be judged. Wait for the open.")
+        up = _line(wall_above, "the first level above, from the volume profile")
+        down = _line(wall_below, "the first level below, from the volume profile")
     else:
         stance = "wait"
         do_now = f"No setup armed at {spot:.2f} - nothing to do; watch the lines."
@@ -722,6 +742,12 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         "bands": {"u2": round(band["u2"], 2), "u1": round(band["u1"], 2),
                   "vwap": round(band["vwap"], 2), "d1": round(band["d1"], 2),
                   "d2": round(band["d2"], 2)},
+        # Are the bands MEASURED, or a zero-volume placeholder? When the feed
+        # serves no volume every band collapses onto spot, so "a close above
+        # the session VWAP" becomes "a close above the current price" - an
+        # unreachable gate that reads like a real one. Consumers must not
+        # quote a level, arm a setup or derive a trigger when this is False.
+        "bands_ok": not band["degenerate"],
         "spot": round(spot, 4),
         "vwap": round(band["vwap"], 4),
         "day_shape": ds,

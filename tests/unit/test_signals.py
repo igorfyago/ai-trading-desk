@@ -453,3 +453,135 @@ def test_capitulation_is_long_only(monkeypatch):
     bars.append({"t": t0 + 70 * 900, "o": o, "h": o + 0.05,
                  "l": p - 0.4, "c": p, "v": 4200})
     assert T.capitulation(bars)["side"] == "long"
+
+
+# --------------------------------------------------------------- armed gate
+# Three live calls died on the same shape: the caller was read a fillable
+# order, challenged it, and got "no setup armed" out of the SAME payload.
+# Each fix so far patched whichever ladder spoke last. These pin the rule
+# itself: one authority, and every order-shaped field derives from it.
+
+def _flat_zero_volume_bars(n=80, px=746.0):
+    """A pre-market tape: real prices, NO volume. Yahoo genuinely returns 0
+    volume for every extended-hours bar, so this is the normal state before
+    the open, not a synthetic edge case."""
+    t0 = 20_000 * 86400 + 4 * 3600 + 34_200
+    bars, p = [], px
+    for i in range(n):
+        o = p
+        p = px + (0.10 if i % 2 else -0.08)
+        bars.append({"t": t0 + i * 900, "o": o, "h": max(o, p) + 0.05,
+                     "l": min(o, p) - 0.05, "c": p, "v": 0})
+    return bars
+
+
+def test_zero_volume_session_reports_itself_instead_of_becoming_price():
+    """With no volume there is no VWAP. The old code silently substituted
+    hlc3, so 'the session VWAP at 747.01' WAS the last bar's close: a gate
+    the price crosses seconds after it is spoken, which is exactly what a
+    caller was told to wait for on a live call."""
+    from common import tape as T
+
+    bars = _flat_zero_volume_bars()
+    read = T.read_tape(bars, ticker="SPY")
+    assert read["bands_ok"] is False
+    # the placeholder is just this bar's own hlc3 - no averaging happened at
+    # all. On the real feed the last pre-market bar is a one-tick sliver
+    # (o==h==l==c), so this lands exactly on spot and reads like a level.
+    b = bars[-1]
+    assert read["vwap"] == round((b["h"] + b["l"] + b["c"]) / 3.0, 4)
+    assert read["bands"]["u1"] == read["bands"]["d1"] == read["bands"]["vwap"]
+    assert (read["action"] or {})["stance"] == "wait"
+    assert "no VWAP" in read["action"]["do_now"]  # ...and the tape says so
+    assert read["stage"] == "none"               # nothing can arm without bands
+
+    # and a real session still measures a VWAP that is NOT merely spot
+    ok = T.read_tape(_double_bottom_day(), ticker="SPY")
+    assert ok["bands_ok"] is True
+
+
+def test_unarmed_tape_cannot_produce_a_fillable_order(monkeypatch):
+    """THE regression. GEX has a sign on nearly every session, so structure
+    alone used to hand over a real clip on demand regardless of the tape."""
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40          # structure fully committed...
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    bars = _flat_zero_volume_bars()          # ...but the tape has nothing
+    r = signals.recommend_trade("SPY", tape_bars=bars)
+
+    cp = r["execution"]["contract_plan"]
+    assert cp["plan"] == "plan"
+    assert cp["now_usd"] == 0 and cp["contracts_now"] == 0
+    # the copy line is the caller's whole instruction: it must not be an order
+    assert r["copy_trade"].startswith("Nothing on yet")
+    assert "Buy " not in r["copy_trade"]
+
+
+def test_armed_is_the_only_authority_no_field_disagrees(monkeypatch):
+    """A model handed this payload must not be ABLE to assemble an order:
+    suppressing copy_trade alone left execution/legs/plain_english still
+    speaking one, which is how Marcus re-acquired a trade after admitting
+    nothing was armed."""
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = 40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    r = signals.recommend_trade("SPY", tape_bars=_flat_zero_volume_bars())
+    assert signals.tape_armed(r.get("tape")) is False
+    cp = r["execution"]["contract_plan"]
+    assert cp["contracts_now"] == 0
+    # every field that could imply a fill agrees with the gate
+    assert cp["now_usd"] == 0
+    assert "not an order" in (cp["add_trigger"] or "")
+
+
+def test_degenerate_vwap_is_never_named_as_the_thesis(monkeypatch):
+    """Naming the placeholder 'the session VWAP' is what produced an add
+    trigger the price had already crossed when it was spoken."""
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    r = signals.recommend_trade("SPY", tape_bars=_flat_zero_volume_bars())
+    x = r["execution"]
+    assert x["thesis_label"] != "the session VWAP"
+    # and the thesis is a real level, not a mirror of spot
+    assert x["thesis_reference"] != round(r["spot"], 2)
+
+
+def test_location_box_never_scores_the_opposite_side_green(monkeypatch):
+    """The box fell back to the other side's line and scored it green, so a
+    long was handed the bearish line as its entry and the spoken explanation
+    was false when the caller asked which level it meant."""
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    r = signals.recommend_trade("SPY", tape_bars=_flat_zero_volume_bars())
+    loc = [b for b in r["confluence"]["boxes"] if b["name"] == "location"][0]
+    assert loc["state"] == "gray", loc

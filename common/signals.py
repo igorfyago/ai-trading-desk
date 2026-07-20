@@ -393,7 +393,11 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
                "lean " + ("long from the low end" if bullish else "short from the high end"))
     # the thesis line: the flip when it is a real level, else the wall the
     # trade leans on — always a DISTINCT price, never a mirror of spot
-    if trig or dshape or grun:
+    # A degenerate VWAP is spot, so leaning the thesis on it produces a line
+    # the price has already crossed by the time it is spoken. Fall through to
+    # a real structural level instead of naming the current price.
+    tape_levels_ok = bool(tape) and tape.get("bands_ok", True)
+    if (trig or dshape or grun) and tape_levels_ok:
         thesis_level, thesis_label = tape["vwap"], "the session VWAP"
     elif flip_ok:
         thesis_level, thesis_label = flip, "the tipping point"
@@ -409,7 +413,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
     reach = market.expected_move(spot, snap["atm_iv"], min(dte, 1.0)) * 1.2
     if not trig and not dshape and not grun and abs(thesis_level - spot) > reach:
         context_level, context_label = thesis_level, thesis_label
-        if tape and tape.get("vwap"):
+        if tape and tape.get("vwap") and tape_levels_ok:
             thesis_level, thesis_label = tape["vwap"], "the session VWAP"
         else:
             near = min((atm, put_wall, call_wall), key=lambda v: abs(v - spot))
@@ -562,9 +566,12 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
 
     # 5. Location: an actionable line within reach on this side
     act = tape.get("action") or {}
-    line = act.get("down") if side < 0 else act.get("up")
-    entry_line = line or (act.get("up") if side < 0 else act.get("down"))
-    if entry_line:
+    # ON THIS SIDE, or not at all. The fallback here used to reach for the
+    # OPPOSITE side's line and score it green, so a long was handed the
+    # bearish line as its "entry line" - inflating the green count and making
+    # the spoken explanation false when a caller asked which level it meant.
+    entry_line = act.get("down") if side < 0 else act.get("up")
+    if entry_line and entry_line.get("level") is not None and tape.get("bands_ok", True):
         s5 = box("location", "green",
                  f"entry line {entry_line['level']} within reach ({entry_line['dist']:+})")
     else:
@@ -578,12 +585,43 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
         verdict = "full_confluence"
     elif reds >= 2 or (reds and not support and s1 != "green"):
         verdict = "wait"
-    elif support or s1 == "green" or s3 == "green":
+    elif support or s3 == "green":
+        # s1 (GEX structure) deliberately dropped from this line. Dealer
+        # positioning has a sign nearly every session, so "structure is green"
+        # alone was reaching a half-clip verdict on demand, all day, with no
+        # tape behind it. Structure now needs a checklist or a tape box to
+        # agree before anything is fillable.
         verdict = "partial"
     else:
         verdict = "wait"
     return {"side": "long" if side > 0 else "short", "verdict": verdict,
             "greens": states.count("green"), "reds": reds, "boxes": boxes}
+
+
+def tape_armed(tape: dict | None) -> bool:
+    """Is there something to DO right now, or only a plan to be ready for?
+
+    THE single authority on that question. Sizing, the copy line, the legs and
+    the prose are all derived from this one call, because the alternative has
+    now failed on a live call three times: each field decided for itself, the
+    caller was read a fillable order ("buy XSP 748c, 4 contracts"), challenged
+    it, and got "no setup armed" from the very same payload. Patching whichever
+    ladder spoke last just moves the disagreement to the next field.
+
+    GEX structure alone is deliberately NOT enough. Dealer positioning has a
+    sign on nearly every session, so treating it as armed makes a live order
+    available on demand, all day, regardless of the tape.
+    """
+    if not tape:
+        return False
+    if not tape.get("bands_ok", True):
+        return False              # no measurable levels: nothing can arm
+    if tape.get("capitulation"):
+        return True
+    ds = tape.get("day_shape")
+    if ds and ds.get("takeable"):
+        return True
+    return ((tape.get("action") or {}).get("stance")) in ("enter", "in_trade")
 
 
 def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float,
@@ -633,9 +671,18 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
     def _at(level, fallback: str) -> str:
         """A level, or the honest prose when there genuinely isn't one."""
         return f"{level:.2f}" if isinstance(level, (int, float)) else fallback
-    # CONFLUENCE DRIVES SIZE: the board's verdict outranks the old
-    # regime/score heuristic whenever it is available
-    if verdict == "full_confluence":
+    # THE TAPE DECIDES WHETHER ANYTHING FILLS AT ALL. This gate sits AHEAD of
+    # every branch below, including the regime ones, because those branches
+    # size off GEX alone - and GEX has a sign nearly every session, which is
+    # how a caller got a 4-contract order while the same read said "no setup
+    # armed". Structure still gets quoted in full; it just cannot fill.
+    if not tape_armed(tape):
+        plan, now_usd, later_usd = "plan", 0, budget
+        trigger = (f"no fill until {spoken} trades {thru} "
+                   f"{_at(cont, 'the entry level')} - this is the plan, not an order")
+        why = ("the tape has not armed a setup - this is the structure quoted so "
+               "you are ready, not an order")
+    elif verdict == "full_confluence":
         plan, now_usd, later_usd = "full clip", budget, 0
         trigger = None
         why = "every box on the board is green - structure and the checklist agree, full clip"

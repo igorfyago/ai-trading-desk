@@ -87,6 +87,11 @@ bank.{$BASE_DOMAIN} {
 # enforcement decision has to be made. A path prefix would have exposed the
 # same hole — this option just makes the exposure a deliberate act.
 broker.{$BASE_DOMAIN} {
+    # The broker serves /portfolio and nothing at /, so the bare hostname
+    # answered 404 to anyone who typed it or followed a shared link. The
+    # subdomain exists FOR the portfolio, so it may as well say so.
+    redir / /portfolio permanent
+
     reverse_proxy minibank-broker:8091
 }
 

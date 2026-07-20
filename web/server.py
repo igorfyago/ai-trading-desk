@@ -897,16 +897,21 @@ async def write_calllog(turn: VoiceTurn):
 
 
 @app.get("/api/watch/{ticker}")
-async def watch_setup(ticker: str):
-    """Is a fresh entry live RIGHT NOW? Polled by an open voice call.
+async def watch_setup(ticker: str, kind: str = "", strike: float = 0,
+                      entry: float = 0, expiry: str = "", add: float = 0):
+    """What should Marcus SAY unprompted right now? Polled by an open call.
 
-    Marcus sits silent on a long call the way a trader friend does, then
-    speaks when something actually prints. This is the eye: it reads the tape
-    and returns a FINGERPRINT of whatever setup is live, so the client can
-    tell "still the same flush I already pitched" from "a new one just fired"
-    and only interrupt for the second.
+    Two layers. The tape layer needs no context: a fresh capitulation or a
+    takeable reversal day is worth breaking silence for on its own. The pitch
+    layer needs the trade Marcus last read out (kind/strike/entry/expiry, and
+    the add level when the clip was split) - the client passes it back, and
+    the desk answers with what CHANGED: the trim printed, the runner
+    round-tripped, the +400% ride finished, the add level traded, or the tape
+    armed the other way. Each event carries a fingerprint so it is spoken
+    exactly once; the client keeps the seen-set.
 
-    Cheap on purpose - it runs every polling tick for every open call.
+    Cheap on purpose - it runs every polling tick for every open call, and
+    everything it reads (bars, snapshot) is behind the shared 60s caches.
     """
     from common import market, signals, tape as tape_mod
 
@@ -916,29 +921,57 @@ async def watch_setup(ticker: str):
     except Exception:
         read = None
     if not read:
-        return {"signal": None}
+        return {"signal": None, "events": []}
+
+    events: list[dict] = []
+    tkr = ticker.upper()
 
     cap = read.get("capitulation")
     ds = read.get("day_shape")
+    setup = None
     if cap:
-        kind, why, side = "capitulation", cap["why"], "long"
+        setup = {"signal": "capitulation", "side": "long", "why": cap["why"]}
     elif ds and ds.get("takeable"):
-        kind = "reversal_day"
         side = "long" if ds["shape"].startswith("bull") else "short"
-        why = (f"double {'bottom' if side == 'long' else 'top'} with a "
-               f"{ds['capitulation_x']}x volume flush, VWAP "
-               f"{'reclaimed' if side == 'long' else 'lost'}")
-    else:
-        return {"signal": None}
+        setup = {"signal": "reversal_day", "side": side,
+                 "why": (f"double {'bottom' if side == 'long' else 'top'} with a "
+                         f"{ds['capitulation_x']}x volume flush, VWAP "
+                         f"{'reclaimed' if side == 'long' else 'lost'}")}
+    if setup:
+        # the fingerprint pins the SETUP, not the moment: a flush that stays
+        # live for three bars must not be pitched three times
+        events.append({"event": "new_setup", "why": setup["why"], "side": setup["side"],
+                       "signal": setup["signal"],
+                       "fingerprint": f"{tkr}:{setup['signal']}:{read.get('bar_t') or ''}"})
 
-    # the fingerprint pins the SETUP, not the moment: a flush that stays live
-    # for three bars must not be pitched three times. Bar timestamp + kind is
-    # enough, since one setup per bar per ticker is the most that can fire.
-    bar_t = read.get("bar_t") or ""
-    return {"signal": kind, "side": side, "why": why,
-            "ticker": ticker.upper(),
-            "spot": read.get("spot"),
-            "fingerprint": f"{ticker.upper()}:{kind}:{bar_t}"}
+    if kind in ("call", "put") and strike > 0 and entry > 0:
+        try:
+            rec = signals.recommend_trade(ticker)
+            if "error" in rec:
+                rec = {}
+            mark = None
+            snap = market.latest_snapshot(ticker)
+            if snap and expiry:
+                spot_now = rec.get("spot") or read.get("spot")
+                mark = market.black_scholes(
+                    spot_now, strike, market.days_to(expiry),
+                    snap["atm_iv"], kind)["price"]
+            pitch = {"ticker": tkr, "kind": kind, "strike": strike,
+                     "entry": entry, "expiry": expiry,
+                     "add_level": add if add > 0 else None}
+            events.extend(signals.pitch_events(rec, read, pitch, mark))
+        except Exception:
+            pass          # the pitch layer is a bonus; the tape layer stands
+
+    out: dict = {"ticker": tkr, "spot": read.get("spot"), "events": events}
+    # legacy top-level shape for a client from before this deploy: an open
+    # call keeps its heartbeat through the rollout instead of going deaf
+    if setup:
+        out.update({"signal": setup["signal"], "side": setup["side"],
+                    "why": setup["why"], "fingerprint": events[0]["fingerprint"]})
+    else:
+        out["signal"] = None
+    return out
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

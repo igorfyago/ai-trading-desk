@@ -23,22 +23,59 @@ let voice = { live: false, textOnly: false, responseActive: false, pendingRespon
 
 /* ------------------------------------------------- the desk heartbeat ----
    A long call with a trader friend is mostly silence. He is not waiting to
-   be asked - he is watching, and when something prints he says so. That is
-   the whole feature: Marcus stays quiet, keeps one eye on the tape, and
-   speaks the moment a setup actually fires.
+   be asked - he is watching, and when something CHANGES he says so: a fresh
+   setup fires, the trim prints on the trade he pitched, the runner
+   round-trips to entry, the +400% ride completes, the add level trades, or
+   the tape arms the OTHER way and the pitch is dead.
 
-   The fingerprint is what keeps him from being a nuisance. A flush stays
-   live for several bars, so without it he would pitch the same trade three
-   times running. He speaks once per setup, then goes quiet again. */
+   The seen-set is what keeps him from being a nuisance: every event carries
+   a fingerprint and is spoken exactly once. The pitch (what he last read
+   out) is captured from the trade_recommendation payload and passed back on
+   every beat, so the desk can mark HIS trade, not a hypothetical one. */
 const BEAT_MS = 20_000;
-let beat = { timer: null, last: null, ticker: "SPY" };
+let beat = { timer: null, seen: new Set(), ticker: "SPY", pitch: null };
+
+// what breaks silence first when several things are true at once: a dead
+// premise outranks profit-taking, and both outrank a brand-new idea
+const BEAT_RANK = ["reversal", "runner_target", "runner_stop", "trim", "add", "new_setup"];
+
+const BEAT_SAY = {
+  new_setup: (e) => `DESK ALERT - ${e.signal} just fired on ${beat.ticker}: ${e.why}. `
+    + `Break in now, the way you would on a long call: one short human opener, `
+    + `then the trade. Call trade_recommendation for the exact contract, and `
+    + `draw_levels in the same turn.`,
+  reversal: (e) => `DESK ALERT - the premise of the trade you pitched is GONE: ${e.why}. `
+    + `Break in now and say so plainly - if they're in it, this is where it comes `
+    + `off. Then call trade_recommendation and pitch the new side.`,
+  trim: (e) => `DESK ALERT - trim level: ${e.why}. Break in: half comes off here, `
+    + `that's the rule. Then the runner is free - stopped at entry or it rides `
+    + `to +400%. Say the two numbers, then stop.`,
+  runner_stop: (e) => `DESK ALERT - runner round-trip: ${e.why}. Break in: the rest `
+    + `comes off at entry, flat on the runner, the trim already paid. One line.`,
+  runner_target: (e) => `DESK ALERT - the ride is done: ${e.why}. Break in: take the `
+    + `rest off, that's the whole trade, congratulate them like a human would.`,
+  add: (e) => `DESK ALERT - the add level traded: ${e.why}. Break in: the second `
+    + `half of the clip goes on here if they took the first. Say the level and `
+    + `the size, then stop.`,
+};
+
+function beatQuery() {
+  const p = beat.pitch;
+  if (!p) return "";
+  const q = new URLSearchParams({ kind: p.kind, strike: p.strike, entry: p.entry,
+                                  expiry: p.expiry || "" });
+  if (p.add_level) q.set("add", p.add_level);
+  return "?" + q.toString();
+}
 
 function startHeartbeat(ticker) {
   stopHeartbeat();
   beat.ticker = (ticker || "SPY").toUpperCase();
-  beat.last = null;                       // whatever is live at pickup is old news
+  beat.seen = new Set();
+  beat.pitch = null;
+  // whatever is already true at pickup is old news, not an opening ambush
   fetch(`/api/watch/${beat.ticker}`).then(r => r.json())
-    .then(d => { beat.last = d.fingerprint || null; })
+    .then(d => (d.events || []).forEach(e => beat.seen.add(e.fingerprint)))
     .catch(() => {});
   beat.timer = setInterval(checkTape, BEAT_MS);
 }
@@ -51,13 +88,21 @@ function stopHeartbeat() {
 async function checkTape() {
   if (!voice.live || !voice.dc || voice.dc.readyState !== "open") return;
   if (voice.responseActive) return;       // never cut across him mid-sentence
+  if (voice.userTalking) return;          // and never across the CALLER either
   let d;
   try {
-    d = await fetch(`/api/watch/${beat.ticker}`).then(r => r.json());
+    d = await fetch(`/api/watch/${beat.ticker}${beatQuery()}`).then(r => r.json());
   } catch { return; }
-  if (!d || !d.signal || !d.fingerprint) return;
-  if (d.fingerprint === beat.last) return;   // same setup he already pitched
-  beat.last = d.fingerprint;
+  const fresh = (d && d.events || []).filter(e => e.fingerprint && !beat.seen.has(e.fingerprint))
+    // a round-trip to entry only MEANS anything after the trim: before it the
+    // doctrine is size-for-zero, sit still - so the stop stays unspoken until
+    // the trim for the same contract has been called out
+    .filter(e => e.event !== "runner_stop"
+      || [...beat.seen].some(f => f.includes(":trim:") && f.endsWith(e.fingerprint.split(":runner_stop:")[1])));
+  if (!fresh.length) return;
+  fresh.sort((a, b) => BEAT_RANK.indexOf(a.event) - BEAT_RANK.indexOf(b.event));
+  const e = fresh[0];                     // ONE interruption per beat, the loudest
+  beat.seen.add(e.fingerprint);
 
   // Framed as the desk speaking to him, not as the caller asking. A user-role
   // item would read as though the caller said it, and he would answer a
@@ -66,14 +111,10 @@ async function checkTape() {
     voice.dc.send(JSON.stringify({
       type: "conversation.item.create",
       item: { type: "message", role: "system", content: [{ type: "input_text",
-        text: `DESK ALERT - ${d.signal} just fired on ${d.ticker} at `
-            + `${d.spot}: ${d.why}. Break in now, the way you would on a long `
-            + `call: one short human opener, then the trade. Call `
-            + `trade_recommendation for the exact contract, and draw_levels `
-            + `in the same turn.` }] },
+        text: (BEAT_SAY[e.event] || BEAT_SAY.new_setup)(e) }] },
     }));
     requestResponse();
-    divider(`desk alert · ${d.signal} on ${d.ticker}`);
+    divider(`desk alert · ${e.event.replace("_", " ")} on ${beat.ticker}`);
   } catch { /* channel closing */ }
 }
 
@@ -530,12 +571,14 @@ async function handleVoiceEvent(ev) {
     }
     case "input_audio_buffer.speech_started": {
       voice.speechStartedAt = Date.now();     // a turn began (real or the room)
+      voice.userTalking = true;               // the heartbeat holds its tongue
       // talking over Marcus mid-sentence is the single loudest signal that a
       // turn was too long or too slow, so it rides along with that turn
       if (turn && voice.responseActive) turn.bargeIn = true;
       break;
     }
     case "input_audio_buffer.speech_stopped": {
+      voice.userTalking = false;
       // THE moment the caller starts waiting, and the only honest start for
       // dead air. Measuring from transcription.completed logged NEGATIVE waits
       // (-2441ms), because transcription lands well after Marcus has already
@@ -711,6 +754,14 @@ function tradeStickyFromPayload(raw) {
     if (!x || !x.strike) return;
     const px = Number(x.entry_option_price_est);
     const cp = x.contract_plan || {};
+    // THE PITCH: what the heartbeat marks from here on. Only a FILLABLE call
+    // replaces it - a later "plan, nothing on yet" answer must not blind the
+    // desk to a position the caller may already be holding from the last
+    // fillable one. Analysis units (SPY strike), same as the engine prices in.
+    if (cp.contracts_now > 0 && isFinite(px) && px > 0) {
+      beat.pitch = { kind: x.kind, strike: Number(x.strike), entry: px,
+                     expiry: x.expiry || "", add_level: cp.add_level || null };
+    }
     const name = cp.contract_ticker && cp.contract
       ? `${cp.contract_ticker} ${cp.contract}`          // the desk notation: "XSP 748p"
       : `${p.ticker} ${Number(x.strike)}${x.kind[0]}`;

@@ -709,3 +709,89 @@ def test_add_level_walks_past_a_band_price_has_already_taken():
                                        tape=_armed_tape(u1=748.0, d1=746.80, d2=745.10))
     assert "745.1" in cp3["add_trigger"], cp3["add_trigger"]
     assert "746.8" not in cp3["add_trigger"]
+
+
+# ------------------------------------------------------------ pitch events
+# The heartbeat's brain: what Marcus says unprompted about the trade he
+# already pitched. Pure function, so every threshold is pinned here.
+
+def _pitch(kind="call", strike=746.0, entry=2.00, expiry="2026-07-21", add=747.5):
+    return {"ticker": "SPY", "kind": kind, "strike": strike, "entry": entry,
+            "expiry": expiry, "add_level": add}
+
+
+def _rec(kind="call", armed=False, spot=746.0):
+    return {"ticker": "SPY", "spot": spot,
+            "execution": {"kind": kind},
+            "tape": {"bands_ok": True, "capitulation": {"side": "long"} if armed else None,
+                     "action": {"stance": "enter" if armed else "wait"}}}
+
+
+def test_pitch_events_thresholds_are_the_house_rules():
+    """trim at exactly +50%, target at exactly +400%, stop at entry - the
+    numbers the whole doctrine hangs on, so off-by-a-cent matters."""
+    read = {"bar_t": 1750073400, "spot": 746.0}
+    ev = lambda mark: {e["event"] for e in
+                       signals.pitch_events(_rec(), read, _pitch(add=None), mark)}
+    assert ev(2.99) == set()                 # +49.5%: nothing yet
+    assert ev(3.00) == {"trim"}              # +50% exactly: half off
+    assert ev(9.99) == {"trim"}              # riding
+    assert ev(10.00) == {"runner_target"}    # +400% exactly: the whole trade
+    assert ev(2.00) == {"runner_stop"}       # back at entry
+    assert ev(1.20) == {"runner_stop"}       # below entry: same event, once
+    assert ev(None) == set()                 # no mark, no fiction
+
+
+def test_pitch_events_add_fires_on_the_right_side_only():
+    read = {"bar_t": 1, "spot": 746.0}
+    # call: add above; spot below it -> silent, spot through it -> fires
+    assert signals.pitch_events(_rec(spot=747.4), read, _pitch(add=747.5), None) == []
+    (e,) = signals.pitch_events(_rec(spot=747.6), read, _pitch(add=747.5), None)
+    assert e["event"] == "add" and "747.5" in e["why"]
+    # put mirrors
+    (e2,) = signals.pitch_events(_rec(kind="put", spot=744.0), read,
+                                 _pitch(kind="put", add=744.5), None)
+    assert e2["event"] == "add"
+
+
+def test_pitch_reversal_needs_an_armed_tape_not_a_score_wobble():
+    """GEX flipping sign is weather; Marcus interrupting the caller is an
+    event. The pitched side dying is only worth breaking silence for when the
+    tape actually ARMED the other way."""
+    read = {"bar_t": 42, "spot": 746.0}
+    # engine now says put, but nothing armed: silence
+    assert signals.pitch_events(_rec(kind="put", armed=False), read,
+                                _pitch(add=None), None) == []
+    (e,) = signals.pitch_events(_rec(kind="put", armed=True), read,
+                                _pitch(add=None), None)
+    assert e["event"] == "reversal"
+    assert e["fingerprint"] == "SPY:reversal:put:42"   # pinned to the arming bar
+    # same side armed: that is agreement, not a reversal
+    assert signals.pitch_events(_rec(kind="call", armed=True), read,
+                                _pitch(add=None), None) == []
+
+
+def test_pitch_event_fingerprints_fire_once_per_trade():
+    """trim/stop/target/add are keyed to the CONTRACT, so they cannot nag; a
+    reversal is keyed to the bar that armed it, so a later, genuinely new
+    reversal speaks again."""
+    read = {"bar_t": 100, "spot": 748.0}
+    a = signals.pitch_events(_rec(), read, _pitch(), 3.5)
+    b = signals.pitch_events(_rec(), read, _pitch(), 3.7)   # still over the trim
+    fp = lambda evs, k: [e["fingerprint"] for e in evs if e["event"] == k]
+    assert fp(a, "trim") == fp(b, "trim")                   # same fp: spoken once
+    r1 = signals.pitch_events(_rec(kind="put", armed=True), {"bar_t": 100}, _pitch(add=None), None)
+    r2 = signals.pitch_events(_rec(kind="put", armed=True), {"bar_t": 200}, _pitch(add=None), None)
+    assert r1[0]["fingerprint"] != r2[0]["fingerprint"]     # a NEW bar armed it
+
+
+def test_contract_plan_publishes_the_add_level_as_a_number(monkeypatch):
+    """The poller cannot parse prose; the add level must exist as a float
+    whenever the plan splits the clip and names one."""
+    _force(monkeypatch, "negative_gamma", -40)
+    cp = signals.recommend_trade("SPY")["execution"]["contract_plan"]
+    assert "add_level" in cp
+    if cp["add_level"] is not None:
+        assert isinstance(cp["add_level"], float | int)
+        if cp["add_trigger"] and "crosses" in cp["add_trigger"]:
+            assert f"{cp['add_level']:.2f}" in cp["add_trigger"]

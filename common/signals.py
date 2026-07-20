@@ -644,6 +644,71 @@ def tape_armed(tape: dict | None) -> bool:
     return ((tape.get("action") or {}).get("stance")) in ("enter", "in_trade")
 
 
+def pitch_events(rec: dict, read: dict | None, pitch: dict, mark: float | None) -> list[dict]:
+    """What changed since the trade was pitched, as discrete once-only events.
+
+    A long call is a trader friend on the line: he speaks when something
+    CHANGES, not on a schedule. The pitch is the trade Marcus last read out
+    (kind/strike/entry/expiry, and the add level if the clip was split); mark
+    is the pitched contract's estimated price right now. Pure so every
+    threshold is testable; the server computes `mark` and hands it in.
+
+    Every event carries a fingerprint. The client keeps the seen-set, so each
+    event fires ONCE per pitched trade - except a reversal, which is pinned to
+    the tape bar that armed it: a second, later reversal is genuinely new and
+    must speak again. Priority ordering is the CLIENT's job; this returns
+    everything that is true right now.
+
+    runner_stop is emitted whenever the mark is back at entry, but the DOCTRINE
+    says it only means something after the trim (before it, size-for-zero says
+    sit still) - the client suppresses it until the trim event has been seen.
+    """
+    ev: list[dict] = []
+    kind = (pitch.get("kind") or "").lower()
+    entry = pitch.get("entry")
+    x = (rec or {}).get("execution") or {}
+    tkr = (rec or {}).get("ticker") or pitch.get("ticker") or "?"
+    ckey = f"{kind}{pitch.get('strike'):g}@{pitch.get('expiry')}" if pitch.get("strike") else "?"
+
+    # the tape armed the OTHER side: the pitched trade's premise is gone
+    if kind and x.get("kind") and x["kind"] != kind and tape_armed(rec.get("tape")):
+        bar_t = (read or {}).get("bar_t") or ""
+        ev.append({
+            "event": "reversal",
+            "why": (f"the tape armed a {x['kind']} against the pitched {kind} - "
+                    f"{(rec.get('bias') or 'reversal')}"),
+            "fingerprint": f"{tkr}:reversal:{x['kind']}:{bar_t}",
+        })
+
+    if isinstance(mark, (int, float)) and isinstance(entry, (int, float)) and entry > 0:
+        r = mark / entry
+        if r >= 5.0:
+            ev.append({"event": "runner_target",
+                       "why": f"the pitched contract marks ~{mark:.2f} vs entry {entry:.2f} "
+                              f"({(r - 1) * 100:.0f}% up) - that is the +400% ride, whole trade done",
+                       "fingerprint": f"{tkr}:runner_target:{ckey}"})
+        elif r >= 1.5:
+            ev.append({"event": "trim",
+                       "why": f"the pitched contract marks ~{mark:.2f} vs entry {entry:.2f} "
+                              f"(+{(r - 1) * 100:.0f}%) - trim level hit, half comes off",
+                       "fingerprint": f"{tkr}:trim:{ckey}"})
+        if r <= 1.0:
+            ev.append({"event": "runner_stop",
+                       "why": f"the pitched contract is back at entry (~{mark:.2f} vs "
+                              f"{entry:.2f}) - after a trim the runner comes off here, flat, no loss",
+                       "fingerprint": f"{tkr}:runner_stop:{ckey}"})
+
+    add = pitch.get("add_level")
+    spot = (rec or {}).get("spot") or (read or {}).get("spot")
+    if (isinstance(add, (int, float)) and isinstance(spot, (int, float)) and kind
+            and (spot >= add if kind == "call" else spot <= add)):
+        ev.append({"event": "add",
+                   "why": f"{tkr} traded {'through' if kind == 'call' else 'under'} "
+                          f"{add:g} (now {spot:g}) - the level that earns the second half",
+                   "fingerprint": f"{tkr}:add:{ckey}"})
+    return ev
+
+
 def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float,
                          budget: float = DEFAULT_BUDGET_USD,
                          verdict: str | None = None,
@@ -779,6 +844,10 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         "later_usd": round(later_usd),
         "contracts_now": (max(int(now_usd // per_contract), 1) if now_usd > 0 else 0),
         "add_trigger": trigger,
+        # the add level as a NUMBER, for the machine that watches the tape
+        # while the call sits open. The prose above is for the model; a poller
+        # that has to answer "did price cross it" cannot parse prose.
+        "add_level": cont if isinstance(cont, (int, float)) else None,
         "sizing_why": why,
         "doctrine": "size for zero before the trim; after it the runner stops at entry",
     }

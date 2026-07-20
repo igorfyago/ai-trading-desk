@@ -74,6 +74,22 @@ def _age_s(iso) -> float:
     return (datetime.now(timezone.utc) - ts).total_seconds() if ts else 1e9
 
 
+def _beats(cand: dict, prior: dict | None, tol_s: float = 0.0) -> bool:
+    """Is `cand` the better print? The ONE ranking rule every merge here uses.
+
+    Real time beats delayed however the two are stamped. Alpaca's free SIP feed
+    stamps the 16:00 close at the SESSION BOUNDARY (00:00:00.07Z), which makes a
+    delayed print look newer than the genuine 23:59:57 trade that supersedes it,
+    so age alone ranks them backwards. Within the same class the newer stamp
+    wins; `tol_s` absorbs sub-second jitter where flapping would be visible.
+    """
+    if prior is None:
+        return True
+    if bool(cand.get("delayed")) != bool(prior.get("delayed")):
+        return not cand.get("delayed")
+    return _age_s(cand.get("ts")) < _age_s(prior.get("ts")) - tol_s
+
+
 def _et_wall(ts: datetime) -> datetime:
     """US-Eastern wall clock without tzdata (US DST: 2nd Sun Mar -> 1st Sun Nov)."""
     def nth_sunday(month: int, n: int) -> datetime:
@@ -316,21 +332,7 @@ def fetch_spots(symbols: list[str]) -> dict[str, dict]:
 
     def _keep_newest(cands: dict[str, dict]) -> None:
         for s, q in cands.items():
-            prior = out.get(s)
-            if prior is None:
-                out[s] = q
-                continue
-            # Real time beats delayed however the two are stamped. Alpaca's free
-            # SIP feed stamps its 15-minute-delayed bars at the BAR BOUNDARY, so
-            # a delayed SPY print stamped 00:00:00.07 was outranking a genuine
-            # 23:59:57 Yahoo trade on age alone. blendable_spot then threw the
-            # delayed winner away for being delayed, so SPY lost live gamma
-            # entirely while QQQ, which Alpaca did not answer for, was fine.
-            if bool(prior.get("delayed")) != bool(q.get("delayed")):
-                if not q.get("delayed"):
-                    out[s] = q
-                continue
-            if _age_s(q["ts"]) < _age_s(prior["ts"]):
+            if _beats(q, out.get(s)):
                 out[s] = q
 
     for prov in provider_order():
@@ -524,7 +526,13 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
     now = time.monotonic()
     with _lock:
         hit = _bars_cache.get(key)
-    if hit and now - hit[0] < max(20.0, INTERVALS[norm][4] / 4):
+    # TTL is CAPPED, not proportional. interval/4 meant every timeframe served
+    # a snapshot from a different moment in the past: 15m up to 3.7min stale,
+    # 45m up to 11min, 4h up to a full hour. Flipping between timeframes then
+    # moved the quoted price with no market event behind it, which read as the
+    # desk contradicting itself. One ceiling keeps every chart within a minute
+    # of every other; the per-interval floor still spares the 1D/1W fetches.
+    if hit and now - hit[0] < min(max(20.0, INTERVALS[norm][4] / 4), 60.0):
         return hit[1]
     provs = provider_order()
     if INTERVALS[norm][4] < 86400:
@@ -618,19 +626,33 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
         except Exception:
             pass
     if provider_order():
-        # yahoo fills the gaps AND rescues frozen prints (e.g. IEX stuck at
-        # the close): hunt when 30min < age < 12h. Beyond 12h the market is
-        # simply closed — nothing anywhere is fresher, so don't ask. Bounded:
+        # yahoo fills the gaps AND rescues prints that are not the latest one.
+        # Judge the print we would actually SHOW (the held row can be better
+        # than this round's answer), and rescue when it is:
+        #   missing  — nobody has spoken for this symbol yet;
+        #   delayed  — a delayed print is BY DEFINITION not the latest trade,
+        #              at any age. Alpaca's SIP close stamped at the session
+        #              boundary is 20h old by Saturday night and still wrong,
+        #              so an age ceiling here would freeze SPY at the close;
+        #   frozen   — real time but 30min < age < 12h. Past 12h with a REAL
+        #              TIME print the market is genuinely shut and nothing
+        #              anywhere is fresher, so don't ask.
+        # Volume stays bounded by the budget, not by the age window:
         # >=300s between rescues per symbol, <=25 rescues per call.
         now_m = time.monotonic()
         rescued = 0
         for s in syms:
             q = quotes_out.get(s)
-            age = _age_s(q["ts"]) if q else 1e9
-            missing = q is None
-            frozen = 30 * 60 < age < 12 * 3600
-            if not missing and not frozen:
-                continue
+            prior = _last_watch_row.get(s)
+            best = q
+            if prior and prior.get("ts") and (q is None or _beats(prior, q)):
+                best = prior
+            missing = best is None
+            if not missing:
+                superseded = bool(best.get("delayed")) or (
+                    30 * 60 < _age_s(best.get("ts")) < 12 * 3600)
+                if not superseded:
+                    continue
             if rescued >= 25 or (not missing and now_m - _rescue_at.get(s, -1e9) < 300):
                 continue
             _rescue_at[s] = now_m
@@ -639,26 +661,27 @@ def watch_quotes(symbols: list[str]) -> list[dict]:
                 y = _spot_yahoo(s)
             except Exception:
                 continue
-            if y and (missing or _age_s(y["ts"]) < age):
+            if y and _beats(y, best):
                 quotes_out[s] = y
 
     rows = []
     for s in syms:
         q = quotes_out.get(s)
-        # FRESHEST PRINT WINS ACROSS ROUNDS: after the bell alpaca's free feed
+        # THE BEST PRINT WINS ACROSS ROUNDS: after the bell alpaca's free feed
         # re-serves the frozen 16:00 print while yahoo's rescue (bounded per
-        # round) has already given us the extended tape. An OLDER print must
-        # never displace the newer one we hold — that regression is what made
-        # ext values and session dots flap back to blanks.
+        # round) has already given us the extended tape. Neither an older print
+        # nor a delayed one may displace what we hold — the first regression
+        # made ext values and session dots flap back to blanks, the second let
+        # the boundary-stamped SIP close overwrite the real post-market trade.
         prior = _last_watch_row.get(s)
-        if (q and prior and prior.get("ts")
-                and _age_s(prior["ts"]) < _age_s(q["ts"]) - 1):
+        if q and prior and prior.get("ts") and _beats(prior, q, tol_s=1.0):
             rows.append(dict(prior))
             continue
         row: dict = {"sym": s}
         if q:
             row.update({"price": q["price"], "ts": q["ts"],
-                        "session": q.get("session"), "source": q["source"]})
+                        "session": q.get("session"), "source": q["source"],
+                        "delayed": bool(q.get("delayed"))})
             prev, reg = _closes(s)
             if prev:
                 row["chg"] = round(q["price"] - prev, 2)

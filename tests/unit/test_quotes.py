@@ -192,10 +192,17 @@ def test_watch_quotes_batches_and_maps(monkeypatch):
     assert rows[0]["ext_pct"] == round((100 / 90 - 1) * 100, 2)     # vs reg close
 
 
-def test_watch_quotes_rescues_frozen_prints(monkeypatch):
-    """IEX frozen at the close (hours stale) must lose to a fresher yahoo
-    print; a 15-min delayed-SIP print is fresh enough and must NOT trigger
-    a yahoo call."""
+def test_watch_quotes_rescues_prints_that_are_not_the_latest(monkeypatch):
+    """What sends us hunting yahoo is 'the print we would SHOW is not the
+    latest trade' — which is not the same question as 'is it old'.
+
+    A real-time print frozen at the close is stale and gets rescued. A DELAYED
+    print is never the latest trade at ANY age, so it stays eligible however
+    long it sits. A real-time print on a market that has been shut for days IS
+    the latest trade anyone has, so we ask nobody. Call volume is bounded by
+    the per-symbol budget rather than by an age ceiling, because an age ceiling
+    cannot tell the last two cases apart.
+    """
     from datetime import datetime, timedelta, timezone
 
     monkeypatch.setenv("QUOTES_PROVIDER", "auto")
@@ -210,40 +217,111 @@ def test_watch_quotes_rescues_frozen_prints(monkeypatch):
                 "ts": (now - timedelta(seconds=30)).isoformat(),
                 "source": "yahoo", "delayed": False, "session": "post"}
 
+    def alpaca_serves(**print_):
+        monkeypatch.setattr(quotes, "_spots_alpaca",
+                            lambda syms: {"SPY": {"ticker": "SPY", **print_}})
+        quotes._watch_cache = None
+        quotes._last_watch_row.clear()
+
     monkeypatch.setattr(quotes, "_spot_yahoo", fake_yahoo)
     monkeypatch.setattr(quotes, "_closes", lambda s: (None, None))
 
-    # frozen: 3h-old print -> rescued by yahoo
-    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
-        "SPY": {"ticker": "SPY", "price": 750.87,
-                "ts": (now - timedelta(hours=3)).isoformat(),
-                "source": "alpaca·iex", "delayed": False, "session": "rth"}})
+    # real time but frozen 3h at the close -> rescued by yahoo
+    alpaca_serves(price=750.87, ts=(now - timedelta(hours=3)).isoformat(),
+                  source="alpaca·iex", delayed=False, session="rth")
+    quotes._rescue_at.clear()
+    assert quotes.watch_quotes(["SPY"])[0]["price"] == 749.0
+    assert calls["yahoo"] == 1
+
+    # a 15-min delayed SIP print IS eligible (it is not the latest trade), but
+    # the per-symbol budget from the rescue above still holds the call back
+    alpaca_serves(price=750.2, ts=(now - timedelta(minutes=15)).isoformat(),
+                  source="alpaca·sip15", delayed=True, session="post")
+    assert quotes.watch_quotes(["SPY"])[0]["price"] == 750.2
+    assert calls["yahoo"] == 1, "budget spent: ask again in 300s, not now"
+
+    # ...and once the budget frees up, the same delayed print does get upgraded
+    quotes._watch_cache = None
+    quotes._rescue_at.clear()
+    assert quotes.watch_quotes(["SPY"])[0]["price"] == 749.0
+    assert calls["yahoo"] == 2
+
+    # shut for days, and what we hold is REAL TIME: nothing anywhere is
+    # fresher, so don't ask anyone
+    alpaca_serves(price=748.0, ts=(now - timedelta(hours=40)).isoformat(),
+                  source="alpaca·iex", delayed=False, session="post")
+    quotes._rescue_at.clear()
+    assert quotes.watch_quotes(["SPY"])[0]["price"] == 748.0
+    assert calls["yahoo"] == 2, "a 40h real-time print is the latest there is"
+
+    # shut for days, but what we hold is DELAYED: that is the SPY bug — the
+    # print is wrong no matter how long it has sat, so we do ask, once
+    alpaca_serves(price=748.0, ts=(now - timedelta(hours=40)).isoformat(),
+                  source="alpaca·sip15", delayed=True, session="post")
+    quotes._rescue_at.clear()
+    assert quotes.watch_quotes(["SPY"])[0]["price"] == 749.0
+    assert calls["yahoo"] == 3
+
+    quotes._watch_cache = None
+    quotes.watch_quotes(["SPY"])
+    assert calls["yahoo"] == 3, "the budget, not an age window, bounds volume"
+
+
+def test_watch_last_is_the_post_market_print_not_the_regular_close(monkeypatch):
+    """Saturday 2026-07-18, production. Alpaca's free SIP feed stamps Friday's
+    16:00 regular close (743.29) at the SESSION BOUNDARY, 00:00:00.07Z, which
+    is three seconds NEWER than yahoo's genuine 23:59:57Z post-market trade at
+    742.49 that supersedes it. Ranked on age the wrong print wins, so SPY sat
+    at the regular close with no ext_pct while QQQ — which alpaca does not
+    answer for, so yahoo won by default — was correct all along.
+
+    Last must be the true latest print; the product runs a deliberate 24h tape.
+    """
+    monkeypatch.setenv("QUOTES_PROVIDER", "auto")
+    monkeypatch.setenv("ALPACA_KEY_ID", "k")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "s")
+
+    yahoo_tape = {           # the real last post-market trade, both symbols
+        "SPY": {"ticker": "SPY", "price": 742.49, "ts": "2026-07-17T23:59:57Z",
+                "source": "yahoo", "delayed": False, "session": "post"},
+        "QQQ": {"ticker": "QQQ", "price": 693.76, "ts": "2026-07-17T23:59:57Z",
+                "source": "yahoo", "delayed": False, "session": "post"},
+    }
+    closes = {"SPY": (740.00, 743.29), "QQQ": (694.00, 695.33)}
+    calls = {"yahoo": 0}
+
+    def fake_yahoo(sym):
+        calls["yahoo"] += 1
+        return dict(yahoo_tape[sym])
+
+    # alpaca answers for SPY only, exactly as it does in production
+    def frozen_sip(syms):
+        return {"SPY": {"ticker": "SPY", "price": 743.29,
+                        "ts": "2026-07-18T00:00:00.07Z", "source": "alpaca·sip15",
+                        "delayed": True, "session": "overnight"}}
+
+    monkeypatch.setattr(quotes, "_spots_alpaca", frozen_sip)
+    monkeypatch.setattr(quotes, "_spot_yahoo", fake_yahoo)
+    monkeypatch.setattr(quotes, "_closes", lambda s: closes[s])
     quotes._watch_cache = None
     quotes._last_watch_row.clear()
     quotes._rescue_at.clear()
-    rows = quotes.watch_quotes(["SPY"])
-    assert rows[0]["price"] == 749.0 and calls["yahoo"] == 1
 
-    # fresh enough: 15-min sip print -> no yahoo call
-    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
-        "SPY": {"ticker": "SPY", "price": 750.2,
-                "ts": (now - timedelta(minutes=15)).isoformat(),
-                "source": "alpaca·sip15", "delayed": True, "session": "post"}})
-    quotes._watch_cache = None
-    quotes._last_watch_row.clear()
-    rows = quotes.watch_quotes(["SPY"])
-    assert rows[0]["price"] == 750.2 and calls["yahoo"] == 1
+    spy, qqq = quotes.watch_quotes(["SPY", "QQQ"])
+    assert spy["price"] == 742.49, "the post-market print, not the 16:00 close"
+    assert spy["source"] == "yahoo" and spy["session"] == "post"
+    assert spy["reg_close"] == 743.29
+    assert spy["ext_pct"] == -0.11        # 742.49 vs the 743.29 regular close
+    assert qqq["price"] == 693.76 and qqq["ext_pct"] == -0.23   # unchanged
 
-    # market closed for days (weekend): don't ask anyone
-    monkeypatch.setattr(quotes, "_spots_alpaca", lambda syms: {
-        "SPY": {"ticker": "SPY", "price": 748.0,
-                "ts": (now - timedelta(hours=40)).isoformat(),
-                "source": "alpaca·sip15", "delayed": True, "session": "post"}})
+    # the next round re-serves the frozen close: it must neither overwrite the
+    # real print nor cost another provider call, all weekend long
     quotes._watch_cache = None
-    quotes._last_watch_row.clear()
     quotes._rescue_at.clear()
-    rows = quotes.watch_quotes(["SPY"])
-    assert rows[0]["price"] == 748.0 and calls["yahoo"] == 1
+    spent = calls["yahoo"]
+    spy2 = quotes.watch_quotes(["SPY", "QQQ"])[0]
+    assert spy2["price"] == 742.49 and spy2["ext_pct"] == -0.11
+    assert calls["yahoo"] == spent, "we hold the latest print: ask nobody"
 
 
 def test_scrub_kills_phantom_wicks_keeps_real_spikes():

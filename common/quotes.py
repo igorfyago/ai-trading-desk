@@ -454,22 +454,40 @@ def _fold_partial_tail(bars: list[dict], step_s: int) -> list[dict]:
     the OHLC legend and the change column disagreed between two timeframes
     with no market event behind it.
 
-    INTRADAY ONLY, and the caller enforces that. Daily bars are stamped 13:30Z
-    and weekly ones on Monday 04:00Z, neither aligned to their own step, so
-    flooring those would fold a genuine bar back into its predecessor and
-    silently drop a day (or four) from the chart.
+    DAILY IS FOLDED TOO: after the bell yahoo's 1d series stamps the current
+    forming session at 13:30Z, but the daily often comes from alpaca (yahoo's
+    last daily bar can lag), stamped 04:00Z and closed at the 16:00 price —
+    so the 1D chart froze the official close while every intraday chart moved
+    with the post-market print. Folding merges by CALENDAR DAY (never by
+    flooring 04:00Z onto midnight), so the 1D chart's last candle carries the
+    same live price every other timeframe shows. Weekly/monthly stamps are
+    not day-aligned in a way this confuses: two bars only merge when their
+    stamps fall on the same UTC day. No bar is ever dropped: the merged bar
+    keeps the session stamp (13:30Z) and opens with the session open.
     """
     if len(bars) < 2 or step_s <= 0:
         return bars
     tail = bars[-1]
-    if tail["t"] % step_s == 0:
-        return bars                      # already a boundary: a real bar
     prev = bars[-2]
-    if tail["t"] - prev["t"] >= 2 * step_s:
-        return bars                      # a gap, not this bucket's stub
-    merged = {**prev, "h": max(prev["h"], tail["h"]),
-              "l": min(prev["l"], tail["l"]), "c": tail["c"],
-              "v": prev["v"] + tail["v"]}
+    if step_s >= 86400:
+        # daily/weekly: merge when both stamps are the same calendar day, and
+        # keep the SESSION stamp (13:30Z / live print time) so the forming
+        # candle's identity is today's session
+        day = 86400
+        if tail["t"] // day != prev["t"] // day:
+            return bars
+        merged = {**prev, "t": tail["t"], "o": prev["o"],
+                  "h": max(prev["h"], tail["h"]),
+                  "l": min(prev["l"], tail["l"]), "c": tail["c"],
+                  "v": prev["v"] + tail["v"]}
+    else:
+        if tail["t"] % step_s == 0:
+            return bars                      # already a boundary: a real bar
+        if tail["t"] - prev["t"] >= 2 * step_s:
+            return bars                      # a gap, not this bucket's stub
+        merged = {**prev, "h": max(prev["h"], tail["h"]),
+                  "l": min(prev["l"], tail["l"]), "c": tail["c"],
+                  "v": prev["v"] + tail["v"]}
     return bars[:-2] + [merged]
 
 
@@ -585,6 +603,28 @@ def get_bars(ticker: str, interval: str, limit: int = 600) -> dict | None:
             else:
                 continue  # cboe has no candle history
             if bars:
+                if INTERVALS[norm][4] >= 86400 and prov == "alpaca":
+                    # the daily's last candle must be the LIVE session, not a
+                    # frozen official close: alpaca's daily closes at 16:00 and
+                    # yahoo's daily can lag a full session, so after the bell
+                    # the 1D chart disagreed with every intraday timeframe.
+                    # Fold the freshest print in by calendar day — the same
+                    # fold intraday bars get, so the last price is ONE number
+                    # on 5m, 15m, 45m, 4h and 1D alike.
+                    try:
+                        live = _spot_yahoo(sym)
+                    except Exception:
+                        live = None
+                    if live and live.get("ts"):
+                        px = float(live["price"])
+                        ts = int(_ts_utc(live["ts"]).timestamp())
+                        stub = {"t": ts, "o": px, "h": px, "l": px, "c": px, "v": 0}
+                        if bars and ts // 86400 == bars[-1]["t"] // 86400:
+                            bars[-1] = {**bars[-1], "c": px,
+                                        "h": max(bars[-1]["h"], px),
+                                        "l": min(bars[-1]["l"], px)}
+                        elif bars and ts > bars[-1]["t"]:
+                            bars = _fold_partial_tail(bars + [stub], 86400)
                 payload = {"ticker": sym, "interval": norm, "source": src,
                            "delayed": delayed, "bars": bars[-limit:]}
                 with _lock:

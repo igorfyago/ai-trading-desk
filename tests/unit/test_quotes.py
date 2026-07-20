@@ -466,20 +466,30 @@ def test_partial_tail_folds_on_intraday_only():
     assert quotes._fold_partial_tail(aligned, step) == aligned
 
 
-def test_partial_tail_never_folds_daily_or_weekly():
-    """THE TRAP. Daily yahoo bars are stamped 13:30Z and weekly ones Monday
-    04:00Z, so neither is aligned to its own step. Flooring those would fold a
-    genuine bar into its predecessor and silently delete a day (or four) from
-    the chart, which is why this is gated to intraday at the call site."""
+def test_partial_tail_folds_daily_same_session_only():
+    """The daily must carry the LIVE print, like every intraday chart: after
+    the bell alpaca's 1D bar is frozen at the 16:00 official close (stamped
+    04:00Z) while yahoo's live print moves. Two bars stamped on the SAME
+    calendar day are one session — fold them, keep the session stamp. Bars
+    from different days are distinct sessions and must NEVER merge."""
     day = 86400
-    d1 = 1_750_000_000 // day * day + 13 * 3600 + 1800      # 13:30Z, unaligned
-    daily = [{"t": d1, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 5},
-             {"t": d1 + day, "o": 1.5, "h": 2.5, "l": 1.0, "c": 2.0, "v": 6}]
-    # consecutive daily bars are exactly one step apart, so the gap guard does
-    # not save us here: the CALLER must not invoke this for step >= 86400
-    folded = quotes._fold_partial_tail(daily, day)
-    assert len(folded) == 1, "proves the intraday gate is load-bearing"
+    base = 1_750_000_000 // day * day                      # a midnight UTC
+    alpaca_bar = {"t": base + 4 * 3600, "o": 747.04, "h": 748.69,
+                  "l": 741.56, "c": 742.15, "v": 1000}     # 04:00Z, 16:00 close
+    prior_day = {"t": base - day + 13 * 3600 + 1800, "o": 742.17,
+                 "h": 747.25, "l": 740.8, "c": 743.28, "v": 900}
+    live_stub = {"t": base + 22 * 3600 + 4800, "o": 741.16, "h": 741.16,
+                 "l": 741.16, "c": 741.16, "v": 0}         # the post-market print
 
-    # and the real path leaves daily bars alone
-    _, _, _, factor, step = quotes.INTERVALS["D"]
-    assert factor is None and step == 86400    # so neither branch touches them
+    out = quotes._fold_partial_tail([prior_day, alpaca_bar, live_stub], day)
+    assert len(out) == 2
+    last = out[-1]
+    assert last["t"] == live_stub["t"]       # today's session stamp wins
+    assert last["o"] == 747.04               # the session open is preserved
+    assert last["c"] == 741.16               # the LIVE print is the close
+    assert last["h"] == 748.69 and last["l"] == 741.16
+    assert out[0] == prior_day               # yesterday untouched
+
+    # different calendar days = different sessions: never fold
+    two_days = quotes._fold_partial_tail([prior_day, alpaca_bar], day)
+    assert len(two_days) == 2

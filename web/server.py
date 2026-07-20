@@ -896,6 +896,51 @@ async def write_calllog(turn: VoiceTurn):
     return {"ok": True}
 
 
+@app.get("/api/watch/{ticker}")
+async def watch_setup(ticker: str):
+    """Is a fresh entry live RIGHT NOW? Polled by an open voice call.
+
+    Marcus sits silent on a long call the way a trader friend does, then
+    speaks when something actually prints. This is the eye: it reads the tape
+    and returns a FINGERPRINT of whatever setup is live, so the client can
+    tell "still the same flush I already pitched" from "a new one just fired"
+    and only interrupt for the second.
+
+    Cheap on purpose - it runs every polling tick for every open call.
+    """
+    from common import market, signals, tape as tape_mod
+
+    try:
+        feed = market.resolve_feed(ticker)[0]
+        read = tape_mod.get_tape_read(feed)
+    except Exception:
+        read = None
+    if not read:
+        return {"signal": None}
+
+    cap = read.get("capitulation")
+    ds = read.get("day_shape")
+    if cap:
+        kind, why, side = "capitulation", cap["why"], "long"
+    elif ds and ds.get("takeable"):
+        kind = "reversal_day"
+        side = "long" if ds["shape"].startswith("bull") else "short"
+        why = (f"double {'bottom' if side == 'long' else 'top'} with a "
+               f"{ds['capitulation_x']}x volume flush, VWAP "
+               f"{'reclaimed' if side == 'long' else 'lost'}")
+    else:
+        return {"signal": None}
+
+    # the fingerprint pins the SETUP, not the moment: a flush that stays live
+    # for three bars must not be pitched three times. Bar timestamp + kind is
+    # enough, since one setup per bar per ticker is the most that can fire.
+    bar_t = read.get("as_of") or read.get("t") or ""
+    return {"signal": kind, "side": side, "why": why,
+            "ticker": ticker.upper(),
+            "spot": read.get("spot"),
+            "fingerprint": f"{ticker.upper()}:{kind}:{bar_t}"}
+
+
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 # Local dev convenience: preview the apex portal without deploying. Caddy serves
 # it in production. Mounted at /portal, not /landing, which no route has ever

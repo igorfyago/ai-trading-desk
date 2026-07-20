@@ -20,6 +20,63 @@ let busy = false;
 let voice = { live: false, textOnly: false, responseActive: false, pendingResponse: false,
             pc: null, dc: null, mic: null, agentLine: null,
               audioEl: null, muteGuard: false, scrubNext: false, lastActivity: 0 };
+
+/* ------------------------------------------------- the desk heartbeat ----
+   A long call with a trader friend is mostly silence. He is not waiting to
+   be asked - he is watching, and when something prints he says so. That is
+   the whole feature: Marcus stays quiet, keeps one eye on the tape, and
+   speaks the moment a setup actually fires.
+
+   The fingerprint is what keeps him from being a nuisance. A flush stays
+   live for several bars, so without it he would pitch the same trade three
+   times running. He speaks once per setup, then goes quiet again. */
+const BEAT_MS = 20_000;
+let beat = { timer: null, last: null, ticker: "SPY" };
+
+function startHeartbeat(ticker) {
+  stopHeartbeat();
+  beat.ticker = (ticker || "SPY").toUpperCase();
+  beat.last = null;                       // whatever is live at pickup is old news
+  fetch(`/api/watch/${beat.ticker}`).then(r => r.json())
+    .then(d => { beat.last = d.fingerprint || null; })
+    .catch(() => {});
+  beat.timer = setInterval(checkTape, BEAT_MS);
+}
+
+function stopHeartbeat() {
+  if (beat.timer) clearInterval(beat.timer);
+  beat.timer = null;
+}
+
+async function checkTape() {
+  if (!voice.live || !voice.dc || voice.dc.readyState !== "open") return;
+  if (voice.responseActive) return;       // never cut across him mid-sentence
+  let d;
+  try {
+    d = await fetch(`/api/watch/${beat.ticker}`).then(r => r.json());
+  } catch { return; }
+  if (!d || !d.signal || !d.fingerprint) return;
+  if (d.fingerprint === beat.last) return;   // same setup he already pitched
+  beat.last = d.fingerprint;
+
+  // Framed as the desk speaking to him, not as the caller asking. A user-role
+  // item would read as though the caller said it, and he would answer a
+  // question nobody asked.
+  try {
+    voice.dc.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: { type: "message", role: "system", content: [{ type: "input_text",
+        text: `DESK ALERT - ${d.signal} just fired on ${d.ticker} at `
+            + `${d.spot}: ${d.why}. Break in now, the way you would on a long `
+            + `call: one short human opener, then the trade. Call `
+            + `trade_recommendation for the exact contract, and draw_levels `
+            + `in the same turn.` }] },
+    }));
+    requestResponse();
+    divider(`desk alert · ${d.signal} on ${d.ticker}`);
+  } catch { /* channel closing */ }
+}
+
 /* ------------------------------------------------------ the call log ----
    One record per logical turn (caller spoke -> tools ran -> Marcus answered),
    POSTed for offline review by `python -m common.calllog review`. The clock
@@ -342,6 +399,7 @@ async function startVoice({ withMic, queueText } = { withMic: true }) {
     await voice.pc.setRemoteDescription({ type: "answer", sdp });
 
     voice.live = true;
+    startHeartbeat(current?.id === 'marcus' ? 'SPY' : null);
     voice.textOnly = !withMic;
     voice.lastActivity = Date.now();
     if (withMic) $("mic").classList.add("live");
@@ -381,6 +439,7 @@ function sendTextTurn(text) {
 }
 
 function hangUp(silent) {
+  stopHeartbeat();
   voice.dc?.close(); voice.pc?.close();
   voice.mic?.getTracks().forEach((t) => t.stop());
   voice.audioEl?.pause();

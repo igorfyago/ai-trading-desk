@@ -7,7 +7,7 @@ is the core design decision — the same split a real desk would demand.
 
 ONE DIRECTION, ALWAYS. The desk buys a single option and never spreads: the
 sizing is buying math (budget / premium), the management rule is "sell half at
-+50%", and the doctrine is hold-to-zero with no stop. Spreads and condors
++50%", and the runner is then stopped at entry. Spreads and condors
 cannot be sized, trimmed or held that way, so a payload that named one was
 describing a trade the desk would never place.
 
@@ -445,7 +445,7 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         "runner_stop_price": entry_px,
         "runner_target_price": round(entry_px * 5, 2),
         "stop": None,
-        "risk_plan": "no stop-loss by design: size small (half a percent of the "
+        "risk_plan": "no stop until the trim: size small (half a percent of the "
                      "account max) and accept the contract can go to zero",
         "thesis_reference": round(thesis_level, 2),
         "thesis_kind": ("tape" if trig else "flip" if flip_ok else "wall"),
@@ -672,7 +672,7 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         "contracts_now": (max(int(now_usd // per_contract), 1) if now_usd > 0 else 0),
         "add_trigger": trigger,
         "sizing_why": why,
-        "doctrine": "size for zero: the whole premium is the risk, no stop",
+        "doctrine": "size for zero before the trim; after it the runner stops at entry",
     }
 
 
@@ -747,7 +747,7 @@ def _plain_english_exec(ticker: str, x: dict) -> str:
         f"{sizing_bit}"
         + (f"Target {x['target']:g} - the low-volume gap, achievable today - "
            "then reassess. " if x.get("target") else "")
-        + f"No stop-loss: size for zero; {x.get('thesis_label', 'the tipping point')} at "
+        + f"No stop before the trim - size for zero, then the runner stops at entry; {x.get('thesis_label', 'the tipping point')} at "
         f"{x['thesis_reference']:g} only tells you whether the thesis still stands."
     )
 

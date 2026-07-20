@@ -127,6 +127,8 @@
 </style>
 </head>
 <body>
+<!-- Estate bar: the portal is the hub, and the signed-in user shows here too. -->
+<script src="https://auth.b4rruf3t.com/eco-nav.js" defer></script>
 <header class="topbar">
   <span class="brand">b4rruf3t<span>.</span></span>
 </header>
@@ -145,6 +147,12 @@
       <p>A neobank from first principles: double-entry ledger, sharded by customer,
          cross-region payments settled over Kafka with an outbox.</p>
       <div class="stack">raw java 21 · postgres · kafka · no frameworks</div>
+    </a>
+    <a class="card" href="https://broker.b4rruf3t.com">
+      <h2><span class="dot"></span>minibroker</h2>
+      <p>The bank's investment arm: portfolio, holdings and market prices on its
+         own hostname, identity carried over from the bank.</p>
+      <div class="stack">raw java 21 · postgres · same ledger discipline</div>
     </a>
     <a class="card" href="https://mart.b4rruf3t.com">
       <h2><span class="dot"></span>minimart</h2>

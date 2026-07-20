@@ -1513,7 +1513,21 @@
   });
 
   let deskChart = null, chartSeq = 0, chartLib = null, quotesES = null, gexLevels = null,
-      tapeChecks = null, callerLevels = null;
+      tapeChecks = null, callerLevels = null, lastQuoteAt = 0;
+
+  // THE SINGLETON LAW, CLIENT SIDE: a frozen chart is a LYING chart. The SSE
+  // stream dies silently (proxy idle timeouts, container restarts, laptop
+  // sleep) and EventSource's own reconnect can stall for minutes with the
+  // last tick still painted. If no quote has moved for 45s while the tab is
+  // visible, drop the stream, re-fetch the canonical bars (server pins the
+  // ONE price on every interval) and re-open — the chart rejoins the live
+  // print within a minute instead of showing an hours-old number forever.
+  setInterval(() => {
+    if (document.hidden || !focus) return;
+    if (lastQuoteAt && Date.now() - lastQuoteAt < 45000) return;
+    openQuoteStream();
+    mountChart(focus);
+  }, 30000);
 
   function applyTapeMarkers() {
     // circle the LATEST bar each reversal check fired on — max one per check
@@ -1603,6 +1617,7 @@
     if (quotesES) quotesES.close();
     quotesES = new EventSource(`${API}/api/stream/quotes?symbols=${[...new Set([focus, "SPY"])].join(",")}`);
     quotesES.onmessage = (e) => {
+      lastQuoteAt = Date.now();
       let d; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type !== "quote") return;
       if (d.ticker === focus) {

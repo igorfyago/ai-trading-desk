@@ -65,7 +65,7 @@
               background:var(--green); margin-right:7px; }
 
   /* the scoreboard — the game's score, visible on EVERY tab */
-  #g-score { position:fixed; top:12px; right:16px; z-index:60; cursor:pointer;
+  #g-score { position:fixed; top:calc(var(--eco-nav-h, 48px) + 12px); right:16px; z-index:60; cursor:pointer;
              font-family:var(--mono); font-size:12.5px; font-weight:500;
              font-variant-numeric:tabular-nums; padding:7px 15px; border-radius:999px;
              background:var(--panel2); border:1px solid var(--line); color:var(--dim); }
@@ -121,6 +121,11 @@
           color:var(--dim); font:inherit; font-size:11px; padding:3px 10px; }
   .pbtn:hover { color:var(--text); border-color:rgba(255,255,255,.3); }
   .pbtn.close:hover { color:var(--red); border-color:var(--red); }
+  .prow .bkr { font-size:11px; white-space:nowrap; text-decoration:none;
+               border:1px solid var(--line); border-radius:999px; padding:2px 9px;
+               color:var(--green); border-color:rgba(62,207,142,.4); }
+  .prow .bkr.off { color:var(--dim); border-color:var(--line); }
+  .prow a.bkr:hover { border-color:rgba(255,255,255,.3); }
 
   /* positions pane */
   #positions .plabel { font-size:11px; text-transform:uppercase; letter-spacing:.12em;
@@ -281,7 +286,7 @@
 
   #iv-select { display:none; }   /* the interval combo exists for phones only */
   /* phone nav: a floating glass chip + the nav itself as a slide-in drawer */
-  #m-nav-btn { display:none; position:fixed; top:10px; left:10px; z-index:80;
+  #m-nav-btn { display:none; position:fixed; top:calc(var(--eco-nav-h, 48px) + 10px); left:10px; z-index:80;
     width:36px; height:36px; align-items:center; justify-content:center;
     border-radius:10px; background:rgba(19,21,27,.78); backdrop-filter:blur(8px);
     border:1px solid var(--line); color:var(--text); font-size:15px; cursor:pointer; }
@@ -463,15 +468,8 @@
       <button class="tab-btn" data-pane="replay">Replay</button>
       <button class="tab-btn" data-pane="gex">GEX</button>
       <span class="nav-sep" aria-hidden="true"></span>
-      <!-- THE ESTATE, exactly as the bank's shell orders it: Bank, Mart, Pay,
-           Portal, same window. To the customer these are one product, and a
-           tab bar that spawns windows is a link list wearing a tab bar's
-           clothes. Only GitHub, which is not the estate, opens a new tab. -->
-      <a class="tab-btn" href="https://bank.b4rruf3t.com">Bank</a>
-      <a class="tab-btn" href="https://mart.b4rruf3t.com">Mart</a>
-      <a class="tab-btn" href="https://pay.b4rruf3t.com">Pay</a>
-      <a class="tab-btn" href="https://b4rruf3t.com">Portal</a>
-      <span class="nav-sep" aria-hidden="true"></span>
+      <!-- Estate cross-links live in the eco-nav bar above; keep only the
+           one external link that is not the estate. -->
       <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
          target="_blank">GitHub</a>
     </div>
@@ -1798,6 +1796,50 @@
   const contractOf = (t) => `${t.contract_ticker} ${Number(t.strike)}${t.kind[0]}`;
   const usd = (x) => (x >= 0 ? "+$" : "−$") + Math.abs(x).toFixed(0);
 
+  /* Execution mirror tag — renders ONLY what the record proves.
+     broker_order_id present = the broker placed it, link to the position.
+     unlinked = the fix is a link, offer it. Anything else shows the recorded
+     reason verbatim; "unreachable" is a fact about our call, never a claim
+     about the broker's book (a timed-out order may still have landed). */
+  const BROKER_WEB = location.hostname.endsWith("b4rruf3t.com")
+    ? "https://broker.b4rruf3t.com" : "http://localhost:8091";
+  const bq = (x) => String(x ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const BKR_LABEL = { rejected: "broker refused", unreachable: "broker unreachable",
+                      unmirrorable: "not sent to broker" };
+
+  function bkrTag(t) {
+    if (t.broker_order_id) {
+      const did = t.broker_status === "filled" || t.broker_status === "settled"
+        ? "executed in your broker account as" : "order placed in your broker account for";
+      return `<a class="bkr" target="_blank" rel="noopener"
+        href="${BROKER_WEB}/portfolio?customer=${t.broker_customer}"
+        title="${did} ${bq(t.broker_contract)} · open the position">broker #${t.broker_customer} ✓</a>`;
+    }
+    if (t.broker_status === "unlinked")
+      return `<a class="bkr off" href="#" onclick="bkrPromptLink(event)"
+        title="${bq(t.broker_reason || "no linked broker account")} · click to link">link your account</a>`;
+    if (t.broker_reason)
+      return `<span class="bkr off" title="${bq(t.broker_reason)}">${BKR_LABEL[t.broker_status] || bq(t.broker_status)}</span>`;
+    return "";
+  }
+
+  function bkrPromptLink(ev) {
+    ev.preventDefault();
+    show("dash");                        // the link control lives on the rail
+    const row = document.getElementById("wl-linkrow");
+    const input = document.getElementById("wl-link");
+    const btn = document.getElementById("wl-link-btn");
+    if (btn) btn.hidden = false;
+    if (row) row.hidden = false;
+    if (input && input.offsetParent) { input.focus(); input.select(); return; }
+    // the rail is display:none at this viewport width — same claim, asked
+    // plainly, through the same wlLink path the rail control uses
+    const v = window.prompt("Bank customer number to link this desk session to:");
+    const n = Number((v || "").trim());
+    if (Number.isFinite(n) && n > 0) wlLink(n);
+  }
+  window.bkrPromptLink = bkrPromptLink;
+
   function paintScore() {
     const el = document.getElementById("g-score");
     if (!lastScore) { el.textContent = "P&L –"; el.className = ""; return; }
@@ -1848,6 +1890,7 @@
       <span>×${p.contracts_open} @ ${p.entry_px}</span>
       <span>mark ${p.mark ?? "–"}</span>
       ${p.tp_hit ? '<span style="color:var(--green)">TRIM ZONE</span>' : ""}
+      ${bkrTag(p)}
       <span class="pnl ${cls}">${pnl != null ? usd(pnl) + pct : "–"}</span>
       ${rowButtons(p)}
     </div>`;
@@ -1884,7 +1927,7 @@
         <span class="pc">${contractOf(t)}</span>
         <span>${t.status}</span>
         <span style="color:var(--dim)">${when}</span>
-        ${t.status === "quoted" ? `<button class="pbtn" onclick="act(${t.id},'add')">TAKE IT</button>` : ""}
+        ${t.status === "quoted" ? `<button class="pbtn" onclick="act(${t.id},'add')">TAKE IT</button>` : bkrTag(t)}
         <span class="pnl ${r >= 0 ? "pos" : "neg"}">${t.status === "closed" ? usd(r)
           : "~" + (t.quoted_px ?? "")}</span>
       </div>`;

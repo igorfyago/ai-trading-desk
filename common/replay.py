@@ -59,32 +59,55 @@ def score_path(rec: dict, bars: list[dict]) -> dict:
                 "note": "tape and snapshot disagree by >5% (demo data or a "
                         "stale feed) - grading this would be fiction"}
 
-    marks, trim, last = [], None, None
+    # ONE CLOCK FOR EVERYTHING. The engine's quoted entry uses day-granular
+    # DTE; the marks below use real fractional time. Grading the quoted entry
+    # against fractional marks gave pre-close decisions an instant time-value
+    # uplift that looked like edge. The GRADED entry is re-priced on the
+    # marks' own clock; the quoted one is reported beside it for honesty.
+    entry_graded = market.black_scholes(
+        x["entry_underlying"], strike,
+        max((expiry_dt.timestamp() - t0) / 86400.0, 0.02), iv, kind)["price"]
+
+    marks, trim, runner_exit, last = [], None, None, None
     for b in path:
         rem_days = max((expiry_dt.timestamp() - b["t"]) / 86400.0, 0.02)
         px = market.black_scholes(b["c"], strike, rem_days, iv, kind)["price"]
         marks.append({"t": b["t"], "px": round(px, 2), "spot": b["c"]})
-        if trim is None and px >= 1.5 * entry:
-            trim = {"t": b["t"], "px": round(px, 2), "spot": b["c"]}
         last = {"t": b["t"], "px": round(px, 2), "spot": b["c"]}
+        if trim is None and px >= 1.5 * entry_graded:
+            trim = {"t": b["t"], "px": round(px, 2), "spot": b["c"]}
+            continue
+        # HOUSE RULES, all of them. The grader used to stop at the trim and
+        # let the runner ride to the bell no matter what - no breakeven stop,
+        # no +400% take - then the UI called its output "the house rules".
+        if trim and runner_exit is None:
+            if px <= entry_graded:
+                runner_exit = {"t": b["t"], "px": round(px, 2), "spot": b["c"],
+                               "why": "runner stopped at entry"}
+            elif px >= 5.0 * entry_graded:
+                runner_exit = {"t": b["t"], "px": round(px, 2), "spot": b["c"],
+                               "why": "runner took +400%"}
 
     expired = path[-1]["t"] >= expiry_dt.timestamp() - 1800
-    if expired:   # settle the runner at intrinsic
+    if expired and runner_exit is None:   # settle the runner at intrinsic
         s = path[-1]["c"]
         intrinsic = max(s - strike, 0.0) if kind == "call" else max(strike - s, 0.0)
         last = {"t": path[-1]["t"], "px": round(intrinsic, 2), "spot": s}
 
+    runner_px = (runner_exit or last)["px"]
     if trim:
         half = contracts / 2.0
-        pnl = (trim["px"] - entry) * 100 * half + (last["px"] - entry) * 100 * (contracts - half)
+        pnl = ((trim["px"] - entry_graded) * 100 * half
+               + (runner_px - entry_graded) * 100 * (contracts - half))
     else:
-        pnl = (last["px"] - entry) * 100 * contracts
-    invested = entry * 100 * contracts
+        pnl = (last["px"] - entry_graded) * 100 * contracts
+    invested = entry_graded * 100 * contracts
 
     return {
         "gradable": True,
-        "entry": {"t": t0, "px": entry, "spot": x["entry_underlying"]},
-        "trim": trim, "final": last, "expired": expired,
+        "entry": {"t": t0, "px": round(entry_graded, 2), "spot": x["entry_underlying"],
+                  "quoted_px": entry},
+        "trim": trim, "runner_exit": runner_exit, "final": last, "expired": expired,
         "contracts": contracts, "invested_usd": round(invested, 2),
         "pnl_usd": round(pnl, 2),
         "pnl_pct": round(pnl / invested * 100, 1) if invested else 0.0,
@@ -96,7 +119,13 @@ def score_path(rec: dict, bars: list[dict]) -> dict:
 def run(ticker: str, at: str, interval: str = "15m") -> dict:
     bars = _bars_for(ticker, interval)
     t0 = _parse(at).timestamp()
-    past = [b for b in bars if b["t"] <= t0]
+    # STRICT BLINDFOLD: a bar stamped t covers prints through t+step, so the
+    # bar STRADDLING the decision moment carries up to 15 minutes of
+    # post-decision tape. Feeding it to the detector was lookahead - small,
+    # but exactly the kind that inflates a backtest. Only fully closed bars.
+    from common.quotes import INTERVALS, normalize_interval
+    step = INTERVALS[normalize_interval(interval) or "15m"][4]
+    past = [b for b in bars if b["t"] + step <= t0]
     rec = signals.recommend_trade(
         ticker, as_of=at, tape_bars=past if len(past) >= 30 else None)
     if "error" in rec:

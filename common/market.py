@@ -164,7 +164,15 @@ def black_scholes(spot: float, strike: float, dte_days: float, iv: float,
 
     Good enough for indicative quotes; a real desk would use a vol surface.
     """
-    t = max(dte_days, 0.5) / 365.0
+    # The floor used to be 0.5 DAYS, which quietly re-priced every 0DTE mark
+    # as if half a day of time value remained: the replay grader fed real
+    # fractional DTE in and got the floor back out, so afternoon decay never
+    # happened and pre-close entries got a free uplift toward the trim. On a
+    # desk whose validated doctrine is 0DTE, that floor was a standing lie.
+    # 0.02 days (~30 min) keeps the math finite at the expiry minute without
+    # inventing an afternoon that is not there. Day-granularity callers
+    # (days_to floors at 0.5) are unaffected: the floor only bites below it.
+    t = max(dte_days, 0.02) / 365.0
     sqrt_t = math.sqrt(t)
     d1 = (math.log(spot / strike) + (rate + iv**2 / 2) * t) / (iv * sqrt_t)
     d2 = d1 - iv * sqrt_t

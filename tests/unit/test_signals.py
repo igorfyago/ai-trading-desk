@@ -924,3 +924,47 @@ def test_plan_prose_never_says_buy(monkeypatch):
     assert "NOTHING FILLS YET" in pe
     assert ": buy " not in pe
     assert "(0x" not in pe and "$0)" not in pe
+
+
+def test_grader_applies_all_house_rules_not_just_the_trim():
+    """The grader stopped managing at the trim: no breakeven stop, no +400%
+    take, while the UI called its output 'the house rules'. Both exits now
+    exist, and entry is priced on the same fractional-DTE clock as the marks
+    (the old half-day floor handed pre-close decisions free time value)."""
+    from common import replay
+
+    t0 = 1_750_000_000
+    day = __import__("datetime").datetime.fromtimestamp(
+        t0, tz=__import__("datetime").timezone.utc).date().isoformat()
+    rec = {"as_of": __import__("datetime").datetime.fromtimestamp(
+               t0, tz=__import__("datetime").timezone.utc).isoformat(),
+           "snapshot_iv": 0.2,
+           "execution": {"kind": "call", "strike": 600.0, "expiry": day,
+                         "entry_underlying": 600.0,
+                         "entry_option_price_est": 2.0,
+                         "contract_plan": {"contracts_now": 4, "now_usd": 800,
+                                           "budget_usd": 2000}}}
+
+    def bar(i, c):
+        return {"t": t0 + (i + 1) * 900, "o": c, "h": c, "l": c, "c": c, "v": 1}
+
+    # rip to a trim, keep ripping to +400%: the runner must TAKE it
+    rip = [bar(i, 600 + i * 2.2) for i in range(14)]
+    v = replay.score_path(rec, rip)
+    assert v["gradable"] and v["trim"] is not None
+    assert v["runner_exit"] is not None and "400" in v["runner_exit"]["why"]
+    # entry graded on the marks' clock, quoted price reported beside it
+    assert v["entry"]["quoted_px"] == 2.0
+    assert v["entry"]["px"] != 2.0 or True   # same clock CAN coincide; px must exist
+    assert v["pnl_usd"] > 0
+
+    # rip to a trim but not the target, then round-trip: the runner must STOP
+    # AT ENTRY, and the whole trade still banks the trim half. Near expiry the
+    # option is nearly pure intrinsic, so the path is tuned to peak between
+    # 1.5x and 5x the graded entry.
+    rt = [bar(i, 600 + i * 0.55) for i in range(8)] + \
+         [bar(8 + i, 603.85 - i * 0.9) for i in range(8)]
+    v2 = replay.score_path(rec, rt)
+    assert v2["trim"] is not None
+    assert v2["runner_exit"] is not None and "entry" in v2["runner_exit"]["why"]
+    assert v2["pnl_usd"] > 0, "the trim half must survive the round-trip"

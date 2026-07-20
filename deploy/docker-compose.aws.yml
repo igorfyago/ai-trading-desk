@@ -306,6 +306,13 @@ services:
       ANALYTICS_DB_URL: jdbc:postgresql://minibank-control:5432/minimart_analytics
       ANALYTICS_DB_USER: minibank
       ANALYTICS_DB_PASSWORD: minibank
+      # the fourth service: freight, whose FreightDb defaults to the dev
+      # compose Postgres on localhost:5436 and crash-loops the whole JVM in
+      # prod without these (mart+pay outage 2026-07-20)
+      MINIFREIGHT_ADMIN_URL: jdbc:postgresql://minibank-control:5432/minibank
+      MINIFREIGHT_DB_URL: jdbc:postgresql://minibank-control:5432/minifreight
+      MINIFREIGHT_DB_USER: minibank
+      MINIFREIGHT_DB_PASSWORD: minibank
       MINIPAY_URL: http://localhost:8082
       # The processor reaches the affiliated bank's ISSUER face over HTTP, on
       # the container network, exactly as it would reach a stranger's. On-us
@@ -318,6 +325,7 @@ services:
       MINIMART_POOL: "8"
       MINIPAY_POOL: "8"
       ANALYTICS_POOL: "4"
+      MINIFREIGHT_POOL: "4"
       JAVA_TOOL_OPTIONS: "-Xmx320m"
     ports:
       - "127.0.0.1:8086:8081"

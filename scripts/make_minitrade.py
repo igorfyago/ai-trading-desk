@@ -8,6 +8,14 @@ palette, one lowercase word for a title, a TOP tab bar instead of the
 hover-out left rail.
 
 Idempotent: rerun after editing the source page and it rebuilds.
+
+STALE SOURCE, 2026-07-20: web/landing/index.html was deleted in 59815d5, and
+web/trade/index.html has been committed to directly since (59815d5, 4d5b2ec,
+fc61cf3 all carry trade-page hunks that exist in no source page). This script
+can no longer run, and it must NOT be pointed at web/portal/index.html and
+rerun: that page has diverged, and the output would silently drop those
+committed features. Until the page is re-sourced, TOPBAR and TOPBAR_CSS below
+stay the estate-shell spec and are kept in lockstep with the page by hand.
 """
 
 import re
@@ -37,9 +45,16 @@ TOPBAR = """  <header class="topbar">
       <button class="tab-btn" data-pane="positions">Positions</button>
       <button class="tab-btn" data-pane="replay">Replay</button>
       <button class="tab-btn" data-pane="gex">GEX</button>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <!-- THE ESTATE, exactly as the bank's shell orders it: Bank, Mart, Pay,
+           Portal, same window. To the customer these are one product, and a
+           tab bar that spawns windows is a link list wearing a tab bar's
+           clothes. Only GitHub, which is not the estate, opens a new tab. -->
       <a class="tab-btn" href="https://bank.b4rruf3t.com">Bank</a>
       <a class="tab-btn" href="https://mart.b4rruf3t.com">Mart</a>
-      <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
+      <a class="tab-btn" href="https://pay.b4rruf3t.com">Pay</a>
+      <a class="tab-btn" href="https://b4rruf3t.com">Portal</a>
+      <span class="nav-sep" aria-hidden="true"></span>
       <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
          target="_blank">GitHub</a>
       <div id="g-score" onclick="show('positions')"
@@ -73,6 +88,9 @@ TOPBAR_CSS = """
              transition:color .13s, border-color .13s, background .13s; }
   .tab-btn:hover { color:var(--text); border-color:var(--dim); }
   .tab-btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  /* the seam between this app's tabs and the rest of the estate · the same
+     hairline the bank's shell draws, copied from minibank verbatim */
+  .nav-sep { flex:none; width:1px; align-self:stretch; background:var(--line); margin:0 4px; }
 
   /* A pill laid out in the row, not a chip pinned to the window corner, which
      is why it used to align with nothing. */

@@ -795,3 +795,132 @@ def test_contract_plan_publishes_the_add_level_as_a_number(monkeypatch):
         assert isinstance(cp["add_level"], float | int)
         if cp["add_trigger"] and "crosses" in cp["add_trigger"]:
             assert f"{cp['add_level']:.2f}" in cp["add_trigger"]
+
+
+# ------------------------------------------------------------ the desk brain
+def test_deskgraph_answers_exactly_like_the_engine(monkeypatch):
+    """The graph is a WINDOW onto the engine, never a second opinion: same
+    ticker, same moment, byte-identical decision fields."""
+    from common import deskgraph
+
+    _force(monkeypatch, "negative_gamma", -40)
+    shipped = []
+    monkeypatch.setattr(deskgraph, "_ship", lambda r: shipped.append(r))
+
+    direct = signals.recommend_trade("SPY")
+    viagraph = deskgraph.run("SPY")
+    for key in ("bias", "structure", "copy_trade"):
+        assert viagraph[key] == direct[key]
+    x1, x2 = direct["execution"], viagraph["execution"]
+    assert (x1["kind"], x1["strike"]) == (x2["kind"], x2["strike"])
+
+    # and the run record is real: all four nodes, timed, with the order line
+    (run,) = shipped
+    assert [n["node"] for n in run["nodes"]] == ["structure", "tape", "decide", "order"]
+    assert all(isinstance(n["ms"], int) for n in run["nodes"])
+    assert run["outcome"] == "ok" and run["agent"] == "marcus"
+    assert run["order"].startswith(("Buy ", "Nothing on yet"))
+    assert run["spec"]["edges"] == [["structure", "tape"], ["tape", "decide"],
+                                    ["decide", "order"]]
+
+
+def test_deskgraph_never_walls_off_the_engine(monkeypatch):
+    """langgraph missing, a node exploding - the caller still gets the
+    engine's answer. Observability is a bonus, never a dependency."""
+    from common import deskgraph
+
+    _force(monkeypatch, "negative_gamma", -40)
+    monkeypatch.setattr(deskgraph, "_ship", lambda r: None)
+
+    # compile failure: the flag latches and the engine answers directly
+    monkeypatch.setattr(deskgraph, "_compiled", None)
+    monkeypatch.setattr(deskgraph, "_compile_failed", False)
+    def boom():
+        raise ImportError("no langgraph")
+    monkeypatch.setattr(deskgraph, "build", boom)
+    r = deskgraph.run("SPY")
+    assert "copy_trade" in r and deskgraph._compile_failed is True
+
+
+def test_a_put_never_borrows_the_longs_rearm_line(monkeypatch):
+    """The QQQ 699.28 splice, caught live on prod 2026-07-20 14:53Z. An
+    armed-LONG tape publishes BOTH action lines for the long's setup (the
+    confirm line and the -2sigma tag zone). The put pitch grabbed act.down by
+    label and read the long's tag zone as its own trigger: a level ABOVE spot
+    (already crossed downward) whose stated meaning was the opposite trade
+    re-arming. Lines now carry the side they serve, and both consumers must
+    refuse a line from the other trade."""
+    # the prod shape, replicated: spot 699.00 flushed under -2sigma, long armed
+    tape = {"bands_ok": True, "capitulation": None, "day_shape": None,
+            "stage": "armed", "bias": "long", "spot": 699.00,
+            "bands": {"u2": 700.9, "u1": 700.1, "vwap": 699.9,
+                      "d1": 699.6, "d2": 699.28},
+            "action": {"stance": "conditional",
+                       "up": {"level": 699.6, "dist": 0.6, "for": "long",
+                              "means": "a high-volume 15m body closing back above -1σ CONFIRMS the long - that is the entry"},
+                       "down": {"level": 699.28, "dist": 0.28, "for": "long",
+                                "means": "the tag zone - a wick re-arms it; a THICK close under it means the flush is real, no knife-catch"}}}
+
+    ex = {"kind": "put", "strike": 699.0, "entry_underlying": 699.00,
+          "entry_option_price_est": 2.10}
+    cp = signals._contract_and_sizing(ex, "QQQ", "negative_gamma", -40,
+                                      verdict="wait", tape=tape)
+    trig = cp["add_trigger"] or ""
+    assert "699.28" not in trig, f"the long's tag zone leaked into the put: {trig}"
+    assert "re-arms" not in trig
+    assert "no line within reach" in trig or "the entry level" in trig
+
+    # a CALL on the same tape may still use the long's confirm line: that one
+    # genuinely serves it and sits ahead of the trade
+    exc = {"kind": "call", "strike": 699.0, "entry_underlying": 699.00,
+           "entry_option_price_est": 2.10}
+    cpc = signals._contract_and_sizing(exc, "QQQ", "negative_gamma", 40,
+                                       verdict="wait", tape=tape)
+    assert "699.6" in (cpc["add_trigger"] or "")
+    assert "CONFIRMS the long" in cpc["add_trigger"]
+
+
+def test_the_dollars_said_are_the_dollars_spent():
+    """The min-1-contract floor bought a $2,100 contract against a stated
+    $1,000 half: a 2.1x silent overspend with two contradictory numbers in one
+    line. Now the fill is recomputed from the contracts actually bought, and a
+    premium the whole clip cannot cover becomes a plan, not a surprise."""
+    ex = {"kind": "call", "strike": 746.0, "entry_underlying": 746.0,
+          "entry_option_price_est": 18.0}          # $1,800: over the half, fits the clip
+    cp = signals._contract_and_sizing(ex, "SPY", "negative_gamma", 40,
+                                      budget=2000, verdict="partial",
+                                      tape=_armed_tape(u1=747.0, d1=744.0))
+    # one contract fits the CLIP, so the split collapses to one-now - and the
+    # dollars quoted are the true cost, not the fictional $1,000 half
+    assert cp["contracts_now"] == 1
+    assert cp["now_usd"] == 1800
+    assert cp["later_usd"] == 200
+
+    ex2 = {**ex, "entry_option_price_est": 25.0}   # $2,500: over the whole clip
+    cp2 = signals._contract_and_sizing(ex2, "SPY", "negative_gamma", 40,
+                                       budget=2000, verdict="partial",
+                                       tape=_armed_tape(u1=747.0, d1=744.0))
+    assert cp2["contracts_now"] == 0 and cp2["plan"] == "plan"
+    assert "over the" in (cp2["add_trigger"] or "")
+
+
+def test_plan_prose_never_says_buy(monkeypatch):
+    """The fifth authority: copy_trade said 'Nothing on yet' while
+    plain_english said 'buy ... @ ~2.13' and 'half now (0x, $0)' on the same
+    payload. A plan reads as a plan, whole."""
+    real = market.latest_snapshot
+
+    def fake(ticker, as_of=None):
+        snap = real(ticker)
+        snap["regime"] = "negative_gamma"
+        snap["signal_score"] = -40
+        snap["gamma_flip"] = None
+        return snap
+
+    monkeypatch.setattr(signals.market, "latest_snapshot", fake)
+    r = signals.recommend_trade("SPY", tape_bars=_flat_zero_volume_bars())
+    assert r["execution"]["contract_plan"]["plan"] == "plan"
+    pe = r["plain_english"]
+    assert "NOTHING FILLS YET" in pe
+    assert ": buy " not in pe
+    assert "(0x" not in pe and "$0)" not in pe

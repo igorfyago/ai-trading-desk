@@ -773,14 +773,16 @@ function tradeStickyFromPayload(raw) {
     // live or pending · "on confirmation only" told him nothing actionable.
     const tp = p.tape || {};
     const a = tp.action || {};
-    const bands = tp.bands || {};
-    const side = (tp.checklist || {}).side;
+    // the CONTRACT side picks the line, and the line must say it serves that
+    // side ("for") and sit ahead of the trade - the prose regex this replaces
+    // grabbed whichever line mentioned CONFIRM, including the other trade's
+    const want = x.kind === "call" ? "long" : "short";
+    const lineFor = [a.up, a.down].find((l) => l && l.for === want
+      && (x.kind === "call" ? l.dist > 0 : l.dist < 0));
     let cond = "take it now", ready = true, watch = null;
     if (a.stance === "conditional") {
-      const trig = [a.down, a.up].find((l) => l && /CONFIRM|TRIGGER/i.test(l.means));
-      const lvl = trig ? trig.level : (side === "long" ? bands.d1 : bands.u1);
-      cond = lvl != null
-        ? `wait · 15m close ${side === "long" ? "over" : "under"} ${lvl}`
+      cond = lineFor
+        ? `wait · 15m close ${x.kind === "call" ? "over" : "under"} ${lineFor.level}`
         : "wait · no trigger in reach yet";
       ready = false; watch = p.ticker;
     } else if (a.stance === "wait_pullback") {
@@ -798,6 +800,8 @@ function tradeStickyFromPayload(raw) {
       x.target && { price: x.target, label: "target", color: x.kind === "call" ? "green" : "red" },
     ].filter(Boolean);
     renderTradeSticky({ contract, cond, kind: x.kind, levels, ready, watch });
+    const st = $("trade-sticky");
+    if (st) st._contractKey = `${x.kind}:${x.strike}:${x.expiry}`;
     watchPendingTrade();
   } catch { /* the sticky is a bonus; the voice already said it */ }
 }
@@ -813,7 +817,16 @@ function watchPendingTrade() {
     if (!el || !el._watch || el.classList.contains("done") || document.hidden) return;
     try {
       const d = await fetch(`/api/summary/${encodeURIComponent(el._watch)}`).then((r) => r.json());
-      if (d && d.trade) tradeStickyFromPayload(JSON.stringify(d.trade));
+      if (!d || !d.trade) return;
+      const fx = (d.trade.execution || {});
+      const key = `${fx.kind}:${fx.strike}:${fx.expiry}`;
+      // same contract: full refresh (its condition may have armed). A
+      // DIFFERENT contract stays out - the heartbeat announces new trades,
+      // the sticky guards the one already pinned.
+      if (!el._contractKey || el._contractKey === key) {
+        el._contractKey = key;
+        tradeStickyFromPayload(JSON.stringify(d.trade));
+      }
     } catch { /* provider hiccup: next tick */ }
   }, 30000);
 }
@@ -838,7 +851,7 @@ function tradeStickyFromTrade(t) {
 }
 
 function drawCallerLevels(args) {
-  const levels = (args.clear ? [] : (args.levels || []))
+  const levels = (args.levels || [])
     .filter((l) => l && typeof l.price === "number" && isFinite(l.price) && l.price > 0)
     .slice(0, 8)
     .map((l) => ({ price: l.price, label: String(l.label || "").slice(0, 28),
@@ -846,6 +859,7 @@ function drawCallerLevels(args) {
   const msg = { deskDrawLevels: { levels, clear: !!args.clear } };
   if (window.parent !== window) window.parent.postMessage(msg, "*");  // embed: the parent owns the chart
   dock.extraLevels = levels;
+  dock.extraLevelsSym = dock.symbol;
   if (dock.chart) {
     if (dock.active) dockLevels(dock.active);
     else {
@@ -878,8 +892,14 @@ boot();
 
 const dock = { chart: null, symbol: null, chartSeq: 0, active: null, pip: null,
   quotesES: null, quotesSyms: "", eventsES: null };
-const DOCK_SECS = 900;   // 15m: the SAME tape the dashboard chart shows —
-                         // one chart identity everywhere, no spin-offs
+const DOCK_SECS = 900;   // 15m: the SAME tape the dashboard chart shows AND
+                         // the same bars the ENGINE reads (get_tape_read is
+                         // 15m) — one chart identity everywhere
+const DOCK_INTERVAL = `${DOCK_SECS / 60}m`;  // derived: fetch and identity
+                                             // CANNOT diverge again (the dock
+                                             // once fetched 5m under a 15m
+                                             // identity; studies ran on a
+                                             // mixed series)
 
 function fmtUsd(x) {
   if (x === null || x === undefined) return "";
@@ -987,11 +1007,12 @@ async function dockChartBoot(underlying) {
   if (!window.DeskChart || (dock.chart && dock.symbol === sym)) return;
   const seq = ++dock.chartSeq;
   try {
-    const data = await fetch(`/api/bars/${sym}?interval=5m&limit=400`)
+    const data = await fetch(`/api/bars/${sym}?interval=${DOCK_INTERVAL}&limit=400`)
       .then((r) => (r.ok ? r.json() : null));
     if (seq !== dock.chartSeq) return;                // a newer boot superseded this one
     if (!data || !(data.bars || []).length) return;   // text-only dock still works
     if (!dock.chart) dock.chart = DeskChart.create($("dock-chart"), { intervalSec: DOCK_SECS });
+    if (dock.extraLevelsSym && dock.extraLevelsSym !== sym) dock.extraLevels = [];
     dock.chart.setData(data.bars, DOCK_SECS, { symbol: sym });
     dock.symbol = sym;
     dockQuotes();                                     // the stream follows the chart's symbol

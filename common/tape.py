@@ -612,11 +612,16 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
     # composing its own levels (a wall 4$ away is context, not a trigger).
     reach = max(1.25 * band["sigma"], spot * 0.0015)
 
-    def _line(level, means):
+    def _line(level, means, serves):
+        """serves: which trade this line belongs to ('long'/'short'). The QQQ
+        splice bug was a put reading the LONG's re-arm zone as its own add
+        trigger - a level already behind price whose meaning described the
+        opposite trade. Lines now carry their side so no consumer can
+        mis-attribute them again."""
         if level is None or abs(level - spot) > reach or abs(level - spot) < spot * 1e-5:
             return None
         return {"level": round(level, 2), "dist": round(level - spot, 2),
-                "means": means}
+                "means": means, "for": serves}
 
     vw_px = band["vwap"]
     up = down = None
@@ -630,28 +635,28 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
                   f"target {_fmt(target)}, thesis dies on a 15m close back "
                   f"{'below' if bias == 'long' else 'above'} VWAP {vw_px:.2f}.")
         if bias == "long":
-            up = _line(target, "the gap target - scale the runner there")
-            down = _line(vw_px, "a 15m close under VWAP kills the thesis - no adds")
+            up = _line(target, "the gap target - scale the runner there", "long")
+            down = _line(vw_px, "a 15m close under VWAP kills the thesis - no adds", "long")
         else:
-            down = _line(target, "the gap target - scale the runner there")
-            up = _line(vw_px, "a 15m close over VWAP kills the thesis - no adds")
+            down = _line(target, "the gap target - scale the runner there", "short")
+            up = _line(vw_px, "a 15m close over VWAP kills the thesis - no adds", "short")
     elif cap:
         stance = "enter"
         do_now = (f"Capitulation flush at {spot:.2f} - {cap['why']}. Long here; "
                   f"the thesis line is VWAP {vw_px:.2f}.")
-        up = _line(target, "first objective")
-        down = _line(vw_px, "a 15m close under VWAP and the flush failed")
+        up = _line(target, "first objective", "long")
+        down = _line(vw_px, "a 15m close under VWAP and the flush failed", "long")
     elif ds and ds.get("takeable"):
         d_side = "long" if ds["shape"].startswith("bull") else "short"
         stance = "enter"
         do_now = (f"Reversal day is on and fresh - the {d_side} works here at "
                   f"{spot:.2f}; the thesis line is VWAP {vw_px:.2f}.")
         if d_side == "long":
-            up = _line(target, "first objective - the gap/wall ahead")
-            down = _line(vw_px, "the thesis - a thick 15m close under it and the day-call is wrong")
+            up = _line(target, "first objective - the gap/wall ahead", "long")
+            down = _line(vw_px, "the thesis - a thick 15m close under it and the day-call is wrong", "long")
         else:
-            down = _line(target, "first objective - the gap/wall ahead")
-            up = _line(vw_px, "the thesis - a thick 15m close over it and the day-call is wrong")
+            down = _line(target, "first objective - the gap/wall ahead", "short")
+            up = _line(vw_px, "the thesis - a thick 15m close over it and the day-call is wrong", "short")
     elif ds:
         d_side = "long" if ds["shape"].startswith("bull") else "short"
         stance = "wait_pullback"
@@ -659,22 +664,22 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
                   f"{'bullish' if d_side == 'long' else 'bearish'} reversal day is in but the "
                   f"entry window passed; wait for a pullback toward VWAP {vw_px:.2f} that holds.")
         if d_side == "long":
-            down = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day")
-            up = _line(wall_above, "if it gets there without a pullback, it ran without you - still no chase")
+            down = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day", "long")
+            up = _line(wall_above, "if it gets there without a pullback, it ran without you - still no chase", "long")
         else:
-            up = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day")
-            down = _line(wall_below, "if it gets there without a pullback, it ran without you - still no chase")
+            up = _line(vw_px, "the pullback zone - a hold there is the entry; a thick close through it kills the day", "short")
+            down = _line(wall_below, "if it gets there without a pullback, it ran without you - still no chase", "short")
     elif gap and gap["fired"]:
         g_long = gap["side"] == "long"
         stance = "enter"
         do_now = (f"GAP RUN fired at {spot:.2f} - a thick close through "
                   f"{gap['trigger']} into a thin book; it travels fast to {gap['target']}.")
         if g_long:
-            up = _line(gap["target"], "the far side of the thin book - scale there")
-            down = _line(band["vwap"], "back under VWAP kills the run")
+            up = _line(gap["target"], "the far side of the thin book - scale there", "long")
+            down = _line(band["vwap"], "back under VWAP kills the run", "long")
         else:
-            down = _line(gap["target"], "the far side of the thin book - scale there")
-            up = _line(band["vwap"], "back over VWAP kills the run")
+            down = _line(gap["target"], "the far side of the thin book - scale there", "short")
+            up = _line(band["vwap"], "back over VWAP kills the run", "short")
     elif stage == "confirming":
         gate = ([w for w in prof["walls"] if w > bars[conf_i]["c"]] if bias == "long"
                 else [w for w in prof["walls"] if w < bars[conf_i]["c"]])
@@ -683,32 +688,32 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         do_now = (f"Nothing filled yet at {spot:.2f} - the {bias} is confirming; "
                   "the trigger is the wall, not here.")
         if bias == "long":
-            up = _line(trig_lvl, f"a push through it TRIGGERS the long - gap runs toward {_fmt(target)}")
-            down = _line(band["d1"], "a 15m close back under -1σ kills the confirm - stand down")
+            up = _line(trig_lvl, f"a push through it TRIGGERS the long - gap runs toward {_fmt(target)}", "long")
+            down = _line(band["d1"], "a 15m close back under -1σ kills the confirm - stand down", "long")
         else:
-            down = _line(trig_lvl, f"a push through it TRIGGERS the short - gap runs toward {_fmt(target)}")
-            up = _line(band["u1"], "a 15m close back over +1σ kills the confirm - stand down")
+            down = _line(trig_lvl, f"a push through it TRIGGERS the short - gap runs toward {_fmt(target)}", "short")
+            up = _line(band["u1"], "a 15m close back over +1σ kills the confirm - stand down", "short")
     elif stage == "armed":
         stance = "conditional"
         do_now = (f"Nothing to buy at {spot:.2f} - the {bias} reversal is armed, "
                   "not confirmed; the entry is the confirm close, and only that.")
         if bias == "long":
-            up = _line(band["d1"], "a high-volume 15m body closing back above -1σ CONFIRMS the long - that is the entry")
-            down = _line(band["d2"], "the tag zone - a wick re-arms it; a THICK close under it means the flush is real, no knife-catch")
+            up = _line(band["d1"], "a high-volume 15m body closing back above -1σ CONFIRMS the long - that is the entry", "long")
+            down = _line(band["d2"], "the tag zone - a wick re-arms it; a THICK close under it means the flush is real, no knife-catch", "long")
         else:
-            down = _line(band["u1"], "a high-volume 15m body closing back under +1σ CONFIRMS the short - that is the entry")
-            up = _line(band["u2"], "the tag zone - holding above it kills the fade, the trend runs")
+            down = _line(band["u1"], "a high-volume 15m body closing back under +1σ CONFIRMS the short - that is the entry", "short")
+            up = _line(band["u2"], "the tag zone - holding above it kills the fade, the trend runs", "short")
     elif gap:
         g_long = gap["side"] == "long"
         stance = "conditional"
         do_now = (f"Gap run LOADED at {spot:.2f} - wicks basing, thin book "
                   f"{'overhead' if g_long else 'below'}; the thick close starts it.")
         if g_long:
-            up = _line(gap["trigger"], f"a THICK 15m close above it starts the run - thin book to {gap['target']}")
-            down = _line(band["d1"], "losing the basing zone kills the idea")
+            up = _line(gap["trigger"], f"a THICK 15m close above it starts the run - thin book to {gap['target']}", "long")
+            down = _line(band["d1"], "losing the basing zone kills the idea", "long")
         else:
-            down = _line(gap["trigger"], f"a THICK 15m close below it starts the run - thin book to {gap['target']}")
-            up = _line(band["u1"], "losing the basing zone kills the idea")
+            down = _line(gap["trigger"], f"a THICK 15m close below it starts the run - thin book to {gap['target']}", "short")
+            up = _line(band["u1"], "losing the basing zone kills the idea", "short")
     elif band["degenerate"]:
         # No volume in this session, so there is no VWAP and no bands. Say that
         # instead of pointing at spot: quoting a placeholder as "the line" is
@@ -718,15 +723,15 @@ def read_tape(bars: list[dict], ticker: str = "Spot") -> dict:
         stance = "wait"
         do_now = (f"No session volume yet at {spot:.2f} - no VWAP, no bands, so "
                   "no band setup can be judged. Wait for the open.")
-        up = _line(wall_above, "the first level above, from the volume profile")
-        down = _line(wall_below, "the first level below, from the volume profile")
+        up = _line(wall_above, "the first level above, from the volume profile", "long")
+        down = _line(wall_below, "the first level below, from the volume profile", "short")
     else:
         stance = "wait"
         do_now = f"No setup armed at {spot:.2f} - nothing to do; watch the lines."
         ups = [x for x in (band["u1"], band["u2"], wall_above) if x is not None and x > spot]
         dns = [x for x in (band["d1"], band["d2"], wall_below) if x is not None and x < spot]
-        up = _line(min(ups) if ups else None, "reclaim and hold it and buyers take control")
-        down = _line(max(dns) if dns else None, "lose it and sellers take control")
+        up = _line(min(ups) if ups else None, "reclaim and hold it and buyers take control", "long")
+        down = _line(max(dns) if dns else None, "lose it and sellers take control", "short")
 
     action = {"stance": stance, "do_now": do_now, "up": up, "down": down,
               "reach": round(reach, 2)}

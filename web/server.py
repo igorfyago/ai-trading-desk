@@ -896,6 +896,16 @@ async def write_calllog(turn: VoiceTurn):
     return {"ok": True}
 
 
+@app.get("/api/brain")
+def brain_meta():
+    """The desk brain's topology and wiring: which DAG decides, whether the
+    LangGraph runtime is live, and where runs are shipped (the observatory).
+    The observatory reads this instead of hardcoding the graph, so the DAG it
+    draws can never drift from the one that actually runs."""
+    from common import deskgraph
+    return deskgraph.graph_meta()
+
+
 @app.get("/api/watch/{ticker}")
 async def watch_setup(ticker: str, kind: str = "", strike: float = 0,
                       entry: float = 0, expiry: str = "", add: float = 0):
@@ -938,11 +948,17 @@ async def watch_setup(ticker: str, kind: str = "", strike: float = 0,
                          f"{ds['capitulation_x']}x volume flush, VWAP "
                          f"{'reclaimed' if side == 'long' else 'lost'}")}
     if setup:
-        # the fingerprint pins the SETUP, not the moment: a flush that stays
-        # live for three bars must not be pitched three times
+        # the fingerprint pins the SETUP, not the moment. A capitulation is a
+        # BAR event, so the bar timestamp is its identity. A reversal DAY stays
+        # takeable across many bars - stamping it with bar_t made it a new
+        # "setup" every 15 minutes and Marcus would have re-pitched it all
+        # afternoon; its identity is the session, not the bar.
+        bar_t = read.get("bar_t") or 0
+        stamp = (bar_t if setup["signal"] == "capitulation"
+                 else f"{setup['side']}:{(bar_t - 4 * 3600) // 86400}")
         events.append({"event": "new_setup", "why": setup["why"], "side": setup["side"],
                        "signal": setup["signal"],
-                       "fingerprint": f"{tkr}:{setup['signal']}:{read.get('bar_t') or ''}"})
+                       "fingerprint": f"{tkr}:{setup['signal']}:{stamp}"})
 
     if kind in ("call", "put") and strike > 0 and entry > 0:
         try:

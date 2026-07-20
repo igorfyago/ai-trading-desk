@@ -579,11 +579,17 @@ def _confluence(kind: str, snap: dict, flip, score: float, tape: dict | None) ->
 
     # 5. Location: an actionable line within reach on this side
     act = tape.get("action") or {}
-    # ON THIS SIDE, or not at all. The fallback here used to reach for the
-    # OPPOSITE side's line and score it green, so a long was handed the
-    # bearish line as its "entry line" - inflating the green count and making
-    # the spoken explanation false when a caller asked which level it meant.
+    # ON THIS SIDE, or not at all - and the line must SAY it serves this side.
+    # Matching the up/down label alone re-created the bug one level deeper: an
+    # armed-long tape publishes both labels for the LONG's setup, so a short
+    # was scored green off the long's re-arm zone (the QQQ splice). The line
+    # also has to sit ahead of the trade: dist positive for a long entry,
+    # negative for a short one.
+    want_side = "long" if side > 0 else "short"
     entry_line = act.get("down") if side < 0 else act.get("up")
+    if entry_line is not None and (entry_line.get("for") != want_side
+                                   or (entry_line.get("dist") or 0) * side <= 0):
+        entry_line = None
     if entry_line and entry_line.get("level") is not None and tape.get("bands_ok", True):
         s5 = box("location", "green",
                  f"entry line {entry_line['level']} within reach ({entry_line['dist']:+})")
@@ -775,14 +781,20 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
     # armed". Structure still gets quoted in full; it just cannot fill.
     if not tape_armed(tape):
         plan, now_usd, later_usd = "plan", 0, budget
-        # STATE THE CONDITION, ON THE RIGHT SIDE OF PRICE. Quoting a static
-        # entry level here produced "wait for SPY to cross 746.48" while SPY
-        # was already at 746.53 - a condition the caller had to be told twice
-        # was not a condition. The tape's own up/down lines are built from
-        # levels strictly beyond spot and within reach, so a line taken from
-        # there cannot already be satisfied when it is spoken.
+        # STATE THE CONDITION, ON THE RIGHT SIDE OF PRICE - and FROM THE RIGHT
+        # TRADE. Matching the up/down LABEL alone was not enough: an armed-LONG
+        # tape publishes BOTH lines for the long's setup, so a put grabbed the
+        # long's re-arm zone as its own trigger - a level already behind price
+        # whose meaning described the opposite trade (the QQQ 699.28 splice,
+        # caught on prod). A line is usable only when it says it serves THIS
+        # side and sits strictly ahead of the trade (dist sign matches).
         act = (tape or {}).get("action") or {}
+        side_name = "call" if execution["kind"] == "call" else "put"
+        want = "long" if side_name == "call" else "short"
         line = act.get("up") if execution["kind"] == "call" else act.get("down")
+        if line is not None and (line.get("for") != want
+                                 or (line.get("dist") or 0) * (1 if want == "long" else -1) <= 0):
+            line = None
         if line and line.get("level") is not None:
             trigger = (f"nothing arms yet - {spoken} has to reach {line['level']:g}, "
                        f"and then: {line['means']}. This is the plan, not an order")
@@ -829,6 +841,23 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
     if contract_ticker != spoken:
         contract_spoken += f" (= {spoken} {execution['strike']:g})"
 
+    # THE DOLLARS SAID ARE THE DOLLARS SPENT. The old floor (min 1 contract)
+    # could buy a $2,100 contract against a stated $1,000 half - a 2.1x silent
+    # overspend, and the copy line then carried two contradictory numbers. One
+    # contract is still allowed when it fits the WHOLE clip (a split that
+    # cannot split collapses to "one now"), and now_usd is recomputed from the
+    # contracts actually bought so the words can never disagree with the fill.
+    contracts_now = int(now_usd // per_contract) if now_usd > 0 else 0
+    if contracts_now == 0 and now_usd > 0 and per_contract <= budget:
+        contracts_now = 1
+    if contracts_now * per_contract > 0:
+        now_usd = contracts_now * per_contract
+        later_usd = max(budget - now_usd, 0)
+    elif now_usd > 0:                        # priced out of even one contract
+        plan, now_usd, later_usd = "plan", 0, budget
+        trigger = (f"one {contract_spoken} costs ~${per_contract:,.0f}, over the "
+                   f"${budget:g} clip - this is the plan, not an order")
+
     return {
         "contract_ticker": contract_ticker,
         "contract": f"{contract_strike:g}{kind_letter}",
@@ -842,7 +871,7 @@ def _contract_and_sizing(execution: dict, ticker: str, regime: str, score: float
         "plan": plan,
         "now_usd": round(now_usd),
         "later_usd": round(later_usd),
-        "contracts_now": (max(int(now_usd // per_contract), 1) if now_usd > 0 else 0),
+        "contracts_now": contracts_now,
         "add_trigger": trigger,
         # the add level as a NUMBER, for the machine that watches the tape
         # while the call sits open. The prose above is for the model; a poller
@@ -906,6 +935,20 @@ def _plain_english_exec(ticker: str, x: dict) -> str:
     contract = (cp.get("contract_spoken")
                 or f"{cp.get('contract_ticker', ticker)} {cp.get('contract', '')}"
                 ) if cp else f"{ticker} {round(x['strike']):g}{kl}"
+    # NOTHING FILLS -> NOTHING SAYS "BUY". This prose was the fifth authority:
+    # copy_trade said "Nothing on yet" while this said "buy ... @ ~2.13" and
+    # "half now (0x, $0)" in the same payload, and the model voiced whichever
+    # it read last. A plan is described in the conditional, whole.
+    if cp and cp.get("plan") == "plan":
+        return (
+            f"{x['gex_headline']} - {x['gex_why']}. "
+            f"NOTHING FILLS YET - this is the structure, quoted so you're ready: "
+            f"{contract} @ ~{x['entry_option_price_est']:.2f}, expiring {x['expiry']} "
+            f"({x['dte_days']:g} DTE), would trim half at {x['tp50_option_price']:.2f}. "
+            f"{cp.get('add_trigger') or 'No trigger in reach yet.'} "
+            f"{x.get('thesis_label', 'the tipping point')} at {x['thesis_reference']:g} "
+            "is the line that tells you whether the idea still stands."
+        )
     sizing_bit = (
         f"Clip ${cp.get('budget_usd', 2000):g}: "
         + (f"all of it now ({cp.get('contracts_now')}x) - {cp.get('sizing_why')}. "

@@ -450,6 +450,9 @@
 </style>
 </head>
 <body>
+  <!-- Estate bar: cross-app tabs + the one signed-in user live there now,
+       so this topbar carries only the desk's own sections. -->
+  <script src="https://auth.b4rruf3t.com/eco-nav.js" defer></script>
   <header class="topbar">
     <span class="brand">mini<span>trade</span></span>
     <div class="tb-nav">
@@ -457,12 +460,8 @@
       <button class="tab-btn" data-pane="positions">Positions</button>
       <button class="tab-btn" data-pane="replay">Replay</button>
       <button class="tab-btn" data-pane="gex">GEX</button>
-      <a class="tab-btn" href="https://bank.b4rruf3t.com">Bank</a>
-      <a class="tab-btn" href="https://mart.b4rruf3t.com">Mart</a>
-      <a class="tab-btn" href="https://b4rruf3t.com">All apps</a>
       <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
          target="_blank">GitHub</a>
-
     </div>
   </header>
 
@@ -1584,7 +1583,9 @@
   window.addEventListener("message", (e) => {
     const d = e.data && e.data.deskDrawLevels;
     if (!d) return;
-    callerLevels = d.clear ? null : { sym: focus, levels: d.levels || [] };
+    callerLevels = (d.levels && d.levels.length)
+      ? { sym: focus, levels: d.levels }              // clear-and-redraw in one call
+      : (d.clear ? null : callerLevels);
     applyGexLevels();
   });
 

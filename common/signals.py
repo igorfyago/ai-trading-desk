@@ -434,8 +434,16 @@ def _execution_plan(snap, spot, flip, put_wall, call_wall, score, dte, atm, step
         "tp_rule": "sell HALF when the option is up 50%",
         "tp50_option_price": tp50_px,
         "tp50_underlying_est": tp50_u,
-        "runner_rule": "after the trim, let the rest ride to the target or expiry - "
-                       "no management, worst case it expires worthless",
+        # THE TESTED MANAGEMENT. "let it ride to expiry, no management" is not
+        # what was measured: the runner is stopped at ENTRY if it round-trips,
+        # and taken at +400%. The breakeven stop is what turns the average
+        # loser from -100% into something survivable, and it is the single
+        # biggest contributor to the profit factor.
+        "runner_rule": (f"after the trim, stop the runner at {entry_px:.2f} "
+                        f"(entry - the trade is free from there) or let it ride "
+                        f"to {entry_px * 5:.2f}"),
+        "runner_stop_price": entry_px,
+        "runner_target_price": round(entry_px * 5, 2),
         "stop": None,
         "risk_plan": "no stop-loss by design: size small (half a percent of the "
                      "account max) and accept the contract can go to zero",
@@ -695,6 +703,11 @@ def _copy_trade_line(x: dict) -> str:
             f"${cp.get('now_usd'):g}, {cp.get('contracts_now')} contracts"]
     if x.get("tp50_option_price"):
         bits.append(f"sell half at {x['tp50_option_price']:.2f}")
+    if x.get("runner_stop_price"):
+        # the caller is copying this into a broker: the runner needs its two
+        # exits stated as prices, not as a doctrine they have to translate
+        bits.append(f"then stop the rest at {x['runner_stop_price']:.2f} "
+                    f"or ride to {x['runner_target_price']:.2f}")
     if cp.get("later_usd"):
         bits.append(str(cp.get("add_trigger")))
     return " ".join(_sentence(b) for b in bits)

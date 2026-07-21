@@ -813,7 +813,11 @@
       state.priceLines = (levels || []).filter((l) => l && l.price).map((l) =>
         candles.createPriceLine({
           price: l.price, color: l.color || palette().dim,
-          lineWidth: 1, lineStyle: l.style ?? 2, axisLabelVisible: true,
+          lineWidth: 1, lineStyle: l.style ?? 2,
+          // a structure level's bare number on the axis reads as THE PRICE —
+          // only the live close may claim the axis; levels keep their text
+          // title (call wall / put wall / γ flip) but no axis pill
+          axisLabelVisible: l.axis !== false,
           title: l.title || "",
         }));
     }

@@ -1574,7 +1574,7 @@
     if (gexLevels && gexLevels.sym === focus && GEX_COVERED.includes(focus)) {
       if (gexLevels.call) lv.push({ price: gexLevels.call, color: cssv("--green"), style: 2, title: "call wall" });
       if (gexLevels.put) lv.push({ price: gexLevels.put, color: cssv("--red"), style: 2, title: "put wall" });
-      if (gexLevels.flip) lv.push({ price: gexLevels.flip, color: cssv("--accent"), style: 3, title: "flip" });
+      if (gexLevels.flip) lv.push({ price: gexLevels.flip, color: cssv("--accent"), style: 3, title: "γ flip", axis: false });
     }
     for (const p of book.positions) {
       if (p.underlying !== focus && !(p.underlying === "SPY" && focus === "XSP")) continue;

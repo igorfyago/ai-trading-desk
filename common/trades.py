@@ -25,7 +25,8 @@ _COLS = ("id", "created_at", "updated_at", "session", "source", "underlying",
          "contracts_total", "contracts_open", "status", "quoted_px", "entry_px",
          "trim_px", "close_px", "entry_underlying", "tp50_px", "tp50_underlying",
          "thesis_reference", "iv_entry", "entry_at", "trim_at", "close_at",
-         "realized_usd", "note")
+         "realized_usd", "note", "broker_order_id", "broker_customer",
+         "broker_contract", "broker_status", "broker_reason")
 
 
 def _now() -> str:
@@ -60,6 +61,36 @@ def _latest(session: str | None, statuses: tuple[str, ...]) -> dict | None:
             return hit[0]
     hit = _fetch(f"status IN ({marks})", statuses, 1)
     return hit[0] if hit else None
+
+
+def _apply_mirror(trade: dict) -> dict:
+    """The post-Allow hook: mirror a just-opened entry into the linked
+    customer's broker account, and record EXACTLY what happened on the row.
+
+    Runs AFTER the local commit — the desk's own log already holds the trade,
+    so a broker that is down, unlinked or refusing can only ever cost the
+    mirror, never the trade. common.broker.mirror_entry never raises; if
+    recording its outcome fails, the entry itself is already safe.
+    """
+    from common import broker
+
+    out = broker.mirror_entry(trade)
+    if not out:
+        return trade
+    note = trade.get("note")
+    extra = out.pop("note_extra", None)
+    if extra:
+        note = f"{note} · {extra}" if note else extra
+    conn = get_connection()
+    conn.execute("UPDATE trades SET broker_order_id=?, broker_customer=?,"
+                 " broker_contract=?, broker_status=?, broker_reason=?,"
+                 " note=?, updated_at=? WHERE id=?",
+                 (out["broker_order_id"], out["broker_customer"],
+                  out["broker_contract"], out["broker_status"],
+                  out["broker_reason"], note, _now(), trade["id"]))
+    conn.commit()
+    conn.close()
+    return _fetch("id = ?", (trade["id"],), 1)[0]
 
 
 # ------------------------------------------------------------- lifecycle ----
@@ -141,6 +172,7 @@ def confirm_entry(session: str, fill_price: float | None = None,
     conn.commit()
     conn.close()
     trade = _fetch("id = ?", (trade["id"],), 1)[0]
+    trade = _apply_mirror(trade)
     _emit("opened", trade)
     return trade
 
@@ -335,6 +367,8 @@ def adjust(trade_id: int, action: str, qty: int | None = None,
     conn.commit()
     conn.close()
     trade = _fetch("id = ?", (t["id"],), 1)[0]
+    if event == "opened":                 # first ADD = the entry · same hook
+        trade = _apply_mirror(trade)
     _emit(event, trade)
     return trade
 

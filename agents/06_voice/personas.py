@@ -158,11 +158,21 @@ def confirm_entry(session: str = "voice", fill_price: float | None = None,
     t = trades.confirm_entry(session, fill_price, contracts)
     if "error" in t:
         return json.dumps(t)
-    return json.dumps({"status": "open", "contract": f"{t['contract_ticker']} "
-                       f"{t['strike']:g}{t['kind'][0]}", "entry_px": t["entry_px"],
-                       "contracts": t["contracts_open"],
-                       "book": trades.book_line(),
-                       "say": f"Logged, in at {_say_px(t['entry_px'])}."})
+    out = {"status": "open", "contract": f"{t['contract_ticker']} "
+           f"{t['strike']:g}{t['kind'][0]}", "entry_px": t["entry_px"],
+           "contracts": t["contracts_open"],
+           "book": trades.book_line(),
+           "say": f"Logged, in at {_say_px(t['entry_px'])}."}
+    # execution mirror facts, verbatim from the record — the broker line may
+    # only be spoken when it is true, and the reason when it is not
+    if t.get("broker_order_id"):
+        out["broker"] = (f"executed in broker account #{t['broker_customer']}"
+                         f" as {t['broker_contract']}")
+    elif t.get("broker_status") == "unlinked":
+        out["broker"] = "no linked broker account · desk log only"
+    elif t.get("broker_reason"):
+        out["broker"] = f"broker order not confirmed: {t['broker_reason']}"
+    return json.dumps(out)
 
 
 def trim_half(session: str = "voice", price: float | None = None) -> str:

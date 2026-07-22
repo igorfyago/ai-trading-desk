@@ -1,6 +1,6 @@
 """Shared test setup.
 
-Three invariants for the whole suite:
+Four invariants for the whole suite:
 1. No test ever touches the real OpenAI API unless explicitly opted in
    (RUN_LIVE=1): a dummy key is planted BEFORE any langchain import, and
    load_dotenv(override=False) in the app modules won't replace it.
@@ -17,6 +17,11 @@ from pathlib import Path
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 os.environ.setdefault("LANGSMITH_TRACING", "false")
 os.environ.setdefault("QUOTES_PROVIDER", "off")
+# 4. No test touches a real broker: the execution mirror aims at a port that
+#    refuses instantly (no DNS, no 2s timeout), so every entry in the suite
+#    exercises the degrade path unless a test installs its own fake client.
+os.environ.setdefault("BROKER_URL", "http://127.0.0.1:9")
+os.environ.setdefault("BROKER_TIMEOUT", "0.5")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))

@@ -129,7 +129,12 @@ CREATE TABLE IF NOT EXISTS trades (
     entry_at TEXT, trim_at TEXT, close_at TEXT,
     realized_usd REAL NOT NULL DEFAULT 0,
     note TEXT,
-    payload TEXT                        -- full engine output at quote time
+    payload TEXT,                       -- full engine output at quote time
+    broker_order_id TEXT,               -- broker's order id · set ONLY when placed
+    broker_customer INTEGER,            -- whose book the mirror resolved to
+    broker_contract TEXT,               -- OCC symbol the desk submitted
+    broker_status TEXT,                 -- filled/... | rejected | unlinked | unreachable | unmirrorable
+    broker_reason TEXT                  -- why NOT executed · NULL when it was
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_ticker_time ON snapshots (ticker, captured_at DESC);
@@ -220,12 +225,34 @@ def _seed(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+# Columns added to `trades` after the table shipped. CREATE TABLE IF NOT
+# EXISTS cannot retrofit them onto an existing desk.db, so they are ALTERed
+# in when absent — additive only, never a rewrite of recorded rows.
+_TRADES_UPGRADES = {
+    "broker_order_id": "TEXT",
+    "broker_customer": "INTEGER",
+    "broker_contract": "TEXT",
+    "broker_status": "TEXT",
+    "broker_reason": "TEXT",
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    have = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+    missing = [(c, t) for c, t in _TRADES_UPGRADES.items() if c not in have]
+    for col, typ in missing:
+        conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {typ}")
+    if missing:
+        conn.commit()
+
+
 def get_connection() -> sqlite3.Connection:
     """Open the demo DB, creating and seeding it on first use."""
     DATA_DIR.mkdir(exist_ok=True)
     fresh = not DB_PATH.exists()
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+    _migrate(conn)
     if fresh:
         _seed(conn)
     return conn

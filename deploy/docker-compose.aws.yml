@@ -358,11 +358,11 @@ services:
     volumes:
       - sso_keys:/keys
 
-  # ---- glance: the practice second screen (clone side by side: /opt/apps/glance)
-  # The laptop pushes a JPEG of its screen in every two seconds and a phone
-  # reads it at remote.b4rruf3t.com. It costs money per solve, so it meters
-  # itself and stops rather than surprising anyone with a bill, the same way
-  # the observatory does.
+  # ---- glance: a private tool (clone side by side: /opt/apps/glance, which is
+  # a private repo). Its hostname lives in deploy/.env as PRIVATE_HOST and is
+  # deliberately not written down in this repo, which is public.
+  # It costs money per call, so it meters itself and stops rather than
+  # surprising anyone with a bill, the same way the observatory does.
   glance:
     build: ../../glance
     restart: unless-stopped
@@ -393,6 +393,9 @@ services:
     restart: unless-stopped
     environment:
       BASE_DOMAIN: ${BASE_DOMAIN:-localhost}
+      # Hostname of the unlisted private tool. Unset means Caddy binds a
+      # harmless placeholder instead, so a fresh clone still comes up.
+      PRIVATE_HOST: ${PRIVATE_HOST:-private.localhost}
     ports:
       - "80:80"
       - "443:443"

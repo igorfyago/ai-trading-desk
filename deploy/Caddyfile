@@ -126,23 +126,24 @@ auth.{$BASE_DOMAIN} {
     reverse_proxy sso:8090
 }
 
-# remote.b4rruf3t.com · the practice second screen. The laptop pushes a picture
-# of its screen to /api/ingest and a phone reads it here.
+# A private, password-gated tool. Unlike every block above it, this one is not
+# part of the estate: nothing links to it, it is absent from the eco-nav bar
+# and from the portal, and its hostname is NOT written down here.
 #
-# Two different credentials, on purpose. A person reading the page has a
-# password and a signed cookie; the capture client has a bearer token and never
-# gets a session. Neither one is the other's fallback, so leaking the token
-# published nothing, and leaking the password lets nobody inject a screen.
+# The hostname comes from the environment (set in deploy/.env, which is not in
+# this repo) because this repo is public and the rest of the estate is a
+# portfolio. Keeping the two unassociated is the point.
 #
-# This host is the one place in the estate that serves a live picture of a
-# personal machine, so it stays out of the eco-nav bar and out of the portal.
-# That is about not putting it on the estate tour, and NOTHING about hiding it.
-# Measured on the day it went up: scanners were requesting /.git/HEAD and
-# /config here within a minute of the first certificate, because Let's Encrypt
-# publishes every hostname it signs to the certificate transparency logs and
-# bots read those logs continuously. A new subdomain is public the moment it
-# has TLS. The password is the only thing protecting this, so treat it as the
-# only thing protecting this.
-remote.{$BASE_DOMAIN} {
+# What that does NOT do is make the hostname secret. Let's Encrypt publishes
+# every name it signs to the certificate transparency logs within seconds, and
+# bots read those logs continuously: this host was getting /.git/HEAD probes
+# within a minute of its first certificate. Unlisted is not hidden. The
+# password is the only thing protecting it, so treat it as the only thing
+# protecting it.
+#
+# Two credentials, and neither is the other's fallback: a reader has a password
+# and a signed cookie, the client that feeds it has a bearer token and never
+# gets a session.
+{$PRIVATE_HOST:private.localhost} {
     reverse_proxy glance:8330
 }

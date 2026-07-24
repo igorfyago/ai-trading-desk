@@ -125,3 +125,19 @@ pay.{$BASE_DOMAIN} {
 auth.{$BASE_DOMAIN} {
     reverse_proxy sso:8090
 }
+
+# remote.b4rruf3t.com · the practice second screen. The laptop pushes a picture
+# of its screen to /api/ingest and a phone reads it here.
+#
+# Two different credentials, on purpose. A person reading the page has a
+# password and a signed cookie; the capture client has a bearer token and never
+# gets a session. Neither one is the other's fallback, so leaking the token
+# published nothing, and leaking the password lets nobody inject a screen.
+#
+# This host is the one place in the estate that serves a live picture of a
+# personal machine, so it stays out of the eco-nav bar and out of the portal:
+# it is not part of the estate tour, and a hostname nobody links to is a
+# hostname nobody wanders into.
+remote.{$BASE_DOMAIN} {
+    reverse_proxy glance:8330
+}

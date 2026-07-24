@@ -358,6 +358,36 @@ services:
     volumes:
       - sso_keys:/keys
 
+  # ---- glance: the practice second screen (clone side by side: /opt/apps/glance)
+  # The laptop pushes a JPEG of its screen in every two seconds and a phone
+  # reads it at remote.b4rruf3t.com. It costs money per solve, so it meters
+  # itself and stops rather than surprising anyone with a bill, the same way
+  # the observatory does.
+  glance:
+    build: ../../glance
+    restart: unless-stopped
+    environment:
+      # Both REQUIRED. Without a password the service answers 401 to everyone
+      # rather than serving a picture of somebody's desktop, and without a
+      # token it accepts no frames · but failing at compose time is louder
+      # than failing at runtime for a service of this kind.
+      GLANCE_PASSWORD: ${GLANCE_PASSWORD:?set in .env}
+      GLANCE_INGEST_TOKEN: ${GLANCE_INGEST_TOKEN:?set in .env}
+      # the estate key that is already in this file · no third secret to manage
+      GLANCE_API_KEY: ${OPENAI_API_KEY:?set in .env}
+      GLANCE_MODEL: ${GLANCE_MODEL:-gpt-5.5}
+      GLANCE_LANGUAGE: ${GLANCE_LANGUAGE:-Python}
+      GLANCE_DAILY_USD: ${GLANCE_DAILY_USD:-2.00}
+      GLANCE_MONTHLY_USD: ${GLANCE_MONTHLY_USD:-20.00}
+      GLANCE_MAX_SOLVES_DAY: ${GLANCE_MAX_SOLVES_DAY:-200}
+    volumes:
+      # notes, the spend meter and the session key. NOT the frames: the newest
+      # screen lives in memory and is replaced by the next one, so no picture
+      # of the laptop is ever written to this box.
+      - glancedata:/app/data
+    ports:
+      - "127.0.0.1:8330:8330"             # debugging only; caddy proxies internally
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -370,9 +400,10 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../web/portal:/srv/landing:ro
       - caddy_data:/data
-    depends_on: [desk, gex-api, observatory, minibank, sso]
+    depends_on: [desk, gex-api, observatory, minibank, sso, glance]
 
 volumes:
+  glancedata:
   sso_keys:
   pgdata:
   caddy_data:

@@ -135,9 +135,14 @@ auth.{$BASE_DOMAIN} {
 # published nothing, and leaking the password lets nobody inject a screen.
 #
 # This host is the one place in the estate that serves a live picture of a
-# personal machine, so it stays out of the eco-nav bar and out of the portal:
-# it is not part of the estate tour, and a hostname nobody links to is a
-# hostname nobody wanders into.
+# personal machine, so it stays out of the eco-nav bar and out of the portal.
+# That is about not putting it on the estate tour, and NOTHING about hiding it.
+# Measured on the day it went up: scanners were requesting /.git/HEAD and
+# /config here within a minute of the first certificate, because Let's Encrypt
+# publishes every hostname it signs to the certificate transparency logs and
+# bots read those logs continuously. A new subdomain is public the moment it
+# has TLS. The password is the only thing protecting this, so treat it as the
+# only thing protecting this.
 remote.{$BASE_DOMAIN} {
     reverse_proxy glance:8330
 }

@@ -40,23 +40,22 @@ MINIBANK_ROOT = """  :root {
 
 TOPBAR = """  <header class="topbar">
     <span class="brand">mini<span>trade</span></span>
+    <!-- TWO ROWS, TWO JOBS. Row one is the estate bar (auth's eco-nav.js): it
+         names one pill per SERVICE and marks the current one, and its roster
+         is auth's to change, not this file's. This row is row two, and it
+         names only the VIEWS inside this app. So the links that used to sit here,
+         Bank, Mart, Pay and Portal, are gone: the bar says them already, and
+         the same destination twice on one screen is a bug you can see. GitHub
+         went with them, being source rather than a view.
+         The first pill reads Desk, not Trade: Trade is this service's name in
+         row one, and a view cannot be named after its own service. The
+         data-pane value stays "dash" because show() switches on it. Rename
+         the label, never the value. -->
     <div class="tb-nav">
-      <button class="tab-btn on" data-pane="dash">Trade</button>
+      <button class="tab-btn on" data-pane="dash">Desk</button>
       <button class="tab-btn" data-pane="positions">Positions</button>
       <button class="tab-btn" data-pane="replay">Replay</button>
       <button class="tab-btn" data-pane="gex">GEX</button>
-      <span class="nav-sep" aria-hidden="true"></span>
-      <!-- THE ESTATE, exactly as the bank's shell orders it: Bank, Mart, Pay,
-           Portal, same window. To the customer these are one product, and a
-           tab bar that spawns windows is a link list wearing a tab bar's
-           clothes. Only GitHub, which is not the estate, opens a new tab. -->
-      <a class="tab-btn" href="https://bank.b4rruf3t.com">Bank</a>
-      <a class="tab-btn" href="https://mart.b4rruf3t.com">Mart</a>
-      <a class="tab-btn" href="https://pay.b4rruf3t.com">Pay</a>
-      <a class="tab-btn" href="https://b4rruf3t.com">Portal</a>
-      <span class="nav-sep" aria-hidden="true"></span>
-      <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
-         target="_blank">GitHub</a>
       <div id="g-score" onclick="show('positions')"
            title="net P&amp;L: realized + open · positions">P&amp;L &ndash;</div>
     </div>
@@ -88,9 +87,9 @@ TOPBAR_CSS = """
              transition:color .13s, border-color .13s, background .13s; }
   .tab-btn:hover { color:var(--text); border-color:var(--dim); }
   .tab-btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
-  /* the seam between this app's tabs and the rest of the estate · the same
-     hairline the bank's shell draws, copied from minibank verbatim */
-  .nav-sep { flex:none; width:1px; align-self:stretch; background:var(--line); margin:0 4px; }
+  /* No .nav-sep rule: the seam existed to divide this app's tabs from the
+     estate links beside them, and the estate links moved up to the shared
+     bar. One row, one job, nothing to divide. */
 
   /* A pill laid out in the row, not a chip pinned to the window corner, which
      is why it used to align with nothing. */

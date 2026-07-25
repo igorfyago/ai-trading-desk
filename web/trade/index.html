@@ -407,9 +407,6 @@
              transition:color .13s, border-color .13s, background .13s; }
   .tab-btn:hover { color:var(--text); border-color:var(--dim); }
   .tab-btn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
-  /* the seam between this app's tabs and the rest of the estate · the same
-     hairline the bank's shell draws, copied from minibank verbatim */
-  .nav-sep { flex:none; width:1px; align-self:stretch; background:var(--line); margin:0 4px; }
 
   /* A pill laid out in the row, not a chip pinned to the window corner, which
      is why it used to align with nothing. */
@@ -462,16 +459,17 @@
   <script src="https://auth.b4rruf3t.com/eco-nav.js" defer></script>
   <header class="topbar">
     <span class="brand">mini<span>trade</span></span>
+    <!-- TWO ROWS, TWO JOBS. The estate bar above names the SERVICES and marks
+         that you are in Trade. This row names only the VIEWS inside this app,
+         which is why the first one is called Desk: Trade is the service's own
+         name, already upstairs. The data-pane value stays "dash", because
+         show() switches on it and only the LABEL changed. GitHub is source,
+         not a view, so it left the row. -->
     <div class="tb-nav">
-      <button class="tab-btn on" data-pane="dash">Trade</button>
+      <button class="tab-btn on" data-pane="dash">Desk</button>
       <button class="tab-btn" data-pane="positions">Positions</button>
       <button class="tab-btn" data-pane="replay">Replay</button>
       <button class="tab-btn" data-pane="gex">GEX</button>
-      <span class="nav-sep" aria-hidden="true"></span>
-      <!-- Estate cross-links live in the eco-nav bar above; keep only the
-           one external link that is not the estate. -->
-      <a class="tab-btn" href="https://github.com/igorfyago/ai-trading-desk"
-         target="_blank">GitHub</a>
     </div>
   </header>
 

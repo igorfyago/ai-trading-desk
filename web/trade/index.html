@@ -642,6 +642,19 @@
     if (name === "positions") { openEventStream(); refreshBook(); refreshScore(); }
   }
 
+  /* THE TABS ARE BOUND HERE, and they were not bound anywhere before.
+     The topbar markup carries data-pane and show() reads it, but nothing ever
+     connected the two, so every tab was decorative: Positions, Replay and GEX
+     did nothing at all, and Trade only looked alive because "dash" is the pane
+     that starts active. Verified on the live site before the fix by calling
+     show("positions") from the console, which worked instantly · the function
+     was never the problem, the wiring was missing.
+     Delegated from the bar so a tab added to the markup is bound by existing. */
+  document.querySelector(".topbar").addEventListener("click", ev => {
+    const btn = ev.target.closest(".tab-btn[data-pane]");
+    if (btn) show(btn.dataset.pane);
+  });
+
   /* ------------------------------------------------------- dashboard ---- */
   // Same-origin when served by the desk itself (local dev at /landing);
   // the public desk API from the apex domain in production.

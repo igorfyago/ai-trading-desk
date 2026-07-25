@@ -371,8 +371,14 @@ services:
       # rather than serving a picture of somebody's desktop, and without a
       # token it accepts no frames · but failing at compose time is louder
       # than failing at runtime for a service of this kind.
+      # On first boot these two become the owner's account and its first
+      # device, so the client already installed keeps working. After that they
+      # are only a migration path.
       GLANCE_PASSWORD: ${GLANCE_PASSWORD:?set in .env}
       GLANCE_INGEST_TOKEN: ${GLANCE_INGEST_TOKEN:?set in .env}
+      GLANCE_OWNER: ${GLANCE_OWNER:-igor}
+      # Empty closes signup entirely. Set, it is the code friends need.
+      GLANCE_SIGNUP_CODE: ${GLANCE_SIGNUP_CODE:-}
       # the estate key that is already in this file · no third secret to manage
       GLANCE_API_KEY: ${OPENAI_API_KEY:?set in .env}
       GLANCE_MODEL: ${GLANCE_MODEL:-gpt-5.5}

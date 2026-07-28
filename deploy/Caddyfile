@@ -120,6 +120,12 @@ warehouse.{$BASE_DOMAIN} {
     reverse_proxy miniwarehouse:8420
 }
 
+# The estate nav has carried this as "Stats" since the sso eco-nav landed;
+# the container serves measured history only (BENCH_MODE=replay).
+analytics.{$BASE_DOMAIN} {
+    reverse_proxy analytics:8090
+}
+
 # rag. was the working name while the thing was being built, and it is the word
 # anyone who has read about retrieval will try first. It is a redirect rather
 # than a second reverse_proxy so there is exactly one canonical hostname: two

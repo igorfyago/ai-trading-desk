@@ -447,6 +447,22 @@ services:
     ports:
       - "127.0.0.1:8420:8420"             # debugging only; caddy proxies internally
 
+  # ---- minianalytics: the estate's Spark layer, replay deployment. The
+  # build context is NOT a clone: miniAnalytics has no remote, and a Spark
+  # assembly build would out-eat this box, so the jar plus its measured
+  # history (runs, x-ray traces, Delta transaction logs) ship prebuilt from
+  # the workstation into /opt/apps/miniAnalytics (see that repo's deploy/).
+  # BENCH_MODE=replay serves real measurements and refuses execution: an
+  # open /api/run here would hand strangers a Spark cluster on this box.
+  analytics:
+    build: ../../miniAnalytics
+    restart: unless-stopped
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"     # heaps are capped, the estate is polite
+      BENCH_MODE: "replay"
+    ports:
+      - "127.0.0.1:8430:8090"           # debugging only; caddy proxies internally
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -462,7 +478,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../web/portal:/srv/landing:ro
       - caddy_data:/data
-    depends_on: [desk, gex-api, observatory, minibank, sso, glance]
+    depends_on: [desk, gex-api, observatory, minibank, sso, glance, analytics]
 
 volumes:
   glancedata:

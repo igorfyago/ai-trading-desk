@@ -432,6 +432,19 @@ services:
       # because an app that silently answers half the question is worse than
       # one that refuses to start.
       OPENAI_API_KEY: ${OPENAI_API_KEY:?set in .env}
+      # The two spending gates. This endpoint is public and unauthenticated,
+      # and CT log scanners were probing the host within eight minutes of its
+      # first certificate, so both are on by default in the image. They are
+      # pinned in deploy/.env as well: a compose default is only a default,
+      # and the value that actually runs should be written down where the
+      # other operational values are.
+      #
+      # The daily cap is the one that protects the wallet: it is read from the
+      # ledger, so it counts money rather than requests, and it holds whoever
+      # is calling. The per address limit reads a header the caller writes, so
+      # it slows a loop and is not a security control.
+      ASK_DAILY_USD: ${ASK_DAILY_USD:-0.50}
+      ASK_IP_PER_HOUR: ${ASK_IP_PER_HOUR:-8}
     ports:
       - "127.0.0.1:8410:8410"             # debugging only; caddy proxies internally
 

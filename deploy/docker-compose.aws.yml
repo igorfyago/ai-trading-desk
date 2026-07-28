@@ -394,6 +394,59 @@ services:
     ports:
       - "127.0.0.1:8330:8330"             # debugging only; caddy proxies internally
 
+  # ---- miniask: ask the estate's own source a question and get an answer with
+  # citations. FastAPI, and a Postgres with pgvector holding the corpus.
+  #
+  # THE DATABASE IS NOT DISPOSABLE, which is unusual on this box. Its 4156
+  # chunks carry embeddings that cost real money to produce, and they were
+  # built from graphify output that exists only on the laptop and is in no
+  # repo. Nothing here can rebuild them: the volume is the only copy. Rebuild
+  # the image freely, never `down -v` this service.
+  miniask-pg:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: miniask
+      POSTGRES_USER: miniask
+      POSTGRES_PASSWORD: miniask    # never published to the host; internal network only
+    volumes:
+      - miniask_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miniask -d miniask"]
+      interval: 10s
+      retries: 5
+
+  miniask:
+    build: ../../miniask              # clone side by side: /opt/apps/miniask
+    restart: unless-stopped
+    depends_on:
+      miniask-pg:
+        condition: service_healthy
+    environment:
+      # The host is the compose service name, not 127.0.0.1:5433 as on the
+      # laptop. sslmode=disable because this connection never leaves the
+      # container network.
+      MINIASK_DATABASE_URL: postgresql://miniask:miniask@miniask-pg:5432/miniask?sslmode=disable
+      # Embeddings for the question, and the answer itself. Retrieval alone
+      # would still work without it, so this could be optional · it is not,
+      # because an app that silently answers half the question is worse than
+      # one that refuses to start.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set in .env}
+    ports:
+      - "127.0.0.1:8410:8410"             # debugging only; caddy proxies internally
+
+  # ---- miniwarehouse: events to bronze parquet to dbt marts, with the run
+  # x-ray. Self-contained on purpose: the fixtures are committed and seeded, so
+  # the container builds its own DuckDB warehouse on first boot and depends on
+  # no database, no broker and no other service in this file. The numbers it
+  # shows are modelled from the estate's event shapes, not read from the
+  # estate's live databases.
+  miniwarehouse:
+    build: ../../miniwarehouse        # clone side by side: /opt/apps/miniwarehouse
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8420:8420"             # debugging only; caddy proxies internally
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -413,6 +466,7 @@ services:
 
 volumes:
   glancedata:
+  miniask_pgdata:
   sso_keys:
   pgdata:
   caddy_data:

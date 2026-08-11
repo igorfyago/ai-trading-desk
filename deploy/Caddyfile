@@ -170,3 +170,23 @@ auth.{$BASE_DOMAIN} {
 {$PRIVATE_HOST:private.localhost} {
     reverse_proxy glance:8330
 }
+
+# CatCam product page: static files in a subfolder of the existing portal
+# mount, so no compose/container change was needed. NOTE: a portal redeploy
+# that rsyncs with --delete would wipe /srv/landing/catcam; the source of
+# truth is the CatCam repo (site/), redeploy is one script there.
+# The product moved to its own domain; one canonical hostname (same
+# reasoning as the ask. redirect above): the estate URL 301s there.
+catcam.{$BASE_DOMAIN} {
+    redir https://catcam.app{uri} permanent
+}
+
+# CatCam product site, canonical home.
+catcam.app {
+    root * /srv/landing/catcam
+    file_server
+}
+
+www.catcam.app {
+    redir https://catcam.app{uri} permanent
+}

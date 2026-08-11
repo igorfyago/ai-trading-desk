@@ -121,10 +121,16 @@ warehouse.{$BASE_DOMAIN} {
     reverse_proxy miniwarehouse:8420
 }
 
-# The estate nav has carried this as "Stats" since the sso eco-nav landed;
-# the container serves measured history only (BENCH_MODE=replay).
-analytics.{$BASE_DOMAIN} {
+# The console's public name is minispark, so the hostname says spark. The
+# container serves measured history only (BENCH_MODE=replay).
+spark.{$BASE_DOMAIN} {
     reverse_proxy analytics:8090
+}
+
+# analytics. was the launch name; links to it exist in the wild, so it stays
+# as a redirect. Same one-canonical-hostname policy as ask. below.
+analytics.{$BASE_DOMAIN} {
+    redir https://spark.{$BASE_DOMAIN}{uri} permanent
 }
 
 # ask. was the launch name and links to it exist in the wild, so it stays as

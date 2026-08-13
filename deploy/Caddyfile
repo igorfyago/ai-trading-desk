@@ -1,8 +1,17 @@
 # Automatic HTTPS (Let's Encrypt) for both apps. Point two DNS A-records at
 # the EC2 elastic IP and set the domains here. WebRTC mic access REQUIRES https.
 
+# Estate pages opt in to same-site prerendering: eco-nav.js plants speculation
+# rules, Chrome pre-renders the app behind the tab the visitor hovers, and the
+# click swaps to an already-built page · the bar reads as one static object.
+# Credentialed, because the estate cookie has to ride into the prerender.
+(prerenderable) {
+    header Supports-Loading-Mode credentialed-prerender
+}
+
 # Apex: the landing/portal page (static). Left-pane tabs load the apps below.
 {$BASE_DOMAIN} {
+    import prerenderable
     root * /srv/landing
     file_server
 }
@@ -12,18 +21,22 @@ www.{$BASE_DOMAIN} {
 }
 
 desk.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy desk:8000
 }
 
 gex.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy gex-api:3000
 }
 
 obs.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy observatory:8321
 }
 
 bank.{$BASE_DOMAIN} {
+    import prerenderable
     # The issuer API is a SERVICE-TO-SERVICE interface, and it was answering the
     # public internet with no credential of any kind: POST /issuer/v1/authorizations
     # from anywhere returned "need instrument, authorization_id, amount", a
@@ -87,6 +100,7 @@ bank.{$BASE_DOMAIN} {
 # enforcement decision has to be made. A path prefix would have exposed the
 # same hole — this option just makes the exposure a deliberate act.
 broker.{$BASE_DOMAIN} {
+    import prerenderable
     # The broker serves /portfolio and nothing at /, so the bare hostname
     # answered 404 to anyone who typed it or followed a shared link. The
     # subdomain exists FOR the portfolio, so it may as well say so.
@@ -100,6 +114,7 @@ broker.{$BASE_DOMAIN} {
 # different database from everything else on this host. Path routing at the
 # edge is what lets a service be split out without the front end noticing.
 mart.{$BASE_DOMAIN} {
+    import prerenderable
     handle /api/analytics/* {
         reverse_proxy minimart:8083
     }
@@ -109,21 +124,25 @@ mart.{$BASE_DOMAIN} {
 }
 
 pay.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy minimart:8082
 }
 
 # The app teaches retrieval augmented generation, so the hostname says so.
 rag.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy miniask:8410
 }
 
 warehouse.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy miniwarehouse:8420
 }
 
 # The console's public name is minispark, so the hostname says spark. The
 # container serves measured history only (BENCH_MODE=replay).
 spark.{$BASE_DOMAIN} {
+    import prerenderable
     reverse_proxy analytics:8090
 }
 

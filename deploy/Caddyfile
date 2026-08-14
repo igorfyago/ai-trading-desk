@@ -213,6 +213,10 @@ catcam.{$BASE_DOMAIN} {
 # CatCam product site, canonical home.
 catcam.app {
     root * /srv/landing/catcam
+    # Same store-but-revalidate as the apex block: without it a CatCam site
+    # deploy leaves visitors on stale files. file_server's ETag makes the
+    # revalidation a cheap 304.
+    header Cache-Control no-cache
     file_server
 }
 

@@ -31,8 +31,8 @@ html::before { content:""; position:fixed; top:0; left:0; right:0; height:48px;
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--text); min-height:100%;
          font:15px/1.6 "Inter",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
-  .topbar { display:flex; align-items:center; gap:10px; height:46px; padding:0 16px;
-            background:var(--panel); border-bottom:1px solid var(--line); }
+  .topbar { display:flex; align-items:center; gap:10px; min-height:59px; padding:0 16px;
+            background:var(--panel); border-bottom:1px solid var(--line); /* 59px = estate subheader contract */ }
   .brand { font-weight:700; font-size:15px; }
   .brand span { color:var(--accent); }
 

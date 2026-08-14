@@ -88,6 +88,24 @@ app.add_middleware(
     allow_methods=["GET", "POST"],   # POST = the sim's position buttons
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def revalidate_frontend(request: Request, call_next):
+    """Browsers were caching the frontend on modification-time heuristics, so
+    a deploy could leave a visitor on a week-old page for another day, or on a
+    mixed one, old HTML with new script, which is worse. no-cache means store
+    but revalidate: StaticFiles answers 304 through its ETag, so the steady
+    cost is one conditional request per file and a page is never stale.
+    Everything under /api/ is skipped: the logo route sets its own long-lived
+    caching on purpose, and the SSE streams already send no-cache themselves.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 STATIC = Path(__file__).resolve().parent / "static"
 REALTIME_MODEL = os.getenv("REALTIME_MODEL", "gpt-realtime-2.1")
 

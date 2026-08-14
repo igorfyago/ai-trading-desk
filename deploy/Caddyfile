@@ -13,6 +13,10 @@
 {$BASE_DOMAIN} {
     import prerenderable
     root * /srv/landing
+    # no-cache = store but revalidate: without it browsers cache these files
+    # on mtime heuristics and a deploy leaves visitors on a stale portal.
+    # file_server's ETag makes revalidation a cheap 304.
+    header Cache-Control no-cache
     file_server
 }
 
